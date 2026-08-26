@@ -67,3 +67,85 @@ func TestValidatePhaseDependencies(t *testing.T) {
 		})
 	}
 }
+
+// A draft produced by `planr new` must be registrable by `planr add` once the
+// author fills in its placeholders, and must report every unfilled placeholder
+// at once rather than one failed `add` at a time.
+func newDraftForTest(t *testing.T) string {
+	t.Helper()
+	raw, err := renderNewDraft("demo", nil, "a demo plan")
+	if err != nil {
+		t.Fatalf("renderNewDraft() unexpected error: %v", err)
+	}
+	return raw
+}
+
+func TestNewDraftReportsEveryPlaceholderAtOnce(t *testing.T) {
+	_, err := parseDraft([]byte(newDraftForTest(t)), "demo.md")
+	if err == nil {
+		t.Fatal("parseDraft() accepted an unfilled draft")
+	}
+	message := err.Error()
+	if got := strings.Count(message, "\n  line "); got != 3 {
+		t.Fatalf("parseDraft() reported %d placeholders, want 3; error: %v", got, err)
+	}
+}
+
+func TestNewDraftRoundTripsOnceFilledIn(t *testing.T) {
+	raw := newDraftForTest(t)
+	lines := strings.Split(raw, "\n")
+	for index, line := range lines {
+		if strings.Contains(line, draftPlaceholder) {
+			lines[index] = "- filled in"
+		}
+	}
+	parsed, err := parseDraft([]byte(strings.Join(lines, "\n")), "demo.md")
+	if err != nil {
+		t.Fatalf("parseDraft() rejected a filled-in draft: %v", err)
+	}
+	if parsed.Name != "demo" || len(parsed.Phases) != 1 {
+		t.Fatalf("parseDraft() = %+v, want plan demo with one phase", parsed)
+	}
+}
+
+func TestPlaceholderGuidanceInCommentIsNotAPlaceholder(t *testing.T) {
+	raw := "<!-- fill in every " + draftPlaceholder + " line -->\nreal content\n"
+	if err := checkDraftPlaceholders(raw); err != nil {
+		t.Fatalf("checkDraftPlaceholders() flagged commented guidance: %v", err)
+	}
+}
+
+func TestPhaseDependsOnAcceptsNumbersAndSlugs(t *testing.T) {
+	phases := []draftPhase{
+		{Title: "First", Meta: phaseMeta{Phase: 0, Slug: "first"}},
+		{Title: "Second", Meta: phaseMeta{Phase: 1, Slug: "second", DependsOnRefs: []phaseRef{{slug: "first"}}}},
+		{Title: "Third", Meta: phaseMeta{Phase: 2, Slug: "third", DependsOnRefs: []phaseRef{{number: intPointer(0)}, {slug: "second"}}}},
+	}
+	if err := resolvePhaseRefs(phases); err != nil {
+		t.Fatalf("resolvePhaseRefs() unexpected error: %v", err)
+	}
+	if got := phases[1].Meta.DependsOn; len(got) != 1 || got[0] != 0 {
+		t.Fatalf("slug dependency resolved to %v, want [0]", got)
+	}
+	if got := phases[2].Meta.DependsOn; len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("mixed dependencies resolved to %v, want [0 1]", got)
+	}
+}
+
+func TestPhaseDependsOnUnknownSlugListsAvailableSlugs(t *testing.T) {
+	phases := []draftPhase{
+		{Title: "First", Meta: phaseMeta{Phase: 0, Slug: "first"}},
+		{Title: "Second", Meta: phaseMeta{Phase: 1, Slug: "second", DependsOnRefs: []phaseRef{{slug: "frist"}}}},
+	}
+	err := resolvePhaseRefs(phases)
+	if err == nil {
+		t.Fatal("resolvePhaseRefs() accepted an unknown slug")
+	}
+	for _, want := range []string{"frist", "first", "second"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("resolvePhaseRefs() error = %v, want it to mention %q", err, want)
+		}
+	}
+}
+
+func intPointer(value int) *int { return &value }

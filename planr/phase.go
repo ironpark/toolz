@@ -138,12 +138,32 @@ func uncommittedSourcePaths(repoRoot string, planDirectories, ignore []string) (
 		if fileStatus == nil || (fileStatus.Staging == git.Unmodified && fileStatus.Worktree == git.Unmodified) {
 			continue
 		}
-		if !isGeneratedPlanPath(repoRoot, planDirectories, path) && !isIgnoredPath(path, ignore) {
+		if !isGeneratedPlanPath(repoRoot, planDirectories, path) && !isPlanDraftPath(repoRoot, path) && !isIgnoredPath(path, ignore) {
 			paths = append(paths, path)
 		}
 	}
 	sort.Strings(paths)
 	return paths, nil
+}
+
+// isPlanDraftPath reports whether a dirty file is a draft produced by
+// `planr new`. Drafts survive `planr add`, so without this they show up as
+// "uncommitted source changes" and force the author to either commit planr's
+// own scratch output or reach for --force.
+func isPlanDraftPath(repoRoot, relativePath string) bool {
+	if !strings.EqualFold(filepath.Ext(relativePath), ".md") {
+		return false
+	}
+	raw, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(relativePath)))
+	if err != nil {
+		return false
+	}
+	front, _, err := frontmatter(string(raw))
+	if err != nil {
+		return false
+	}
+	name, ok := front["plan_name"].(string)
+	return ok && name != ""
 }
 
 func isIgnoredPath(relativePath string, patterns []string) bool {

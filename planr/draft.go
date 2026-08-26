@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -13,16 +14,87 @@ import (
 var topHeading = regexp.MustCompile(`(?m)^# (GOALS|SCOPE|CONTEXT|PHASES|VERIFICATION|ORDERING|NEXT)[ \t]*$`)
 var phaseHeading = regexp.MustCompile(`(?m)^## PHASE\s*(?:—|:|-)\s*(.+?)[ \t]*$`)
 var kebab = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
 var requiredSections = []string{"GOALS", "SCOPE", "CONTEXT", "PHASES", "VERIFICATION", "ORDERING", "NEXT"}
 
 type phaseMeta struct {
-	Phase          int     `yaml:"phase"`
-	Slug           string  `yaml:"slug"`
-	PerfPhase      bool    `yaml:"perf_phase"`
-	DependsOn      []int   `yaml:"depends_on"`
-	Status         string  `yaml:"status"`
-	EntryCondition *string `yaml:"entry_condition"`
+	Phase     int    `yaml:"phase"`
+	Slug      string `yaml:"slug"`
+	PerfPhase bool   `yaml:"perf_phase"`
+	// References as written in the draft: phase numbers, phase slugs, or a mix.
+	// parsePhases resolves them into DependsOn once every phase in the plan is
+	// known, because a slug can only be resolved against its siblings.
+	DependsOnRefs  []phaseRef `yaml:"depends_on"`
+	DependsOn      []int      `yaml:"-"`
+	Status         string     `yaml:"status"`
+	EntryCondition *string    `yaml:"entry_condition"`
 }
+
+// phaseRef is one entry of a phase's depends_on list, before resolution.
+type phaseRef struct {
+	number *int
+	slug   string
+}
+
+func (r *phaseRef) UnmarshalYAML(raw []byte) error {
+	var number int
+	if err := yaml.Unmarshal(raw, &number); err == nil {
+		r.number = &number
+		return nil
+	}
+	var slug string
+	if err := yaml.Unmarshal(raw, &slug); err == nil {
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			return fmt.Errorf("depends_on entry must not be empty")
+		}
+		r.slug = slug
+		return nil
+	}
+	return fmt.Errorf("depends_on entry %s must be a phase number or a phase slug", strings.TrimSpace(string(raw)))
+}
+
+func (r phaseRef) String() string {
+	if r.number != nil {
+		return strconv.Itoa(*r.number)
+	}
+	return strconv.Quote(r.slug)
+}
+
+// resolvePhaseRefs turns every depends_on entry into a phase number. Slugs are
+// looked up among the plan's own phases; a slug that matches nothing is
+// reported with the slugs that were available, since a typo here is otherwise
+// indistinguishable from a missing phase.
+func resolvePhaseRefs(phases []draftPhase) error {
+	numbers := map[string]int{}
+	known := make([]string, 0, len(phases))
+	for _, phase := range phases {
+		numbers[phase.Meta.Slug] = phase.Meta.Phase
+		known = append(known, phase.Meta.Slug)
+	}
+	sort.Strings(known)
+	for index := range phases {
+		phase := &phases[index]
+		phase.Meta.DependsOn = make([]int, 0, len(phase.Meta.DependsOnRefs))
+		for _, ref := range phase.Meta.DependsOnRefs {
+			if ref.number != nil {
+				if *ref.number < 0 {
+					return fmt.Errorf("phase %q depends_on %d: phase numbers must be non-negative", phase.Title, *ref.number)
+				}
+				phase.Meta.DependsOn = append(phase.Meta.DependsOn, *ref.number)
+				continue
+			}
+			number, ok := numbers[ref.slug]
+			if !ok {
+				return fmt.Errorf("phase %q depends_on %q, but no phase in this plan has that slug; available slugs: %s",
+					phase.Title, ref.slug, strings.Join(known, ", "))
+			}
+			phase.Meta.DependsOn = append(phase.Meta.DependsOn, number)
+		}
+	}
+	return nil
+}
+
 type draftPhase struct {
 	Title      string
 	Meta       phaseMeta
@@ -45,6 +117,9 @@ func parseDraft(raw []byte, fallback string) (draft, error) {
 	matches := topHeading.FindAllStringSubmatchIndex(body, -1)
 	if len(matches) != len(requiredSections) {
 		return draft{}, fmt.Errorf("expected sections: %s", strings.Join(requiredSections, ", "))
+	}
+	if err := checkDraftPlaceholders(string(raw)); err != nil {
+		return draft{}, err
 	}
 	sections := map[string]string{}
 	for i, m := range matches {
@@ -93,6 +168,41 @@ func parseDraft(raw []byte, fallback string) (draft, error) {
 		return draft{}, fmt.Errorf("NEXT references undefined phase %d", next)
 	}
 	return draft{Name: name, Goals: sections["GOALS"], Scope: sections["SCOPE"], Context: sections["CONTEXT"], Description: description, DependsOn: dependsOn, Phases: phases, Verification: sections["VERIFICATION"], Ordering: sections["ORDERING"], NextPhase: next, NextText: nextText}, nil
+}
+
+// draftPlaceholder marks the spots a freshly generated draft leaves for the
+// author to fill in. `planr new` emits a skeleton that is deliberately not yet
+// registrable; reporting every remaining marker at once keeps the author from
+// discovering the requirements one failed `planr add` at a time.
+const draftPlaceholder = "TODO(planr)"
+
+func checkDraftPlaceholders(raw string) error {
+	lines := []string{}
+	// The template documents the marker inside an HTML comment, so comment
+	// bodies are not themselves placeholders.
+	for number, line := range strings.Split(blankHTMLComments(raw), "\n") {
+		if strings.Contains(line, draftPlaceholder) {
+			lines = append(lines, fmt.Sprintf("  line %d: %s", number+1, strings.TrimSpace(line)))
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return fmt.Errorf("draft still has %d unfilled %s placeholder(s):\n%s\nreplace each line with real content, then run planr add again",
+		len(lines), draftPlaceholder, strings.Join(lines, "\n"))
+}
+
+// blankHTMLComments replaces the contents of every HTML comment with spaces,
+// keeping newlines so line numbers reported elsewhere stay accurate.
+func blankHTMLComments(raw string) string {
+	return htmlComment.ReplaceAllStringFunc(raw, func(match string) string {
+		return strings.Map(func(r rune) rune {
+			if r == '\n' {
+				return r
+			}
+			return ' '
+		}, match)
+	})
 }
 
 func draftDescription(front map[string]any) (string, error) {
@@ -183,6 +293,9 @@ func parsePhases(section string) ([]draftPhase, error) {
 		result = append(result, draftPhase{title, meta, planned, completion})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Meta.Phase < result[j].Meta.Phase })
+	if err := resolvePhaseRefs(result); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 

@@ -47,10 +47,6 @@ func phaseAddCommand(_ context.Context, cmd *cli.Command) error {
 	if status == "planned" && entryCondition != "" {
 		return fmt.Errorf("planned phase cannot set --entry-condition")
 	}
-	dependencies, err := parsePhaseAddDependencies(cmd.StringSlice("depends-on"))
-	if err != nil {
-		return err
-	}
 	slug := strings.TrimSpace(cmd.String("slug"))
 	if slug == "" {
 		slug = slugifyPhaseTitle(title)
@@ -92,6 +88,10 @@ func phaseAddCommand(_ context.Context, cmd *cli.Command) error {
 		if phase.slug == slug {
 			return fmt.Errorf("phase slug %q already exists in plan %q", slug, planDirectory)
 		}
+	}
+	dependencies, err := parsePhaseAddDependencies(cmd.StringSlice("depends-on"), phases)
+	if err != nil {
+		return err
 	}
 	var entryValue *string
 	if entryCondition != "" {
@@ -142,17 +142,33 @@ func requiredPhaseText(value, flag string) (string, error) {
 	return value, nil
 }
 
-func parsePhaseAddDependencies(values []string) ([]int, error) {
+// parsePhaseAddDependencies accepts each dependency as a phase number or as the
+// slug of an existing phase, matching what a draft's depends_on list allows.
+func parsePhaseAddDependencies(values []string, existing []storedPhase) ([]int, error) {
+	numbers := map[string]int{}
+	known := make([]string, 0, len(existing))
+	for _, phase := range existing {
+		numbers[phase.slug] = phase.id
+		known = append(known, phase.slug)
+	}
+	sort.Strings(known)
 	seen := map[int]bool{}
 	dependencies := []int{}
 	for _, value := range values {
 		for _, part := range strings.Split(value, ",") {
 			part = strings.TrimSpace(part)
 			if part == "" {
-				return nil, fmt.Errorf("--depends-on must contain phase numbers")
+				return nil, fmt.Errorf("--depends-on must contain phase numbers or phase slugs")
 			}
 			phase, err := strconv.Atoi(part)
-			if err != nil || phase < 0 {
+			if err != nil {
+				resolved, ok := numbers[part]
+				if !ok {
+					return nil, fmt.Errorf("phase dependency %q is neither a phase number nor a slug of an existing phase; available slugs: %s",
+						part, strings.Join(known, ", "))
+				}
+				phase = resolved
+			} else if phase < 0 {
 				return nil, fmt.Errorf("phase dependency %q must be a non-negative phase number", part)
 			}
 			if seen[phase] {

@@ -507,12 +507,18 @@ func statusCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	summaries, foundDirectory, err := collectPlanSummaries(planDirectories, cmd.Args().First())
+	summaries, _, err := collectPlanSummaries(planDirectories, cmd.Args().First())
 	if err != nil {
 		return err
 	}
-	if !foundDirectory {
-		return fmt.Errorf("no plans directories found: %s", strings.Join(planDirectories, ", "))
+	// A repository with no plans yet is an empty result, not a failure; only an
+	// explicitly requested plan that does not exist is an error.
+	if len(summaries) == 0 {
+		if filter := cmd.Args().First(); filter != "" {
+			return fmt.Errorf("plan %q not found", filter)
+		}
+		fmt.Println("No plans found")
+		return nil
 	}
 	requiredPlans := annotatePlanWaits(summaries)
 	if cmd.NArg() == 0 {

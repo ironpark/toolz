@@ -55,7 +55,7 @@ func main() {
 						ArgsUsage: "<plan-name> <phase-title>",
 						Flags: []cli.Flag{
 							&cli.StringFlag{Name: "slug", Usage: "phase slug (derived from the title when omitted)"},
-							&cli.StringSliceFlag{Name: "depends-on", Usage: "existing phase number (repeatable)"},
+							&cli.StringSliceFlag{Name: "depends-on", Usage: "existing phase number or slug (repeatable)"},
 							&cli.StringFlag{Name: "status", Value: "planned", Usage: "planned or conditional"},
 							&cli.StringFlag{Name: "entry-condition", Usage: "required when status is conditional"},
 							&cli.BoolFlag{Name: "perf-phase", Usage: "mark this as a performance phase"},

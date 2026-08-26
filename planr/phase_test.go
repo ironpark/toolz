@@ -156,3 +156,37 @@ func assertPlanChecklist(t *testing.T, path string, phaseID int, wantDone bool) 
 		t.Fatalf("phase %02d checklist line = %q, want %q", phaseID, line, want)
 	}
 }
+
+// A draft left behind by `planr new` is planr's own output, not a source
+// change, so it must not stand between the author and `planr phase done`.
+func TestUncommittedSourcePathsIgnoresPlanDrafts(t *testing.T) {
+	root := t.TempDir()
+	if _, err := git.PlainInit(root, false); err != nil {
+		t.Fatalf("git.PlainInit() unexpected error: %v", err)
+	}
+	files := map[string]string{
+		"main.go":   "package main\n",
+		"draft.md":  "---\nplan_name: demo\ndescription: \"x\"\n---\n# GOALS\n",
+		"notes.md":  "# just notes\n",
+		"empty.txt": "",
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	paths, err := uncommittedSourcePaths(root, []string{filepath.Join(root, "plan")}, nil)
+	if err != nil {
+		t.Fatalf("uncommittedSourcePaths() unexpected error: %v", err)
+	}
+	want := []string{"empty.txt", "main.go", "notes.md"}
+	if len(paths) != len(want) {
+		t.Fatalf("uncommittedSourcePaths() = %#v, want %#v", paths, want)
+	}
+	for index, path := range want {
+		if paths[index] != path {
+			t.Fatalf("uncommittedSourcePaths() = %#v, want %#v", paths, want)
+		}
+	}
+}

@@ -3,6 +3,18 @@ plan_name: {{ .Name }}
 description: {{ quote .Description }}
 depends_on: [{{ join .DependsOn ", " }}]
 ---
+<!--
+planr draft. Replace every TODO(planr) line before running `planr add`;
+`add` refuses a draft that still contains one and lists all of them at once.
+
+Phase yaml notes:
+  phase       phase number, non-negative, unique within the plan
+  slug        lowercase kebab-case, unique within the plan
+  depends_on  other phases in THIS plan, by number or slug (e.g. [0] or [initial-work])
+  status      planned or conditional
+              conditional requires a non-empty entry_condition
+              planned requires entry_condition: null
+-->
 # GOALS
 
 ## 문제와 사용자 관점의 최종 결과
@@ -38,11 +50,11 @@ entry_condition: null
 
 ### 계획된 작업
 
--
+- TODO(planr): 이 phase에서 수행할 작업을 적는다.
 
 ### 완료 조건
 
--
+- TODO(planr): 이 phase가 끝났다고 판정할 기준을 적는다.
 
 # VERIFICATION
 
@@ -53,3 +65,5 @@ entry_condition: null
 ```yaml
 next_phase: 0
 ```
+
+TODO(planr): 다음에 진행할 phase를 한 줄로 설명한다.
