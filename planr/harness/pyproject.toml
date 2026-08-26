@@ -1,0 +1,11 @@
+[project]
+name = "planr-codex-harness"
+version = "0.1.0"
+description = "Isolated multi-turn Codex evaluation harness for planr"
+requires-python = ">=3.10"
+dependencies = [
+  "openai-codex==0.147.0",
+]
+
+[tool.uv]
+package = false

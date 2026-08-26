@@ -51,10 +51,7 @@ func phaseCommand(cmd *cli.Command, status string) error {
 	if err != nil {
 		return err
 	}
-	planDirectories := make([]string, len(settings.PlansDirs))
-	for index, directory := range settings.PlansDirs {
-		planDirectories[index] = filepath.Join(repoRoot, directory)
-	}
+	planDirectories := settings.planDirs(repoRoot)
 	planRoot, planDirectory, err := findPlanDirectory(planDirectories, cmd.Args().First())
 	if err != nil {
 		return err
@@ -397,13 +394,12 @@ func findPhaseFile(planRoot string, phaseID int) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read phases: %w", err)
 	}
-	prefix := regexp.MustCompile(`^(\d+)-.*\.md$`)
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		match := prefix.FindStringSubmatch(entry.Name())
-		if len(match) != 2 {
+		match := phaseFilePrefix.FindStringSubmatch(entry.Name())
+		if len(match) != 3 {
 			continue
 		}
 		id, err := strconv.Atoi(match[1])

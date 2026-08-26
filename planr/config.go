@@ -64,16 +64,21 @@ func loadConfig(start string) (config, string, error) {
 	}
 }
 
+// planDirs resolves the configured plans directories against the repository root.
+func (c config) planDirs(root string) []string {
+	paths := make([]string, len(c.PlansDirs))
+	for index, directory := range c.PlansDirs {
+		paths[index] = filepath.Join(root, directory)
+	}
+	return paths
+}
+
 func planPaths(start string) ([]string, error) {
 	value, root, err := loadConfig(start)
 	if err != nil {
 		return nil, err
 	}
-	paths := make([]string, len(value.PlansDirs))
-	for index, directory := range value.PlansDirs {
-		paths[index] = filepath.Join(root, directory)
-	}
-	return paths, nil
+	return value.planDirs(root), nil
 }
 
 func validatePlanDirs(directories []string) error {

@@ -32,10 +32,18 @@ planr status
 # 특정 plan 조회 (완료된 plan 포함)
 planr status platform-refresh
 
+# 전체 plan 간단 요약 (완료된 plan 포함)
+planr overview
+planr overview checkout-v2
+
 # phase 상태 변경
 planr phase start checkout-v2 1
 planr phase done checkout-v2 1
 planr phase done checkout-v2 1 --force
+planr phase add checkout-v2 "Cache Warmup" \
+  --work "캐시 워밍업 경로를 추가한다." \
+  --done-when "캐시 적중률 검증이 통과한다." \
+  --depends-on 1
 
 # 기타 상태로 직접 변경
 planr phase set checkout-v2 1 --status conditional
@@ -81,9 +89,10 @@ hooks:
 리포지토리 루트 기준 glob 패턴으로 `phase done`의 미커밋 소스 검사에서 제외할 경로를
 지정합니다. `hooks.before`와 `hooks.after`에 실행 시점별 규칙을 작성합니다. `on`에는 여러 이벤트를
 배열로 지정할 수 있고, 같은 시점에 여러 명령이 필요하면 규칙을 여러 개 작성합니다.
-규칙은 위에서 아래 순서로 실행됩니다. 이벤트 이름은 `new`, `add`, `start`, `done`,
-`reset`, `conditional`, `plan_done`을 사용합니다. `start`, `done`, `reset`,
-`conditional`은 phase 상태 변경에 대응하고, `plan_done`은 모든 phase가 완료되는 순간
+규칙은 위에서 아래 순서로 실행됩니다. 이벤트 이름은 `new`, `add`, `phase_add`, `start`, `done`,
+`reset`, `conditional`, `plan_done`을 사용합니다. `phase_add`는 열린 plan에 phase를
+추가할 때, `start`, `done`, `reset`, `conditional`은 phase 상태 변경에 대응하고,
+`plan_done`은 모든 phase가 완료되는 순간
 한 번의 plan 완료 이벤트로 발생합니다.
 
 `before` 훅은 상태나 파일을 기록하기 전에 실행되며 실패하면 작업을 중단합니다.
@@ -141,6 +150,10 @@ depends_on: [platform-refresh, api-foundation#2]
 `status`는 완료된 plan을 기본적으로 숨깁니다. 진행 중 plan의 phase가 완료된 plan을
 의존하면, 그 완료 plan은 함께 표시합니다. plan 이름을 지정해 조회하면 완료 여부와
 관계없이 표시합니다.
+
+`overview`는 완료된 plan을 포함해 각 plan의 상태와 `완료 phase/전체 phase` 진행률,
+다음 미완료 phase, 의존성 대기를 한눈에 보여줍니다. 자세한 phase 목록과 기본 완료
+plan 숨김 규칙이 필요하면 `status`를 사용합니다.
 
 ## 초안 규격
 
@@ -223,7 +236,12 @@ phase 상태는 `planned`, `conditional`, `in-progress`, `done`을 사용합니�
 `phases/*.md`의 현재 frontmatter를 읽어 남은 phase와 `wait` 목록을 출력합니다.
 `phase set <plan-name> <phase-number> --status <status>`로 상태를 변경할 수 있습니다.
 일반적인 흐름에는 `phase start`, `phase done`, `phase reset` 단축 명령을 사용할 수
-있습니다. 각각 `in-progress`, `done`, `planned` 상태로 변경합니다.
+있습니다. 각각 `in-progress`, `done`, `planned` 상태로 변경합니다. plan이 아직
+완료되지 않았다면 `phase add <plan-name> <phase-title>`로 새 phase를 추가할 수
+있습니다. `--work`와 `--done-when`은 필수이며, 번호는 기존 phase의 가장 큰 번호
+다음으로 자동 지정됩니다. `--depends-on`에는 같은 plan의 기존 phase 번호를 하나
+이상 지정할 수 있고, 새 phase와 `PLAN.md` 체크리스트가 함께 생성됩니다. 완료된
+plan에는 phase를 추가할 수 없습니다.
 상태를 변경하면 해당 phase 문서의 frontmatter와 `PLAN.md`의 체크리스트가 함께 갱신됩니다.
 `phase done`은 plan 문서와 `.planr.yaml`을 제외한 미커밋 소스 변경이 있으면 실패합니다.
 아직 커밋하지 않은 변경을 의도적으로 포함해야 할 때만 `--force`로 검사를 우회합니다.
@@ -240,8 +258,8 @@ checkout 출시 시나리오의 복합 상태 출력을 재현하려면 다음�
 
 스크립트는 `planr/test/work.*`에 새 격리 작업 디렉터리를 만들고, 완료된 인증 기반 plan,
 진행 중 checkout plan, checkout을 기다리는 결제 plan, 일부 phase만 완료된 rollout plan,
-숨겨지는 무관한 완료 plan을 생성한 뒤 `status` 출력을 보여 줍니다. 실행 결과는 Git에서
-제외됩니다.
+숨겨지는 무관한 완료 plan을 생성한 뒤 상세한 `status`와 간단한 `overview` 출력을 차례로
+보여 줍니다. 실행 결과는 Git에서 제외됩니다.
 
 실행 결과를 정리하려면 다음을 사용합니다.
 
@@ -255,3 +273,48 @@ Go 코드와 단위 테스트를 검증하려면 다음을 실행합니다.
 go test ./...
 go vet ./...
 ```
+
+## Codex 멀티턴 평가 하네스
+
+하네스는 `planr/test/codex-harness.*` 아래에 매번 격리된 Git 리포지토리를 만들고, 그 안에
+`AGENT.md`, `AGENTS.md`, 샘플 Go 프로젝트와 `planr` 바이너리를 준비합니다. 작업 목표는
+워크스페이스에 파일로 두지 않고 [`planr/harness/goal.md`](harness/goal.md)를 읽어 첫 turn의
+프롬프트에 실어 전달합니다.
+실행기는 [`planr/harness/pyproject.toml`](harness/pyproject.toml)의 uv 프로젝트이며,
+`openai-codex` 공식 Python SDK의 `AsyncCodex`와 하나의 `Thread`를 사용해 여러 turn을
+이어 갑니다. 따라서 별도의 `codex exec`/`resume` 셸 호출 없이 대화 컨텍스트와 원본 SDK
+알림을 모두 보존합니다. 기본 모델은 `gpt-5.6-luna`, reasoning은 `medium`입니다.
+SDK 사용법은 [공식 Python SDK 문서](https://github.com/openai/codex/tree/main/sdk/python)를
+기준으로 합니다.
+
+처음 clone한 환경에서는 의존성을 동기화합니다.
+
+```sh
+uv sync --project planr/harness
+```
+
+Codex 인증은 로컬 Codex 설정을 사용하므로, 실제 실행 전 Codex 로그인이 되어 있어야
+합니다. 승인은 자동으로 거부하고 샌드박스는 격리 작업공간에 한정합니다.
+
+```sh
+# 기본 4-turn 실행
+./planr/codex-harness.sh
+
+# turn 수와 모델을 명시 (각 turn은 같은 SDK Thread에서 실행)
+./planr/codex-harness.sh --turns 5 --model gpt-5.6-luna --reasoning medium
+
+# Codex를 호출하지 않고 격리 저장소와 산출물 경로만 점검
+./planr/codex-harness.sh --dry-run
+
+# 이전 실행 재분석 또는 임시 실행공간 정리
+./planr/codex-harness.sh analyze planr/test/codex-harness.XXX
+./planr/codex-harness.sh clean
+```
+
+실행 결과의 `REPORT.md`에는 plan 완료 여부, turn별 exit·이벤트·input/output/total
+token, 관찰된 `planr` 명령과 도구 호출 누락, 지침이 불명확했을 가능성이 있는 지점,
+반복 turn·명령으로 추정되는 토큰 낭비 신호가 기록됩니다. `transcript.md`는 대화와
+명령 추출본이며, `turns/turn-*.jsonl`은 SDK가 전달한 원본 알림과 정규화한 turn 결과입니다.
+`metrics.json`은 서로 다른 모델·turn 수 실행을 비교할 때 사용합니다. 하네스는 목표 저장소
+밖의 임시 디렉터리에서만 파일을 수정하며, 분석이 끝난 뒤에도 결과를 직접 확인할 수 있도록
+실행공간을 자동 삭제하지 않습니다.

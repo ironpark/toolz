@@ -11,6 +11,7 @@ import (
 const (
 	hookEventNew         = "new"
 	hookEventAdd         = "add"
+	hookEventPhaseAdd    = "phase_add"
 	hookEventStart       = "start"
 	hookEventDone        = "done"
 	hookEventReset       = "reset"
@@ -21,6 +22,7 @@ const (
 var hookEvents = map[string]bool{
 	hookEventNew:         true,
 	hookEventAdd:         true,
+	hookEventPhaseAdd:    true,
 	hookEventStart:       true,
 	hookEventDone:        true,
 	hookEventReset:       true,

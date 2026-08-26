@@ -47,5 +47,8 @@ perl -0pi -e 's/depends_on: \[\]/depends_on:\n- "01-checkout-v2#1"/' "$work_dire
 printf 'Test workspace: %s\n\n' "$work_directory"
 (
   cd "$work_directory"
+  printf '%s\n' 'Detailed status:'
   ./planr status
+  printf '\n%s\n' 'Overview:'
+  ./planr overview
 )

@@ -184,10 +184,7 @@ func addCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	planDirectories := make([]string, len(settings.PlansDirs))
-	for index, directory := range settings.PlansDirs {
-		planDirectories[index] = filepath.Join(repoRoot, directory)
-	}
+	planDirectories := settings.planDirs(repoRoot)
 	plans := planDirectories[0]
 	planDirectory, err := nextPlanDirectory(planDirectories, d.Name)
 	if err != nil {
@@ -269,20 +266,9 @@ func writePlan(root string, d draft, planDirectory string) error {
 	}
 	checklist := []string{}
 	for _, p := range d.Phases {
-		doc := fmt.Sprintf("phases/%02d-%s.md", p.Meta.Phase, p.Meta.Slug)
-		checklist = append(checklist, fmt.Sprintf("- [ ] [Phase %02d: %s](%s)", p.Meta.Phase, p.Title, doc))
-		dependencies := make([]string, len(p.Meta.DependsOn))
-		for index, dependency := range p.Meta.DependsOn {
-			dependencies[index] = fmt.Sprintf("%s#%d", planDirectory, dependency)
-		}
-		meta := map[string]any{"status": p.Meta.Status, "entry_condition": p.Meta.EntryCondition, "impl_commits": []string{}, "followup_commits": []string{}, "perf_phase": p.Meta.PerfPhase, "depends_on": dependencies, "blocks": []string{}}
-		header, err := yaml.Marshal(meta)
-		if err != nil {
-			return err
-		}
-		done := strings.Split(p.Completion, "\n")[0]
-		content := fmt.Sprintf("---\n%s---\n> DONE-WHEN: %s\n> NEXT: 없음\n\n# %s\n\n## 계획된 작업\n\n%s\n\n## 완료 조건\n\n%s\n", header, strings.TrimPrefix(done, "- "), p.Title, p.Planned, p.Completion)
-		if err := os.WriteFile(filepath.Join(root, doc), []byte(content), 0644); err != nil {
+		checklist = append(checklist, phaseChecklistEntry(p.Meta.Phase, p.Title, p.Meta.Slug))
+		path := filepath.Join(root, phaseDocumentPath(p.Meta.Phase, p.Meta.Slug))
+		if err := writeFrontmatterFile(path, phaseFrontmatter(planDirectory, p.Meta), phaseDocumentBody(p.Title, p.Planned, p.Completion)); err != nil {
 			return err
 		}
 	}
@@ -294,14 +280,225 @@ func writePlan(root string, d draft, planDirectory string) error {
 	nextDoc := ""
 	for _, p := range d.Phases {
 		if p.Meta.Phase == d.NextPhase {
-			nextDoc = fmt.Sprintf("phases/%02d-%s.md", p.Meta.Phase, p.Meta.Slug)
+			nextDoc = phaseDocumentPath(p.Meta.Phase, p.Meta.Slug)
 		}
 	}
 	plan := fmt.Sprintf("---\n%s---\n> NEXT: %s ([Phase %d](%s))\n\n# Phases\n\n%s\n\n# 공통 검증\n\n%s\n\n# 구현 순서를 제한하는 결정\n\n%s\n\n# 다음 구현 대상\n\n%s\n", header, d.NextText, d.NextPhase, nextDoc, strings.Join(checklist, "\n"), d.Verification, d.Ordering, d.NextText)
 	return os.WriteFile(filepath.Join(root, "PLAN.md"), []byte(plan), 0644)
 }
 
+// phaseFilePrefix matches a phase document filename, capturing its number and slug.
+var phaseFilePrefix = regexp.MustCompile(`^(\d+)-(.*)\.md$`)
+
+// phaseDocumentPath is the plan-relative location of a phase document. The
+// same shape is matched by phaseFilePrefix when reading phases back.
+func phaseDocumentPath(id int, slug string) string {
+	return fmt.Sprintf("phases/%02d-%s.md", id, slug)
+}
+
+func phaseChecklistEntry(id int, title, slug string) string {
+	return fmt.Sprintf("- [ ] [Phase %02d: %s](%s)", id, title, phaseDocumentPath(id, slug))
+}
+
+func phaseFrontmatter(planDirectory string, meta phaseMeta) map[string]any {
+	dependencies := make([]string, len(meta.DependsOn))
+	for index, dependency := range meta.DependsOn {
+		dependencies[index] = fmt.Sprintf("%s#%d", planDirectory, dependency)
+	}
+	return map[string]any{
+		"status":           meta.Status,
+		"entry_condition":  meta.EntryCondition,
+		"impl_commits":     []string{},
+		"followup_commits": []string{},
+		"perf_phase":       meta.PerfPhase,
+		"depends_on":       dependencies,
+		"blocks":           []string{},
+	}
+}
+
+func phaseDocumentBody(title, planned, completion string) string {
+	return fmt.Sprintf("> DONE-WHEN: %s\n> NEXT: 없음\n\n# %s\n\n## 계획된 작업\n\n%s\n\n## 완료 조건\n\n%s\n", firstPhaseLine(completion), title, planned, completion)
+}
+
+// planSummary is the shared on-disk view of a plan used by both `status` and
+// `overview`; each command only differs in how it renders it.
+type planSummary struct {
+	name, label, status string
+	dependsOn           []planDependency
+	phases              []storedPhase
+	wait                []string
+}
+
+func (p *planSummary) addDependency(raw string) {
+	dependency, err := parseDependency(raw)
+	if err != nil {
+		return
+	}
+	for _, existing := range p.dependsOn {
+		if existing.plan == dependency.plan && sameDependencyPhase(existing, dependency) {
+			return
+		}
+	}
+	p.dependsOn = append(p.dependsOn, dependency)
+}
+
+// progress reports completed and total phase counts plus the first phase that
+// is not done yet.
+func (p planSummary) progress() (done, total int, next string) {
+	for _, phase := range p.phases {
+		total++
+		if phase.status == "done" {
+			done++
+		} else if next == "" {
+			next = phase.title
+		}
+	}
+	return done, total, next
+}
+
+func sameDependencyPhase(left, right planDependency) bool {
+	if left.phase == nil || right.phase == nil {
+		return left.phase == nil && right.phase == nil
+	}
+	return *left.phase == *right.phase
+}
+
+// collectPlanSummaries reads every plan under planDirectories, optionally
+// keeping only the one matching filter (by directory or plan name).
+func collectPlanSummaries(planDirectories []string, filter string) ([]planSummary, bool, error) {
+	summaries := []planSummary{}
+	foundDirectory := false
+	for _, plans := range planDirectories {
+		entries, err := os.ReadDir(plans)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		foundDirectory = true
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			if filter != "" && entry.Name() != filter && planName(entry.Name()) != filter {
+				continue
+			}
+			planRoot := filepath.Join(plans, entry.Name())
+			raw, err := os.ReadFile(filepath.Join(planRoot, "PLAN.md"))
+			if err != nil {
+				continue
+			}
+			front, _, err := frontmatter(string(raw))
+			if err != nil {
+				return nil, false, fmt.Errorf("%s: %w", entry.Name(), err)
+			}
+			phases, err := readPlanPhases(planRoot)
+			if err != nil {
+				return nil, false, err
+			}
+			status, _ := front["plan_status"].(string)
+			summary := planSummary{
+				name:   planName(entry.Name()),
+				label:  filepath.Join(filepath.Base(plans), entry.Name()),
+				status: status,
+				phases: phases,
+			}
+			for _, dependency := range yamlStrings(front["depends_on"]) {
+				summary.addDependency(dependency)
+			}
+			if status != "done" {
+				for _, phase := range phases {
+					for _, dependency := range phase.dependencies {
+						if _, _, found := strings.Cut(dependency, "#"); found {
+							summary.addDependency(dependency)
+						}
+					}
+				}
+			}
+			summaries = append(summaries, summary)
+		}
+	}
+	return summaries, foundDirectory, nil
+}
+
+// annotatePlanWaits fills in each summary's unmet dependencies and returns the
+// set of plans some open plan still depends on.
+func annotatePlanWaits(summaries []planSummary) map[string]bool {
+	required := map[string]bool{}
+	byName := map[string]*planSummary{}
+	for index := range summaries {
+		byName[summaries[index].name] = &summaries[index]
+	}
+	for index := range summaries {
+		summary := &summaries[index]
+		if summary.status == "done" {
+			continue
+		}
+		for _, dependency := range summary.dependsOn {
+			required[dependency.plan] = true
+			if dependency.plan == summary.name {
+				continue
+			}
+			label := dependencyLabel(dependency)
+			target, found := byName[dependency.plan]
+			if !found {
+				summary.wait = append(summary.wait, label+" (not found)")
+				continue
+			}
+			if dependency.phase == nil {
+				if target.status != "done" {
+					summary.wait = append(summary.wait, fmt.Sprintf("%s (%s)", label, target.status))
+				}
+				continue
+			}
+			phaseFound := false
+			for _, phase := range target.phases {
+				if phase.id != *dependency.phase {
+					continue
+				}
+				phaseFound = true
+				if phase.status != "done" {
+					summary.wait = append(summary.wait, fmt.Sprintf("%s (%s)", label, phase.status))
+				}
+				break
+			}
+			if !phaseFound {
+				summary.wait = append(summary.wait, label+" (phase not found)")
+			}
+		}
+	}
+	return required
+}
+
+// printPlanGroups prints each summary grouped by its plans directory, letting
+// the caller render the per-plan detail lines.
+func printPlanGroups(summaries []planSummary, render func(name string, summary planSummary)) {
+	currentDirectory := ""
+	for _, summary := range summaries {
+		directory, name := filepath.Split(summary.label)
+		if directory != currentDirectory {
+			fmt.Printf("%s\n", directory)
+			currentDirectory = directory
+		}
+		render(name, summary)
+	}
+}
+
+func printPlanList(title string, values []string) {
+	if len(values) == 0 {
+		return
+	}
+	fmt.Printf("    %s:\n", title)
+	for _, value := range values {
+		fmt.Printf("      - %s\n", value)
+	}
+}
+
 func statusCommand(_ context.Context, cmd *cli.Command) error {
+	if cmd.NArg() > 1 {
+		return fmt.Errorf("status accepts at most one plan name")
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -310,157 +507,36 @@ func statusCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	if cmd.NArg() > 1 {
-		return fmt.Errorf("status accepts at most one plan name")
-	}
-	type planStatus struct {
-		name, label, status string
-		done, total         int
-		dependsOn           []planDependency
-		phases              []storedPhase
-		remaining           []string
-		blockedBy           []string
-	}
-	var plansToShow []planStatus
-	foundDirectory := false
-	for _, plans := range planDirectories {
-		entries, err := os.ReadDir(plans)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		foundDirectory = true
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			if cmd.NArg() == 1 && entry.Name() != cmd.Args().First() && planName(entry.Name()) != cmd.Args().First() {
-				continue
-			}
-			raw, err := os.ReadFile(filepath.Join(plans, entry.Name(), "PLAN.md"))
-			if err != nil {
-				continue
-			}
-			front, _, err := frontmatter(string(raw))
-			if err != nil {
-				return fmt.Errorf("%s: %w", entry.Name(), err)
-			}
-			phases, err := readPlanPhases(filepath.Join(plans, entry.Name()))
-			if err != nil {
-				return err
-			}
-			done := 0
-			dependencies := []planDependency{}
-			addDependency := func(raw string) {
-				dependency, err := parseDependency(raw)
-				if err != nil {
-					return
-				}
-				for _, existing := range dependencies {
-					if existing.plan == dependency.plan && ((existing.phase == nil && dependency.phase == nil) || (existing.phase != nil && dependency.phase != nil && *existing.phase == *dependency.phase)) {
-						return
-					}
-				}
-				dependencies = append(dependencies, dependency)
-			}
-			for _, dependency := range yamlStrings(front["depends_on"]) {
-				addDependency(dependency)
-			}
-			remaining := []string{}
-			for _, phase := range phases {
-				if phase.status == "done" {
-					done++
-				} else {
-					remaining = append(remaining, fmt.Sprintf("%s (%s)", phase.title, phase.status))
-				}
-				if front["plan_status"] != "done" {
-					for _, dependency := range phase.dependencies {
-						if _, _, found := strings.Cut(dependency, "#"); found {
-							addDependency(dependency)
-						}
-					}
-				}
-			}
-			label := filepath.Join(filepath.Base(plans), entry.Name())
-			status, _ := front["plan_status"].(string)
-			plansToShow = append(plansToShow, planStatus{planName(entry.Name()), label, status, done, len(phases), dependencies, phases, remaining, nil})
-		}
+	summaries, foundDirectory, err := collectPlanSummaries(planDirectories, cmd.Args().First())
+	if err != nil {
+		return err
 	}
 	if !foundDirectory {
 		return fmt.Errorf("no plans directories found: %s", strings.Join(planDirectories, ", "))
 	}
-	requiredPlans := map[string]bool{}
-	planStatuses := map[string]string{}
-	for _, plan := range plansToShow {
-		planStatuses[plan.name] = plan.status
+	requiredPlans := annotatePlanWaits(summaries)
+	if cmd.NArg() == 0 {
+		// Completed plans stay hidden unless an open plan still depends on them.
+		visible := summaries[:0]
+		for _, summary := range summaries {
+			if summary.status != "done" || requiredPlans[summary.name] {
+				visible = append(visible, summary)
+			}
+		}
+		summaries = visible
 	}
-	for index := range plansToShow {
-		plan := &plansToShow[index]
-		if plan.status == "done" {
-			continue
-		}
-		for _, dependency := range plan.dependsOn {
-			requiredPlans[dependency.plan] = true
-			if dependency.plan == plan.name {
-				continue
-			}
-			dependencyStatus, found := planStatuses[dependency.plan]
-			if !found {
-				plan.blockedBy = append(plan.blockedBy, dependencyLabel(dependency)+" (not found)")
-				continue
-			}
-			if dependency.phase != nil {
-				phaseFound := false
-				var targetPhases []storedPhase
-				for _, candidate := range plansToShow {
-					if candidate.name == dependency.plan {
-						targetPhases = candidate.phases
-						break
-					}
-				}
-				for _, targetPhase := range targetPhases {
-					if targetPhase.id == *dependency.phase {
-						phaseFound = true
-						if targetPhase.status != "done" {
-							plan.blockedBy = append(plan.blockedBy, fmt.Sprintf("%s (%s)", dependencyLabel(dependency), targetPhase.status))
-						}
-						break
-					}
-				}
-				if !phaseFound {
-					plan.blockedBy = append(plan.blockedBy, dependencyLabel(dependency)+" (phase not found)")
-				}
-			} else if dependencyStatus != "done" {
-				plan.blockedBy = append(plan.blockedBy, fmt.Sprintf("%s (%s)", dependencyLabel(dependency), dependencyStatus))
+	printPlanGroups(summaries, func(name string, summary planSummary) {
+		done, total, _ := summary.progress()
+		fmt.Printf("  %s: %s (%d/%d phases done)\n", name, summary.status, done, total)
+		remaining := []string{}
+		for _, phase := range summary.phases {
+			if phase.status != "done" {
+				remaining = append(remaining, fmt.Sprintf("%s (%s)", phase.title, phase.status))
 			}
 		}
-	}
-	currentDirectory := ""
-	for _, plan := range plansToShow {
-		if cmd.NArg() == 0 && plan.status == "done" && !requiredPlans[plan.name] {
-			continue
-		}
-		directory, name := filepath.Split(plan.label)
-		if directory != currentDirectory {
-			fmt.Printf("%s\n", directory)
-			currentDirectory = directory
-		}
-		fmt.Printf("  %s: %s (%d/%d phases done)\n", name, plan.status, plan.done, plan.total)
-		if len(plan.remaining) > 0 {
-			fmt.Println("    remaining:")
-			for _, phase := range plan.remaining {
-				fmt.Printf("      - %s\n", phase)
-			}
-		}
-		if len(plan.blockedBy) > 0 {
-			fmt.Println("    wait:")
-			for _, dependency := range plan.blockedBy {
-				fmt.Printf("      - %s\n", dependency)
-			}
-		}
-	}
+		printPlanList("remaining", remaining)
+		printPlanList("wait", summary.wait)
+	})
 	return nil
 }
 
@@ -474,9 +550,9 @@ func markdownTitle(contents string) string {
 }
 
 type storedPhase struct {
-	id            int
-	title, status string
-	dependencies  []string
+	id                  int
+	slug, title, status string
+	dependencies        []string
 }
 
 func readPlanPhases(planRoot string) ([]storedPhase, error) {
@@ -484,14 +560,13 @@ func readPlanPhases(planRoot string) ([]storedPhase, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read phases for %s: %w", filepath.Base(planRoot), err)
 	}
-	prefix := regexp.MustCompile(`^(\d+)-.*\.md$`)
 	phases := []storedPhase{}
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		match := prefix.FindStringSubmatch(entry.Name())
-		if len(match) != 2 {
+		match := phaseFilePrefix.FindStringSubmatch(entry.Name())
+		if len(match) != 3 {
 			continue
 		}
 		id, err := strconv.Atoi(match[1])
@@ -507,7 +582,7 @@ func readPlanPhases(planRoot string) ([]storedPhase, error) {
 			return nil, fmt.Errorf("%s/%s: %w", filepath.Base(planRoot), entry.Name(), err)
 		}
 		status, _ := front["status"].(string)
-		phases = append(phases, storedPhase{id, markdownTitle(string(contents)), status, yamlStrings(front["depends_on"])})
+		phases = append(phases, storedPhase{id, match[2], markdownTitle(string(contents)), status, yamlStrings(front["depends_on"])})
 	}
 	sort.Slice(phases, func(i, j int) bool { return phases[i].id < phases[j].id })
 	return phases, nil

@@ -40,9 +40,30 @@ func main() {
 				Action:    statusCommand,
 			},
 			{
+				Name:      "overview",
+				Usage:     "show a concise overview of all plans",
+				ArgsUsage: "[plan-name]",
+				Action:    overviewCommand,
+			},
+			{
 				Name:  "phase",
-				Usage: "update a phase status",
+				Usage: "manage plan phases",
 				Commands: []*cli.Command{
+					{
+						Name:      "add",
+						Usage:     "add a phase to an open plan",
+						ArgsUsage: "<plan-name> <phase-title>",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "slug", Usage: "phase slug (derived from the title when omitted)"},
+							&cli.StringSliceFlag{Name: "depends-on", Usage: "existing phase number (repeatable)"},
+							&cli.StringFlag{Name: "status", Value: "planned", Usage: "planned or conditional"},
+							&cli.StringFlag{Name: "entry-condition", Usage: "required when status is conditional"},
+							&cli.BoolFlag{Name: "perf-phase", Usage: "mark this as a performance phase"},
+							&cli.StringFlag{Name: "work", Usage: "planned work (required)"},
+							&cli.StringFlag{Name: "done-when", Usage: "completion condition (required)"},
+						},
+						Action: phaseAddCommand,
+					},
 					{
 						Name:      "set",
 						Aliases:   []string{"update"},
