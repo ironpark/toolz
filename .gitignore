@@ -1,5 +1,6 @@
 # Go
 bin/
+planr/test/
 *.test
 *.out
 coverage.out
