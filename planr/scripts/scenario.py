@@ -19,7 +19,7 @@ from common import HarnessError, build_planr, fixture_dir, make_run_dir, remove_
 
 
 FIXTURE_NAME = "plan-scenario"
-RUN_PREFIX = "work."
+RUN_LABEL = "scenario"
 DRAFT = "checkout-v2.md"
 
 # Every plan is registered from the same draft; the name decides its role below,
@@ -71,7 +71,7 @@ def planr(workspace: pathlib.Path, *args: str) -> str:
 
 
 def prepare_workspace() -> pathlib.Path:
-    workspace = make_run_dir(RUN_PREFIX)
+    workspace = make_run_dir(RUN_LABEL)
     shutil.copytree(fixture_dir(FIXTURE_NAME), workspace, dirs_exist_ok=True)
     build_planr(workspace / "planr")
     return workspace
@@ -94,7 +94,7 @@ def build_scenario(workspace: pathlib.Path) -> None:
 def run_scenario() -> int:
     workspace = prepare_workspace()
     build_scenario(workspace)
-    print(f"Test workspace: {workspace}\n")
+    print(f"Run directory: {workspace}\n")
     print("Detailed status:")
     print(planr(workspace, "status"), end="")
     print("\nOverview:")
@@ -103,7 +103,7 @@ def run_scenario() -> int:
 
 
 def clean() -> int:
-    print(f"Removed {remove_runs(RUN_PREFIX)} test workspace(s)")
+    print(f"Removed {remove_runs(RUN_LABEL)} scenario run(s)")
     return 0
 
 

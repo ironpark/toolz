@@ -6,7 +6,7 @@
 fixtures:
   - name: plan-scenario
     used_by: planr/scripts/scenario.py
-    workspace: planr/test/work.*
+    workspace: planr/run/<timestamp>-scenario/
     description: >-
       단순 plan 생성 시나리오. 초안 하나를 여러 번 등록해 완료/진행/대기/부분
       완료 plan을 만들고 status와 overview 출력을 눈으로 확인한다. Git 리포지토리도
@@ -17,7 +17,7 @@ fixtures:
 
   - name: codex-harness
     used_by: planr/scripts/codex.py
-    workspace: planr/test/codex-harness.*
+    workspace: 시스템 임시 디렉터리 (산출물은 planr/run/<timestamp>-codex/)
     description: >-
       Codex 멀티턴 평가용 샘플 저장소. 에이전트가 실제로 작업할 Go 프로젝트와
       지침 문서를 담고 있으며, 하네스가 이 디렉터리 전체를 격리 작업공간으로

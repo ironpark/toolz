@@ -27,10 +27,12 @@ from common import (
     HarnessError,
     build_planr,
     fixture_dir,
+    make_agent_workspace,
     make_run_dir,
     remove_runs,
     require_command,
     run_command,
+    write_metadata,
 )
 
 
@@ -48,7 +50,7 @@ def load_sdk():
 
 
 FIXTURE_NAME = "codex-harness"
-RUN_PREFIX = "codex-harness."
+RUN_LABEL = "codex"
 GOAL_FILE = pathlib.Path(__file__).resolve().parent / "goal.md"
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_REASONING = "medium"
@@ -173,9 +175,8 @@ def final_response_from_items(items: Iterable[dict[str, Any]]) -> str | None:
     return None
 
 
-def write_metadata(
+def write_run_metadata(
     run_dir: pathlib.Path,
-    workspace: pathlib.Path,
     *,
     model: str,
     reasoning: str,
@@ -183,21 +184,19 @@ def write_metadata(
     timeout: float,
     started_at: str,
 ) -> None:
-    version = getattr(load_sdk(), "__version__", "unknown")
-    values = {
-        "run_directory": str(run_dir),
-        "workspace": str(workspace),
-        "model": model,
-        "reasoning": reasoning,
-        "turns_requested": str(turns),
-        "timeout_seconds": str(timeout),
-        "sdk": "openai-codex",
-        "sdk_version": str(version),
-        "runtime": "codex app-server via official Python SDK",
-        "started_at": started_at,
-    }
-    run_dir.joinpath("metadata.env").write_text(
-        "".join(f"{key}={value}\n" for key, value in values.items()), encoding="utf-8"
+    write_metadata(
+        run_dir,
+        {
+            "run_directory": str(run_dir),
+            "model": model,
+            "reasoning": reasoning,
+            "turns_requested": str(turns),
+            "timeout_seconds": str(timeout),
+            "sdk": "openai-codex",
+            "sdk_version": str(getattr(load_sdk(), "__version__", "unknown")),
+            "runtime": "codex app-server via official Python SDK",
+            "started_at": started_at,
+        },
     )
 
 
@@ -437,8 +436,7 @@ async def run_sdk_turns(
                 sandbox=Sandbox.workspace_write,
             )
             thread_id = thread.id
-            with run_dir.joinpath("metadata.env").open("a", encoding="utf-8") as stream:
-                stream.write(f"thread_id={thread_id}\n")
+            write_metadata(run_dir, {"thread_id": thread_id})
             for number, prompt in enumerate(prompts):
                 log_path = run_dir / "turns" / f"turn-{number:02d}.jsonl"
                 exit_code = await collect_sdk_turn(
@@ -483,9 +481,10 @@ def prepare_workspace() -> tuple[pathlib.Path, pathlib.Path]:
     for required in ("AGENT.md", "AGENTS.md"):
         if not (fixture / required).is_file():
             raise HarnessError(f"missing fixture: {fixture / required}")
-    run_dir = make_run_dir(RUN_PREFIX)
-    workspace = run_dir / "repo"
-    workspace.mkdir()
+    run_dir = make_run_dir(RUN_LABEL)
+    # Outside run_dir on purpose: the agent must not be able to read this run's
+    # transcripts and reports by walking up from its own working directory.
+    workspace = make_agent_workspace(run_dir, RUN_LABEL)
     (workspace / "bin").mkdir()
     (workspace / ".harness").mkdir()
     (run_dir / "turns").mkdir()
@@ -519,9 +518,8 @@ def run_harness(args: argparse.Namespace) -> int:
     goal = load_goal()
     run_dir, workspace = prepare_workspace()
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    write_metadata(
+    write_run_metadata(
         run_dir,
-        workspace,
         model=args.model,
         reasoning=args.reasoning,
         turns=args.turns,
@@ -567,11 +565,13 @@ def run_harness(args: argparse.Namespace) -> int:
     test_exit = final_state(workspace, run_dir)
     if test_exit != 0:
         overall_exit = 1
-    with run_dir.joinpath("metadata.env").open("a", encoding="utf-8") as stream:
-        stream.write(
-            f"finished_at={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n"
-            f"final_test_exit={test_exit}\n"
-        )
+    write_metadata(
+        run_dir,
+        {
+            "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "final_test_exit": str(test_exit),
+        },
+    )
     analyze(run_dir, run_dir / "REPORT.md")
     print(f"Run directory: {run_dir}")
     print(f"Isolated repository: {workspace}")
@@ -583,7 +583,7 @@ def run_harness(args: argparse.Namespace) -> int:
 
 
 def clean_runs() -> int:
-    print(f"Removed {remove_runs(RUN_PREFIX)} Codex harness run(s)")
+    print(f"Removed {remove_runs(RUN_LABEL)} Codex harness run(s)")
     return 0
 
 

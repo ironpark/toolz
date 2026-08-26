@@ -12,7 +12,7 @@ import re
 import shlex
 from typing import Any, Iterable
 
-from common import HarnessError
+from common import HarnessError, read_metadata as load_metadata
 
 
 TOKEN_FIELDS = (
@@ -168,18 +168,11 @@ def read_turn(path: pathlib.Path, number: int) -> TurnStats:
     return stats
 
 
+# Cached: three report sections ask for the same run's metadata, and by the
+# time the analyzer runs the file is no longer being written.
 @functools.lru_cache(maxsize=None)
 def read_metadata(run_dir: pathlib.Path) -> dict[str, str]:
-    metadata: dict[str, str] = {}
-    path = run_dir / "metadata.env"
-    if not path.exists():
-        return metadata
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        metadata[key.strip()] = value
-    return metadata
+    return load_metadata(run_dir)
 
 
 def turn_files(run_dir: pathlib.Path) -> list[pathlib.Path]:
@@ -302,7 +295,12 @@ def latest_overview(run_dir: pathlib.Path) -> tuple[str, pathlib.Path | None]:
 
 
 def planr_event_lines(run_dir: pathlib.Path) -> list[str]:
-    path = run_dir / "repo" / ".harness" / "planr-events.log"
+    # The workspace lives outside run_dir so the agent cannot see the run's
+    # artifacts; metadata.env records where it was put.
+    workspace = read_metadata(run_dir).get("workspace", "")
+    if not workspace:
+        return []
+    path = pathlib.Path(workspace) / ".harness" / "planr-events.log"
     if not path.exists():
         return []
     return [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line]

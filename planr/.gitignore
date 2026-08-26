@@ -1,9 +1,9 @@
 # Binary produced by `go build .` in this directory
 /planr
 
-# Scratch workspaces created by the runners in scripts/.
+# Per-run artifacts and workspaces created by the runners in scripts/.
 # Their source fixtures live in fixtures/ and stay tracked.
-/test/
+/run/
 
 # uv virtualenv for the Python runners
 /scripts/.venv/
