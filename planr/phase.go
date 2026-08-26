@@ -47,20 +47,49 @@ func phaseCommand(cmd *cli.Command, status string) error {
 	if err != nil {
 		return err
 	}
-	planDirectories, err := planPaths(cwd)
+	settings, repoRoot, err := loadConfig(cwd)
 	if err != nil {
 		return err
 	}
-	if status == "done" && !cmd.Bool("force") {
-		_, repoRoot, err := loadConfig(cwd)
+	planDirectories := make([]string, len(settings.PlansDirs))
+	for index, directory := range settings.PlansDirs {
+		planDirectories[index] = filepath.Join(repoRoot, directory)
+	}
+	planRoot, planDirectory, err := findPlanDirectory(planDirectories, cmd.Args().First())
+	if err != nil {
+		return err
+	}
+	event := phaseHookEvent(status)
+	willComplete := false
+	planWasDone := false
+	if status == "done" {
+		planWasDone, err = planAlreadyDone(planRoot)
 		if err != nil {
 			return err
 		}
-		if err := ensureCleanSource(repoRoot, planDirectories); err != nil {
+	}
+	if status == "done" && len(settings.Hooks.commands("before", hookEventPlanDone)) > 0 {
+		willComplete, err = phaseWillComplete(planRoot, phaseID, status)
+		if err != nil {
+			return err
+		}
+		willComplete = willComplete && !planWasDone
+	}
+	if status == "done" && !cmd.Bool("force") {
+		if err := ensureCleanSource(repoRoot, planDirectories, settings.Ignore); err != nil {
 			return err
 		}
 	}
-	planDirectory, completed, err := updatePhaseStatus(planDirectories, cmd.Args().First(), phaseID, status)
+	if err := runConfiguredHooks(repoRoot, settings, "before", event, planDirectory, phaseID, status); err != nil {
+		return err
+	}
+	if willComplete {
+		if err := runConfiguredHooks(repoRoot, settings, "before", hookEventPlanDone, planDirectory, -1, "done"); err != nil {
+			return err
+		}
+	}
+	var completed bool
+	planDirectory, completed, err = updatePhaseStatus(planDirectories, cmd.Args().First(), phaseID, status)
 	if err != nil {
 		return err
 	}
@@ -68,11 +97,19 @@ func phaseCommand(cmd *cli.Command, status string) error {
 	if completed {
 		fmt.Printf("Plan %s marked done\n", planDirectory)
 	}
+	if err := runConfiguredHooks(repoRoot, settings, "after", event, planDirectory, phaseID, status); err != nil {
+		return err
+	}
+	if completed && status == "done" && !planWasDone {
+		if err := runConfiguredHooks(repoRoot, settings, "after", hookEventPlanDone, planDirectory, -1, "done"); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func ensureCleanSource(repoRoot string, planDirectories []string) error {
-	paths, err := uncommittedSourcePaths(repoRoot, planDirectories)
+func ensureCleanSource(repoRoot string, planDirectories, ignore []string) error {
+	paths, err := uncommittedSourcePaths(repoRoot, planDirectories, ignore)
 	if err != nil {
 		return fmt.Errorf("cannot check uncommitted source changes: %w; use --force to bypass this check", err)
 	}
@@ -86,7 +123,7 @@ func ensureCleanSource(repoRoot string, planDirectories []string) error {
 	return fmt.Errorf("cannot mark phase done while source changes are uncommitted:\n%s\ncommit the source changes first or use --force", strings.Join(lines, "\n"))
 }
 
-func uncommittedSourcePaths(repoRoot string, planDirectories []string) ([]string, error) {
+func uncommittedSourcePaths(repoRoot string, planDirectories, ignore []string) ([]string, error) {
 	repository, err := git.PlainOpen(repoRoot)
 	if err != nil {
 		return nil, err
@@ -104,12 +141,54 @@ func uncommittedSourcePaths(repoRoot string, planDirectories []string) ([]string
 		if fileStatus == nil || (fileStatus.Staging == git.Unmodified && fileStatus.Worktree == git.Unmodified) {
 			continue
 		}
-		if !isGeneratedPlanPath(repoRoot, planDirectories, path) {
+		if !isGeneratedPlanPath(repoRoot, planDirectories, path) && !isIgnoredPath(path, ignore) {
 			paths = append(paths, path)
 		}
 	}
 	sort.Strings(paths)
 	return paths, nil
+}
+
+func isIgnoredPath(relativePath string, patterns []string) bool {
+	path := filepath.ToSlash(filepath.Clean(relativePath))
+	for _, pattern := range patterns {
+		pattern = filepath.ToSlash(strings.TrimSpace(pattern))
+		pattern = strings.TrimPrefix(pattern, "./")
+		if pattern == "" {
+			continue
+		}
+		if globPathMatch(pattern, path) {
+			return true
+		}
+		if !strings.ContainsAny(pattern, "*?") && (path == pattern || strings.HasPrefix(path, strings.TrimSuffix(pattern, "/")+"/")) {
+			return true
+		}
+	}
+	return false
+}
+
+func globPathMatch(pattern, value string) bool {
+	pattern = filepath.ToSlash(pattern)
+	var expression strings.Builder
+	expression.WriteString("^")
+	for index := 0; index < len(pattern); index++ {
+		switch pattern[index] {
+		case '*':
+			if index+1 < len(pattern) && pattern[index+1] == '*' {
+				expression.WriteString(".*")
+				index++
+			} else {
+				expression.WriteString("[^/]*")
+			}
+		case '?':
+			expression.WriteString("[^/]")
+		default:
+			expression.WriteString(regexp.QuoteMeta(string(pattern[index])))
+		}
+	}
+	expression.WriteString("$")
+	matched, err := regexp.MatchString(expression.String(), value)
+	return err == nil && matched
 }
 
 func isGeneratedPlanPath(repoRoot string, planDirectories []string, relativePath string) bool {
@@ -124,6 +203,61 @@ func isGeneratedPlanPath(repoRoot string, planDirectories []string, relativePath
 		}
 	}
 	return false
+}
+
+func phaseHookEvent(status string) string {
+	switch status {
+	case "planned":
+		return hookEventReset
+	case "conditional":
+		return hookEventConditional
+	case "in-progress":
+		return hookEventStart
+	case "done":
+		return hookEventDone
+	default:
+		return ""
+	}
+}
+
+func phaseWillComplete(planRoot string, phaseID int, status string) (bool, error) {
+	if status != "done" {
+		return false, nil
+	}
+	phases, err := readPlanPhases(planRoot)
+	if err != nil {
+		return false, err
+	}
+	if len(phases) == 0 {
+		return false, nil
+	}
+	found := false
+	for _, phase := range phases {
+		if phase.id == phaseID {
+			found = true
+			continue
+		}
+		if phase.status != "done" {
+			return false, nil
+		}
+	}
+	if !found {
+		return false, fmt.Errorf("phase %02d not found", phaseID)
+	}
+	return true, nil
+}
+
+func planAlreadyDone(planRoot string) (bool, error) {
+	raw, err := os.ReadFile(filepath.Join(planRoot, "PLAN.md"))
+	if err != nil {
+		return false, err
+	}
+	front, _, err := frontmatter(string(raw))
+	if err != nil {
+		return false, fmt.Errorf("parse PLAN.md: %w", err)
+	}
+	status, _ := front["plan_status"].(string)
+	return status == "done", nil
 }
 
 func updatePhaseStatus(planDirectories []string, planArg string, phaseID int, status string) (string, bool, error) {

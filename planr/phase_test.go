@@ -104,7 +104,7 @@ func TestUncommittedSourcePathsExcludePlanFiles(t *testing.T) {
 		t.Fatalf("write config file: %v", err)
 	}
 
-	paths, err := uncommittedSourcePaths(root, []string{filepath.Join(root, "plan")})
+	paths, err := uncommittedSourcePaths(root, []string{filepath.Join(root, "plan")}, nil)
 	if err != nil {
 		t.Fatalf("uncommittedSourcePaths() unexpected error: %v", err)
 	}

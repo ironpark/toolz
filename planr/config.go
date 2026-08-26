@@ -10,8 +10,20 @@ import (
 )
 
 type config struct {
-	PlansDir  string   `yaml:"plans_dir"`
-	PlansDirs []string `yaml:"plans_dirs"`
+	PlansDir  string     `yaml:"plans_dir"`
+	PlansDirs []string   `yaml:"plans_dirs"`
+	Ignore    []string   `yaml:"ignore"`
+	Hooks     hookConfig `yaml:"hooks"`
+}
+
+type hookConfig struct {
+	Before []hookRule `yaml:"before"`
+	After  []hookRule `yaml:"after"`
+}
+
+type hookRule struct {
+	On  []string `yaml:"on"`
+	Run string   `yaml:"run"`
 }
 
 func loadConfig(start string) (config, string, error) {
@@ -24,7 +36,7 @@ func loadConfig(start string) (config, string, error) {
 		contents, readErr := os.ReadFile(path)
 		if readErr == nil {
 			var value config
-			if err := yaml.Unmarshal(contents, &value); err != nil {
+			if err := yaml.UnmarshalWithOptions(contents, &value, yaml.Strict()); err != nil {
 				return config{}, "", fmt.Errorf("parse %s: %w", path, err)
 			}
 			if len(value.PlansDirs) == 0 && value.PlansDir != "" {
@@ -34,6 +46,9 @@ func loadConfig(start string) (config, string, error) {
 				value.PlansDirs = []string{"plan"}
 			}
 			if err := validatePlanDirs(value.PlansDirs); err != nil {
+				return config{}, "", err
+			}
+			if err := validateHooks(value.Hooks); err != nil {
 				return config{}, "", err
 			}
 			return value, current, nil

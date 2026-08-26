@@ -52,6 +52,17 @@ func newCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return fmt.Errorf("invalid dependencies for plan %q: %w", name, err)
 	}
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	settings, repoRoot, err := loadConfig(workingDirectory)
+	if err != nil {
+		return err
+	}
+	if err := runConfiguredHooks(repoRoot, settings, "before", hookEventNew, name, -1, "draft"); err != nil {
+		return err
+	}
 	draft, err := renderNewDraft(name, dependsOn, description)
 	if err != nil {
 		return err
@@ -60,6 +71,9 @@ func newCommand(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 	fmt.Printf("Created %s\n", absOutput)
+	if err := runConfiguredHooks(repoRoot, settings, "after", hookEventNew, name, -1, "draft"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -166,13 +180,20 @@ func addCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	planDirectories, err := planPaths(workingDirectory)
+	settings, repoRoot, err := loadConfig(workingDirectory)
 	if err != nil {
 		return err
+	}
+	planDirectories := make([]string, len(settings.PlansDirs))
+	for index, directory := range settings.PlansDirs {
+		planDirectories[index] = filepath.Join(repoRoot, directory)
 	}
 	plans := planDirectories[0]
 	planDirectory, err := nextPlanDirectory(planDirectories, d.Name)
 	if err != nil {
+		return err
+	}
+	if err := runConfiguredHooks(repoRoot, settings, "before", hookEventAdd, planDirectory, -1, "registered"); err != nil {
 		return err
 	}
 	target := filepath.Join(plans, planDirectory)
@@ -196,6 +217,9 @@ func addCommand(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 	fmt.Printf("Registered %s\n", planDirectory)
+	if err := runConfiguredHooks(repoRoot, settings, "after", hookEventAdd, planDirectory, -1, "registered"); err != nil {
+		return err
+	}
 	return nil
 }
 

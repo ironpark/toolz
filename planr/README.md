@@ -60,10 +60,38 @@ frontmatter에 보존됩니다. 같은 옵션을 반복하거나 쉼표로 구�
 plans_dirs:
   - plans-active
   - plans-archive
+ignore:
+  - generated/**
+  - tmp
+hooks:
+  before:
+    - on: [new, add]
+      run: "echo plan command started"
+    - on: [done]
+      run: "go test ./..."
+  after:
+    - on: [add, done]
+      run: "echo plan command finished"
+    - on: [plan_done]
+      run: "echo all phases completed"
 ```
 
 새 plan은 첫 번째 경로에 등록되고, `status`는 모든 경로를 조회합니다. 기존
-`plans_dir` 단일 설정도 지원하며, 설정이 없으면 `plan/`을 사용합니다.
+`plans_dir` 단일 설정도 지원하며, 설정이 없으면 `plan/`을 사용합니다. `ignore`는
+리포지토리 루트 기준 glob 패턴으로 `phase done`의 미커밋 소스 검사에서 제외할 경로를
+지정합니다. `hooks.before`와 `hooks.after`에 실행 시점별 규칙을 작성합니다. `on`에는 여러 이벤트를
+배열로 지정할 수 있고, 같은 시점에 여러 명령이 필요하면 규칙을 여러 개 작성합니다.
+규칙은 위에서 아래 순서로 실행됩니다. 이벤트 이름은 `new`, `add`, `start`, `done`,
+`reset`, `conditional`, `plan_done`을 사용합니다. `start`, `done`, `reset`,
+`conditional`은 phase 상태 변경에 대응하고, `plan_done`은 모든 phase가 완료되는 순간
+한 번의 plan 완료 이벤트로 발생합니다.
+
+`before` 훅은 상태나 파일을 기록하기 전에 실행되며 실패하면 작업을 중단합니다.
+`after` 훅은 작업이 기록된 뒤 실행되며 실패해도 기록을 되돌리지는 않고 오류를 알립니다.
+모든 훅은 리포지토리 루트에서 셸 명령으로 실행되고 `PLANR_EVENT`, `PLANR_PLAN`,
+`PLANR_PHASE`, `PLANR_STATUS` 환경 변수를 받습니다. `new`, `add`, `plan_done`처럼
+plan 단위 이벤트에서는 `PLANR_PHASE`가 비어 있습니다.
+이전 단일 이벤트 맵 형식은 사용하지 않고 이 규칙 형식만 사용합니다.
 
 ## 생성 구조
 
