@@ -35,6 +35,7 @@ from common import (
     HarnessError,
     build_planr,
     fixture_dir,
+    init_git_repository,
     make_agent_workspace,
     make_run_dir,
     remove_runs,
@@ -653,21 +654,7 @@ def prepare_workspace(fixture_name: str = DEFAULT_FIXTURE) -> tuple[pathlib.Path
     # throwaway cache per run.
     for variable, directory in (("GOCACHE", "go-cache"), ("GOMODCACHE", "go-mod-cache")):
         os.environ[variable] = str(workspace / ".harness" / directory)
-    init = run_command(["git", "init", "-q"], cwd=workspace)
-    if init.returncode != 0:
-        raise HarnessError(f"could not initialize isolated Git repository: {init.stdout.strip()}")
-    for key, value in {
-        "user.name": "planr codex harness",
-        "user.email": "planr-harness@example.invalid",
-    }.items():
-        configured = run_command(["git", "config", key, value], cwd=workspace)
-        if configured.returncode != 0:
-            raise HarnessError(f"could not configure Git {key}: {configured.stdout.strip()}")
-    baseline = run_command(["git", "add", "-A"], cwd=workspace)
-    if baseline.returncode == 0:
-        baseline = run_command(["git", "commit", "-qm", "harness baseline"], cwd=workspace)
-    if baseline.returncode != 0:
-        raise HarnessError(f"could not create Git baseline: {baseline.stdout.strip()}")
+    init_git_repository(workspace)
     return run_dir, workspace
 
 

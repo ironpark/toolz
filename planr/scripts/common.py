@@ -137,6 +137,32 @@ def build_planr(destination: pathlib.Path) -> None:
         raise HarnessError(f"could not build planr (exit {build.returncode}):\n{build.stdout}")
 
 
+def init_git_repository(workspace: pathlib.Path, *, message: str = "harness baseline") -> None:
+    """Turn a prepared workspace into a repository with one baseline commit.
+
+    planr refuses to run outside a repository, records completions as git notes
+    against HEAD, and blocks `phase done` on uncommitted source changes, so both
+    runners need a repository with at least one commit before the first command.
+    """
+
+    require_command("git")
+    init = run_command(["git", "init", "-q"], cwd=workspace)
+    if init.returncode != 0:
+        raise HarnessError(f"could not initialize isolated Git repository: {init.stdout.strip()}")
+    for key, value in {
+        "user.name": "planr harness",
+        "user.email": "planr-harness@example.invalid",
+    }.items():
+        configured = run_command(["git", "config", key, value], cwd=workspace)
+        if configured.returncode != 0:
+            raise HarnessError(f"could not configure Git {key}: {configured.stdout.strip()}")
+    baseline = run_command(["git", "add", "-A"], cwd=workspace)
+    if baseline.returncode == 0:
+        baseline = run_command(["git", "commit", "-qm", message], cwd=workspace)
+    if baseline.returncode != 0:
+        raise HarnessError(f"could not create Git baseline: {baseline.stdout.strip()}")
+
+
 def force_remove_tree(path: pathlib.Path) -> None:
     """Delete a tree, including files Go's module cache marks read-only.
 

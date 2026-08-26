@@ -1,94 +1,129 @@
 #!/usr/bin/env python3
 """Reproduce the checkout release scenario and print status/overview output.
 
-Registering the same draft several times only ever produces identical
-in-progress plans, so the interesting `status` and `overview` states — a
-completed plan, a plan waiting on another plan's phase, a partially finished
-plan, a hidden unrelated plan — are fabricated by rewriting frontmatter after
-registration.  That is the whole point of the scenario: it is a display
-fixture, not a test of the state transitions themselves.
+The scenario needs states a single `planr add` cannot produce on its own: a
+finished plan, a plan waiting on another plan's phase, a partially finished
+plan, an unrelated finished plan that `status` hides.  Every one of them is
+produced by shaping planr's *input* -- one draft per plan, with the plan
+dependency written into the draft's frontmatter -- and then driving the real
+`planr phase` commands.  Nothing here edits a document planr generated.
+
+That distinction is what keeps the scenario honest.  Rewriting generated
+frontmatter would couple the runner to an internal file format and would let
+the scenario display arrangements the CLI itself would refuse -- a phase marked
+done ahead of its dependencies, for instance.  The draft format, by contrast,
+is a documented interface, so shaping the input breaks loudly and for a real
+reason when it changes.
 """
 
 from __future__ import annotations
 
 import pathlib
-import re
 import shutil
 
-from common import HarnessError, build_planr, fixture_dir, make_run_dir, remove_runs, run_command
+from common import (
+    HarnessError,
+    build_planr,
+    fixture_dir,
+    init_git_repository,
+    make_run_dir,
+    remove_runs,
+    run_command,
+)
 
 
 FIXTURE_NAME = "plan-scenario"
 RUN_LABEL = "scenario"
 DRAFT = "checkout-v2.md"
+# The fixture draft defines these three phases; the scenario completes them by
+# number, so a fixture with fewer phases must fail rather than silently produce
+# a thinner scenario.
+PHASE_COUNT = 3
 
-# Every plan is registered from the same draft; the name decides its role below,
-# and registration order fixes the numeric prefix of each plan directory.
+# Registration order fixes the numeric prefix of each plan directory, so the
+# list order below is what makes AUTH `00-auth-foundation` and so on.
 PLANS = ["auth-foundation", "checkout-v2", "payment-adapter", "legacy-report", "partial-rollout"]
-AUTH, CHECKOUT, PAYMENT, LEGACY, ROLLOUT = (
-    f"{index:02d}-{plan}" for index, plan in enumerate(PLANS)
-)
+AUTH, CHECKOUT, PAYMENT, LEGACY, ROLLOUT = PLANS
 
-
-def substitute(path: pathlib.Path, pattern: str, replacement: str) -> None:
-    contents = path.read_text(encoding="utf-8")
-    updated, count = re.subn(pattern, replacement, contents)
-    if count == 0:
-        raise HarnessError(f"{path}: no match for {pattern!r}; the plan format may have changed")
-    path.write_text(updated, encoding="utf-8")
-
-
-def plan_dir(workspace: pathlib.Path, plan: str) -> pathlib.Path:
-    return workspace / "plans-active" / plan
-
-
-def complete_plan(workspace: pathlib.Path, plan: str) -> None:
-    """Mark a plan and all of its phases done."""
-
-    root = plan_dir(workspace, plan)
-    substitute(root / "PLAN.md", r"plan_status: in-progress", "plan_status: done")
-    for phase in sorted(root.glob("phases/*.md")):
-        substitute(phase, r"status: (?:planned|conditional)", "status: done")
-
-
-def complete_phase(workspace: pathlib.Path, plan: str, phase: str) -> None:
-    substitute(plan_dir(workspace, plan) / "phases" / phase, r"status: planned", "status: done")
-
-
-def add_dependency(workspace: pathlib.Path, plan: str, phase: str, dependency: str) -> None:
-    substitute(
-        plan_dir(workspace, plan) / "phases" / phase,
-        r"depends_on: \[\]",
-        f'depends_on:\n- "{dependency}"',
-    )
+# Plan-level dependencies, written into each draft before registration.
+# checkout waits on a phase that ends up done, so it never appears in `wait`
+# but does keep the finished auth plan visible in `status`; payment waits on a
+# phase that stays open, so it is the one blocking entry.
+DEPENDENCIES = {
+    CHECKOUT: [f"{AUTH}#2"],
+    PAYMENT: [f"{CHECKOUT}#1"],
+}
 
 
 def planr(workspace: pathlib.Path, *args: str) -> str:
-    result = run_command([str(workspace / "planr"), *args], cwd=workspace)
+    result = run_command([str(workspace / "bin" / "planr"), *args], cwd=workspace)
     if result.returncode != 0:
         raise HarnessError(f"planr {' '.join(args)} failed (exit {result.returncode}):\n{result.stdout}")
     return result.stdout
 
 
+def draft_body(workspace: pathlib.Path) -> str:
+    """Return the fixture draft with its frontmatter removed.
+
+    Each plan gets the same body under its own name and dependencies, so the
+    scenario reads as five plans rather than five copies of one file.
+    """
+
+    path = workspace / DRAFT
+    contents = path.read_text(encoding="utf-8")
+    if not contents.startswith("---\n"):
+        raise HarnessError(f"{path}: draft has no frontmatter; the fixture may have changed")
+    end = contents.find("\n---\n", 3)
+    if end < 0:
+        raise HarnessError(f"{path}: draft frontmatter is unterminated")
+    return contents[end + len("\n---\n") :]
+
+
+def write_draft(workspace: pathlib.Path, plan: str, body: str) -> pathlib.Path:
+    """Write a draft for one plan, carrying its plan dependencies."""
+
+    front = [f"plan_name: {plan}"]
+    dependencies = DEPENDENCIES.get(plan, [])
+    if dependencies:
+        front.append("depends_on: [" + ", ".join(dependencies) + "]")
+    path = workspace / f"{plan}.md"
+    path.write_text("---\n" + "\n".join(front) + "\n---\n" + body, encoding="utf-8")
+    return path
+
+
+def complete_phases(workspace: pathlib.Path, plan: str, count: int) -> None:
+    """Complete the first `count` phases of a plan in order.
+
+    Order matters: planr refuses to complete a phase whose dependencies are
+    still open, which is exactly the guarantee the scenario should respect.
+    """
+
+    for phase in range(count):
+        planr(workspace, "phase", "done", plan, str(phase))
+
+
 def prepare_workspace() -> pathlib.Path:
     workspace = make_run_dir(RUN_LABEL)
     shutil.copytree(fixture_dir(FIXTURE_NAME), workspace, dirs_exist_ok=True)
-    build_planr(workspace / "planr")
+    # bin/ is listed in the fixture's `ignore`, so the binary under test never
+    # counts as an uncommitted source change during `phase done`.
+    build_planr(workspace / "bin" / "planr")
+    init_git_repository(workspace, message="scenario baseline")
     return workspace
 
 
 def build_scenario(workspace: pathlib.Path) -> None:
+    body = draft_body(workspace)
     for plan in PLANS:
-        planr(workspace, "add", "--name", plan, DRAFT)
+        planr(workspace, "add", str(write_draft(workspace, plan, body).name))
 
     # A finished dependency, and an unrelated finished plan that `status` hides.
-    complete_plan(workspace, AUTH)
-    complete_plan(workspace, LEGACY)
+    complete_phases(workspace, AUTH, PHASE_COUNT)
+    complete_phases(workspace, LEGACY, PHASE_COUNT)
     # Some phases done, some outstanding.
-    complete_phase(workspace, ROLLOUT, "00-api-contract.md")
-    # A satisfied cross-plan wait, and one that is still blocking.
-    add_dependency(workspace, CHECKOUT, "00-api-contract.md", f"{AUTH}#2")
-    add_dependency(workspace, PAYMENT, "00-api-contract.md", f"{CHECKOUT}#1")
+    complete_phases(workspace, ROLLOUT, 1)
+    # Work under way on the plan whose dependency is already satisfied.
+    planr(workspace, "phase", "start", CHECKOUT, "0")
 
 
 def run_scenario() -> int:
@@ -99,6 +134,8 @@ def run_scenario() -> int:
     print(planr(workspace, "status"), end="")
     print("\nOverview:")
     print(planr(workspace, "overview"), end="")
+    print("\nCompletion records:")
+    print(planr(workspace, "notes"), end="")
     return 0
 
 
