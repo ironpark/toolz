@@ -1,0 +1,32 @@
+# Go
+bin/
+*.test
+*.out
+coverage.out
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+.yarn/
+.pnp.*
+.eslintcache
+.parcel-cache/
+.next/
+.nuxt/
+.svelte-kit/
+dist/
+coverage/
+
+# Zig
+zig-cache/
+zig-out/
+.zig-cache/
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
