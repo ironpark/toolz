@@ -8,7 +8,7 @@
 - [설치](#설치)
 - [빠른 시작](#빠른-시작)
 - [명령](#명령) — [plan 등록](#plan-등록), [조회](#조회), [phase 관리](#phase-관리)
-- [설정](#설정) — [plan 저장 위치](#plan-저장-위치), [훅](#훅)
+- [설정](#설정) — [plan 저장 위치](#plan-저장-위치), [문서 언어](#문서-언어), [훅](#훅)
 - [저장 구조](#저장-구조)
 - [초안 규격](#초안-규격) — [frontmatter](#frontmatter), [섹션](#섹션), [PHASE 블록](#phase-블록), [의존성](#의존성)
 - [라이프사이클](#라이프사이클)
@@ -65,6 +65,9 @@ planr phase done checkout-v2 1
 | `planr phase set <plan-name> <number> --status <status>` | phase 상태를 지정한 값으로 변경합니다 |
 | `planr phase start\|done\|reset <plan-name> <number>` | phase 상태 변경 단축 명령입니다 |
 | `planr notes [plan-name]` | 커밋에 연결된 완료 기록을 조회합니다 |
+| `planr --version` | 설치된 버전을 출력합니다 |
+
+plan 이름을 받는 모든 명령은 `checkout-v2`와 `00-checkout-v2`를 모두 인식합니다.
 
 ### plan 등록
 
@@ -140,9 +143,28 @@ planr phase add checkout-v2 "Cache Warmup" \
 이상 지정할 수 있습니다. 새 phase 문서와 `PLAN.md` 체크리스트가 함께 생성되며,
 완료된 plan에는 phase를 추가할 수 없습니다.
 
-`phase done`은 plan 문서와 `.planr.yaml`을 제외한 미커밋 소스 변경이 있으면
-실패합니다. 아직 커밋하지 않은 변경을 의도적으로 포함해야 할 때만 `--force`로
-검사를 우회합니다.
+#### 진행 전 검사
+
+`phase start`와 `phase done`은 계획된 순서를 지키는지 먼저 확인합니다. `add`가
+검증한 의존성 그래프를 실행 시점에도 그대로 적용하는 것입니다.
+
+- **의존성** — 해당 phase의 `depends_on`에 있는 phase, 그리고 `PLAN.md`의
+  `depends_on`에 있는 선행 plan이 모두 `done`이어야 합니다. 아직 등록되지 않은
+  plan에 의존하고 있으면 `not registered`로 막힙니다. `status`의 `wait` 목록에
+  나오는 항목이 그대로 차단 사유가 됩니다.
+- **미커밋 소스** — `phase done`은 plan 문서와 `.planr.yaml`을 제외한 미커밋 소스
+  변경이 있으면 실패합니다.
+
+```text
+$ planr phase start checkout-v2 1
+cannot set 00-checkout-v2 phase 01 to in-progress while its dependencies are unfinished:
+  - phase 00 "API Contract" (planned)
+finish them first or use --force
+```
+
+두 검사 모두 `--force`로 한 번에 우회합니다. 의도적으로 순서를 벗어나거나 커밋하지
+않은 변경을 포함해야 할 때만 사용합니다. `phase reset`처럼 상태를 되돌리는 방향은
+검사하지 않습니다.
 
 ## 설정
 
@@ -150,6 +172,7 @@ planr phase add checkout-v2 "Cache Warmup" \
 디렉터리로 탐색합니다.
 
 ```yaml
+language: ko
 plans_dirs:
   - plans-active
   - plans-archive
@@ -176,6 +199,24 @@ hooks:
 - `ignore` — 리포지토리 루트 기준 glob 패턴으로, `phase done`의 미커밋 소스 검사에서
   제외할 경로를 지정합니다.
 
+### 문서 언어
+
+`language`는 planr이 **생성하는 문서**의 언어를 정합니다. 지원 값은 `en`과 `ko`이고,
+설정하지 않으면 `en`입니다.
+
+| 값 | `planr new` 초안 | phase 문서 | `PLAN.md` 본문 |
+| --- | --- | --- | --- |
+| `en` (기본) | 영어 스켈레톤 | `## Planned Work` / `## Done When` | `# Shared Verification` 등 |
+| `ko` | 한국어 스켈레톤 | `## 계획된 작업` / `## 완료 조건` | `# 공통 검증` 등 |
+
+명령 출력·옵션·오류 메시지는 언어 설정과 무관하게 항상 영어입니다. 훅과 스크립트가
+어느 저장소에서나 같은 문자열을 보게 하기 위해서입니다.
+
+**읽기는 언어를 가리지 않습니다.** `planr add`는 지원하는 모든 언어의 phase 제목을
+인식하므로, `ko`로 설정된 저장소에서도 영어로 작성된 초안을 그대로 등록할 수 있고 그
+반대도 됩니다. 언어 설정은 새로 만드는 문서에만 적용되며, 이미 등록된 plan의 문서를
+다시 쓰지 않습니다.
+
 ### 훅
 
 `hooks.before`와 `hooks.after`에 실행 시점별 규칙을 작성합니다. `on`에는 여러 이벤트를
@@ -193,6 +234,9 @@ hooks:
 - **`before`** 훅은 상태나 파일을 기록하기 전에 실행되며, 실패하면 작업을 중단합니다.
 - **`after`** 훅은 작업이 기록된 뒤 실행되며, 실패해도 기록을 되돌리지 않고 오류만
   알립니다.
+- 훅 하나는 **10분**까지 실행할 수 있고, 넘으면 중단되며 어느 훅이 멈췄는지 알려
+  줍니다. 테스트 스위트를 돌리기에는 넉넉하면서, 멈춘 훅이 planr을 무한정 붙잡지는
+  못하게 하는 값입니다.
 
 모든 훅은 리포지토리 루트에서 셸 명령으로 실행되고 다음 환경 변수를 받습니다.
 
@@ -251,7 +295,8 @@ planr plan=00-checkout-v2 event=plan_done at=2026-08-27T02:11:40Z
 # 전체 완료 기록
 planr notes
 
-# 특정 plan만
+# 특정 plan만 (두 표기 모두 동작)
+planr notes checkout-v2
 planr notes 00-checkout-v2
 ```
 
@@ -265,6 +310,14 @@ COMPLETED             PLAN          EVENT      COMMIT   SUBJECT
 포맷이라 `git notes --ref=planr show <commit>` 이나 `git log --notes=refs/notes/planr`
 로도 그대로 읽힙니다. 노트를 남기지 못해도 완료 처리 자체는 유지되고 경고만 표준 오류로
 출력합니다.
+
+`refs/notes/*`는 git이 기본으로 주고받는 ref가 아니므로, 완료 기록을 팀과 공유하려면
+명시적으로 push·fetch 합니다.
+
+```sh
+git push origin refs/notes/planr
+git fetch origin refs/notes/planr:refs/notes/planr
+```
 
 ```yaml
 ---
@@ -317,8 +370,14 @@ depends_on: [platform-refresh, api-foundation#2]
 
 ### PHASE 블록
 
-`PHASES`의 각 phase는 제목 직후 YAML 펜스를 두고, `계획된 작업`과 `완료 조건`을
-모두 채웁니다.
+`PHASES`의 각 phase는 제목 직후 YAML 펜스를 두고, 계획된 작업과 완료 조건을 모두
+채웁니다. 두 소제목은 언어별로 다음 쌍 중 **하나**를 씁니다. 저장소의 `language`
+설정과 관계없이 두 쌍 모두 인식하므로, 다른 언어로 작성된 초안도 그대로 등록됩니다.
+
+| 언어 | 소제목 |
+| --- | --- |
+| `en` | `### Planned Work` / `### Done When` |
+| `ko` | `### 계획된 작업` / `### 완료 조건` |
 
 ````markdown
 ## PHASE — Checkout UI
@@ -350,16 +409,20 @@ entry_condition: null
 plan 의존성은 plan 이름을 기준으로 하며, `plan-name#phase-number`를 사용하면 특정
 phase까지 기다리도록 지정할 수 있습니다. 완료되지 않은 선행 plan 또는 phase가 있으면
 `status` 출력의 `wait` 목록에 표시됩니다. 존재하지 않는 이름도 초안에는 기록할 수
-있으므로, 나중에 추가할 plan을 미리 연결하는 것도 가능합니다.
+있으므로, 나중에 추가할 plan을 미리 연결하는 것도 가능합니다. 다만 등록되지 않은
+plan에 의존하는 phase는 [진행 전 검사](#진행-전-검사)에서 막히므로, 실제로 작업을
+시작하려면 그 plan이 먼저 등록되고 완료되어야 합니다.
 
-검사 시점은 두 번입니다.
+검사 시점은 세 번입니다.
 
 - **`new`** — plan 의존성의 형식, 중복, 자기 자신에 대한 의존성을 검사합니다.
 - **`add`** — 위 검사를 다시 수행하고, phase가 같은 plan 안에서 다른 phase만
   의존하는지, 참조한 phase가 존재하는지, 의존성 순환이 없는지도 검사합니다.
+- **`phase start` / `phase done`** — 등록된 그래프대로 선행 phase와 선행 plan이 모두
+  완료되었는지 검사합니다. `--force`로 우회합니다.
 
-문제가 있으면 어떤 plan·phase의 의존성이 잘못되었는지 오류 메시지로 안내하며 파일을
-등록하지 않습니다.
+앞의 두 검사에서 문제가 있으면 어떤 plan·phase의 의존성이 잘못되었는지 오류 메시지로
+안내하며 파일을 등록하지 않습니다.
 
 ## 라이프사이클
 
@@ -450,9 +513,9 @@ python3 planr/scripts/main.py scenario
 python3 planr/scripts/main.py scenario clean
 ```
 
-시나리오는 `plan-scenario` 픽스처를 `planr/run/<타임스탬프>-scenario/`로 복사한 뒤,
-다음 다섯 가지 plan을 만들고 상세한 `status`와 간단한 `overview` 출력을 차례로 보여
-줍니다.
+시나리오는 `plan-scenario` 픽스처를 `planr/run/<타임스탬프>-scenario/`로 복사하고 git
+저장소로 초기화한 뒤, 다음 다섯 가지 plan을 만들고 상세한 `status`, 간단한 `overview`,
+`notes` 출력을 차례로 보여 줍니다.
 
 - 완료된 인증 기반 plan
 - 진행 중 checkout plan
@@ -460,9 +523,14 @@ python3 planr/scripts/main.py scenario clean
 - 일부 phase만 완료된 rollout plan
 - `status`에서 숨겨지는 무관한 완료 plan
 
-같은 초안을 여러 번 등록하면 동일한 진행 중 plan만 나오므로, 완료·대기·부분 완료
-상태는 등록 후 frontmatter를 고쳐서 만들어 냅니다. 이 치환이 하나도 일치하지 않으면
-plan 형식이 바뀐 것으로 보고 실패합니다. 실행 결과는 Git에서 제외됩니다.
+**상태를 만드는 방법** — 시나리오는 planr이 만든 문서를 고치지 않습니다. plan마다
+초안을 따로 쓰면서 의존성을 **초안 frontmatter에 적어 넣고**(입력을 다듬고), 완료·부분
+완료 상태는 실제 `planr phase done` 호출로 만듭니다.
+
+생성된 frontmatter를 정규식으로 치환하면 내부 파일 형식에 시나리오가 묶이고, 무엇보다
+**CLI가 거부할 배치를 화면에 만들어 낼 수 있습니다** — 선행 phase보다 먼저 완료된
+phase 같은 것입니다. 반면 초안 형식은 문서화된 인터페이스이므로, 형식이 바뀌면 시나리오도
+분명한 이유로 함께 실패합니다. 실행 결과는 Git에서 제외됩니다.
 
 ### 테스트
 

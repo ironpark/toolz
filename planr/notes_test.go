@@ -57,7 +57,7 @@ func testDraft() draft {
 func TestFrontmatterOmitsEmptyMetadata(t *testing.T) {
 	plansRoot := t.TempDir()
 	planRoot := filepath.Join(plansRoot, "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2"); err != nil {
+	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", languageKorean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 
@@ -92,7 +92,7 @@ func TestFrontmatterOmitsEmptyMetadata(t *testing.T) {
 func TestCompletionStampsFrontmatter(t *testing.T) {
 	plansRoot := t.TempDir()
 	planRoot := filepath.Join(plansRoot, "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2"); err != nil {
+	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", languageKorean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 
@@ -172,6 +172,35 @@ func TestRecordAndReadCompletionNotes(t *testing.T) {
 	}
 	if phase != "03" {
 		t.Errorf("phase number not recorded, got %q", phase)
+	}
+}
+
+// `notes` must accept the same plan names every other command does; the bare
+// name previously returned an empty result instead of the plan's records.
+func TestReadPlanNotesAcceptsBarePlanName(t *testing.T) {
+	repoRoot := seedRepository(t)
+	if err := recordCompletionNote(repoRoot, "00-checkout-v2", hookEventDone, 1); err != nil {
+		t.Fatalf("record phase note: %v", err)
+	}
+	if err := recordCompletionNote(repoRoot, "01-other", hookEventPlanDone, -1); err != nil {
+		t.Fatalf("record other plan note: %v", err)
+	}
+
+	for _, filter := range []string{"checkout-v2", "00-checkout-v2"} {
+		notes, err := readPlanNotes(repoRoot, filter)
+		if err != nil {
+			t.Fatalf("readPlanNotes(%q) unexpected error: %v", filter, err)
+		}
+		if len(notes) != 1 || notes[0].plan != "00-checkout-v2" {
+			t.Fatalf("readPlanNotes(%q) = %#v, want the one checkout-v2 note", filter, notes)
+		}
+	}
+	notes, err := readPlanNotes(repoRoot, "nonexistent")
+	if err != nil {
+		t.Fatalf("readPlanNotes() unexpected error: %v", err)
+	}
+	if len(notes) != 0 {
+		t.Fatalf("readPlanNotes(\"nonexistent\") = %#v, want none", notes)
 	}
 }
 

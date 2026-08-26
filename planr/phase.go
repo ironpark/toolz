@@ -74,9 +74,17 @@ func phaseCommand(cmd *cli.Command, status string) error {
 		}
 		willComplete = willComplete && !planWasDone
 	}
-	if status == "done" && !cmd.Bool("force") {
-		if err := ensureCleanSource(repoRoot, planDirectories, settings.Ignore); err != nil {
+	if !cmd.Bool("force") {
+		// Starting or completing a phase out of order silently invalidates the
+		// ordering the plan was validated against, so the same graph `add`
+		// checked is enforced here too.
+		if err := ensureDependenciesMet(planDirectories, planRoot, planDirectory, phaseID, status); err != nil {
 			return err
+		}
+		if status == "done" {
+			if err := ensureCleanSource(repoRoot, planDirectories, settings.Ignore); err != nil {
+				return err
+			}
 		}
 	}
 	if err := runConfiguredHooks(repoRoot, settings, "before", event, planDirectory, phaseID, status); err != nil {
@@ -116,6 +124,129 @@ func phaseCommand(cmd *cli.Command, status string) error {
 		}
 	}
 	return nil
+}
+
+// ensureDependenciesMet refuses to advance a phase whose prerequisites are not
+// done. It covers both the phase's own depends_on and the plan-level
+// depends_on in PLAN.md, which is what `status` reports as `wait`. Resetting a
+// phase to planned or conditional moves backwards and is never blocked.
+func ensureDependenciesMet(planDirectories []string, planRoot, planDirectory string, phaseID int, status string) error {
+	if status != "in-progress" && status != "done" {
+		return nil
+	}
+	phases, err := readPlanPhases(planRoot)
+	if err != nil {
+		return err
+	}
+	local := map[int]storedPhase{}
+	var target *storedPhase
+	for index, phase := range phases {
+		local[phase.id] = phase
+		if phase.id == phaseID {
+			target = &phases[index]
+		}
+	}
+	// A missing phase is reported by updatePhaseStatus with a better message.
+	if target == nil {
+		return nil
+	}
+
+	unmet := []string{}
+	for _, raw := range target.dependencies {
+		dependency, parseErr := parseDependency(raw)
+		if parseErr != nil {
+			unmet = append(unmet, fmt.Sprintf("%s (unreadable dependency)", raw))
+			continue
+		}
+		if dependency.plan == planName(planDirectory) && dependency.phase != nil {
+			phase, found := local[*dependency.phase]
+			switch {
+			case !found:
+				unmet = append(unmet, fmt.Sprintf("phase %02d (not found)", *dependency.phase))
+			case phase.status != "done":
+				unmet = append(unmet, fmt.Sprintf("phase %02d %q (%s)", phase.id, phase.title, phase.status))
+			}
+			continue
+		}
+		if reason := unmetPlanDependency(planDirectories, dependency); reason != "" {
+			unmet = append(unmet, reason)
+		}
+	}
+	planDependencies, err := planLevelDependencies(planRoot)
+	if err != nil {
+		return err
+	}
+	for _, dependency := range planDependencies {
+		if reason := unmetPlanDependency(planDirectories, dependency); reason != "" {
+			unmet = append(unmet, reason)
+		}
+	}
+	if len(unmet) == 0 {
+		return nil
+	}
+	lines := make([]string, len(unmet))
+	for index, reason := range unmet {
+		lines[index] = "  - " + reason
+	}
+	return fmt.Errorf("cannot set %s phase %02d to %s while its dependencies are unfinished:\n%s\nfinish them first or use --force",
+		planDirectory, phaseID, status, strings.Join(lines, "\n"))
+}
+
+// unmetPlanDependency describes why a dependency on another plan is not
+// satisfied, or returns an empty string when it is. A dependency naming a plan
+// that was never registered counts as unmet: drafts may reference plans that do
+// not exist yet, but work cannot proceed past one.
+func unmetPlanDependency(planDirectories []string, dependency planDependency) string {
+	label := dependencyLabel(dependency)
+	planRoot, _, err := findPlanDirectory(planDirectories, dependency.plan)
+	if err != nil {
+		return fmt.Sprintf("%s (not registered)", label)
+	}
+	if dependency.phase == nil {
+		done, err := planAlreadyDone(planRoot)
+		if err != nil {
+			return fmt.Sprintf("%s (unreadable)", label)
+		}
+		if !done {
+			return fmt.Sprintf("%s (in-progress)", label)
+		}
+		return ""
+	}
+	phases, err := readPlanPhases(planRoot)
+	if err != nil {
+		return fmt.Sprintf("%s (unreadable)", label)
+	}
+	for _, phase := range phases {
+		if phase.id != *dependency.phase {
+			continue
+		}
+		if phase.status != "done" {
+			return fmt.Sprintf("%s (%s)", label, phase.status)
+		}
+		return ""
+	}
+	return fmt.Sprintf("%s (phase not found)", label)
+}
+
+// planLevelDependencies reads the depends_on list from a plan's PLAN.md.
+func planLevelDependencies(planRoot string) ([]planDependency, error) {
+	raw, err := os.ReadFile(filepath.Join(planRoot, "PLAN.md"))
+	if err != nil {
+		return nil, err
+	}
+	front, _, err := frontmatter(string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("parse PLAN.md: %w", err)
+	}
+	dependencies := []planDependency{}
+	for _, raw := range yamlStrings(front["depends_on"]) {
+		dependency, err := parseDependency(raw)
+		if err != nil {
+			continue
+		}
+		dependencies = append(dependencies, dependency)
+	}
+	return dependencies, nil
 }
 
 func ensureCleanSource(repoRoot string, planDirectories, ignore []string) error {
@@ -457,7 +588,25 @@ func writeFrontmatterFile(path string, front map[string]any, body string) error 
 		return fmt.Errorf("encode %s frontmatter: %w", filepath.Base(path), err)
 	}
 	contents := "---\n" + string(header) + "---\n" + body
-	if err := os.WriteFile(path, []byte(contents), 0644); err != nil {
+	// A status change rewrites a document that is already tracked in git, so it
+	// is staged next to the target and renamed into place: an interrupted write
+	// leaves the previous contents rather than a truncated document.
+	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".")
+	if err != nil {
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
+	}
+	defer os.Remove(temporary.Name())
+	if _, err := temporary.WriteString(contents); err != nil {
+		temporary.Close()
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
+	}
+	if err := os.Chmod(temporary.Name(), 0644); err != nil {
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
+	}
+	if err := os.Rename(temporary.Name(), path); err != nil {
 		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
 	}
 	return nil

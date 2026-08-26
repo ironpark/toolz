@@ -63,7 +63,7 @@ func newCommand(_ context.Context, cmd *cli.Command) error {
 	if err := runConfiguredHooks(repoRoot, settings, "before", hookEventNew, name, -1, "draft"); err != nil {
 		return err
 	}
-	draft, err := renderNewDraft(name, dependsOn, description)
+	draft, err := renderNewDraft(settings.Language, name, dependsOn, description)
 	if err != nil {
 		return err
 	}
@@ -207,7 +207,7 @@ func addCommand(_ context.Context, cmd *cli.Command) error {
 		}
 	}
 	defer os.RemoveAll(tmp)
-	if err := writePlan(tmp, d, planDirectory); err != nil {
+	if err := writePlan(tmp, d, planDirectory, settings.Language); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, target); err != nil {
@@ -254,7 +254,8 @@ func nextPlanDirectory(planDirectories []string, name string) (string, error) {
 	return fmt.Sprintf("%02d-%s", maxIndex+1, name), nil
 }
 
-func writePlan(root string, d draft, planDirectory string) error {
+func writePlan(root string, d draft, planDirectory, language string) error {
+	text := documentStringsFor(language)
 	if err := os.MkdirAll(filepath.Join(root, "phases"), 0755); err != nil {
 		return err
 	}
@@ -268,7 +269,7 @@ func writePlan(root string, d draft, planDirectory string) error {
 	for _, p := range d.Phases {
 		checklist = append(checklist, phaseChecklistEntry(p.Meta.Phase, p.Title, p.Meta.Slug))
 		path := filepath.Join(root, phaseDocumentPath(p.Meta.Phase, p.Meta.Slug))
-		if err := writeFrontmatterFile(path, phaseFrontmatter(planDirectory, p.Meta), phaseDocumentBody(p.Title, p.Planned, p.Completion)); err != nil {
+		if err := writeFrontmatterFile(path, phaseFrontmatter(planDirectory, p.Meta), phaseDocumentBody(language, p.Title, p.Planned, p.Completion)); err != nil {
 			return err
 		}
 	}
@@ -283,7 +284,11 @@ func writePlan(root string, d draft, planDirectory string) error {
 			nextDoc = phaseDocumentPath(p.Meta.Phase, p.Meta.Slug)
 		}
 	}
-	plan := fmt.Sprintf("---\n%s---\n> NEXT: %s ([Phase %d](%s))\n\n# Phases\n\n%s\n\n# 공통 검증\n\n%s\n\n# 구현 순서를 제한하는 결정\n\n%s\n\n# 다음 구현 대상\n\n%s\n", header, d.NextText, d.NextPhase, nextDoc, strings.Join(checklist, "\n"), d.Verification, d.Ordering, d.NextText)
+	plan := fmt.Sprintf("---\n%s---\n> NEXT: %s ([Phase %d](%s))\n\n# Phases\n\n%s\n\n# %s\n\n%s\n\n# %s\n\n%s\n\n# %s\n\n%s\n",
+		header, d.NextText, d.NextPhase, nextDoc, strings.Join(checklist, "\n"),
+		text.verification, d.Verification,
+		text.ordering, d.Ordering,
+		text.nextTarget, d.NextText)
 	return os.WriteFile(filepath.Join(root, "PLAN.md"), []byte(plan), 0644)
 }
 
@@ -306,18 +311,18 @@ func phaseFrontmatter(planDirectory string, meta phaseMeta) map[string]any {
 		dependencies[index] = fmt.Sprintf("%s#%d", planDirectory, dependency)
 	}
 	return map[string]any{
-		"status":           meta.Status,
-		"entry_condition":  meta.EntryCondition,
-		"impl_commits":     []string{},
-		"followup_commits": []string{},
-		"perf_phase":       meta.PerfPhase,
-		"depends_on":       dependencies,
-		"blocks":           []string{},
+		"status":          meta.Status,
+		"entry_condition": meta.EntryCondition,
+		"perf_phase":      meta.PerfPhase,
+		"depends_on":      dependencies,
+		"blocks":          []string{},
 	}
 }
 
-func phaseDocumentBody(title, planned, completion string) string {
-	return fmt.Sprintf("> DONE-WHEN: %s\n> NEXT: 없음\n\n# %s\n\n## 계획된 작업\n\n%s\n\n## 완료 조건\n\n%s\n", firstPhaseLine(completion), title, planned, completion)
+func phaseDocumentBody(language, title, planned, completion string) string {
+	text := documentStringsFor(language)
+	return fmt.Sprintf("> DONE-WHEN: %s\n> NEXT: %s\n\n# %s\n\n## %s\n\n%s\n\n## %s\n\n%s\n",
+		firstPhaseLine(completion), text.noNext, title, text.plannedWork, planned, text.doneWhen, completion)
 }
 
 // planSummary is the shared on-disk view of a plan used by both `status` and

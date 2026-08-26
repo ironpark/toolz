@@ -11,7 +11,7 @@ func TestCollectOverviewEntries(t *testing.T) {
 	plans := filepath.Join(root, "plans-active")
 	planRoot := filepath.Join(plans, "00-checkout-v2")
 	draft := overviewTestDraft("checkout-v2", nil)
-	if err := writePlan(planRoot, draft, "00-checkout-v2"); err != nil {
+	if err := writePlan(planRoot, draft, "00-checkout-v2", languageKorean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 
@@ -36,12 +36,12 @@ func TestAnnotateOverviewWait(t *testing.T) {
 	root := t.TempDir()
 	plans := filepath.Join(root, "plans-active")
 	apiRoot := filepath.Join(plans, "00-api-foundation")
-	if err := writePlan(apiRoot, overviewTestDraft("api-foundation", nil), "00-api-foundation"); err != nil {
+	if err := writePlan(apiRoot, overviewTestDraft("api-foundation", nil), "00-api-foundation", languageKorean); err != nil {
 		t.Fatalf("write API plan: %v", err)
 	}
 	consumerRoot := filepath.Join(plans, "01-checkout-v2")
 	dependency := "api-foundation#0"
-	if err := writePlan(consumerRoot, overviewTestDraft("checkout-v2", &dependency), "01-checkout-v2"); err != nil {
+	if err := writePlan(consumerRoot, overviewTestDraft("checkout-v2", &dependency), "01-checkout-v2", languageKorean); err != nil {
 		t.Fatalf("write consumer plan: %v", err)
 	}
 

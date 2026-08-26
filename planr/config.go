@@ -14,6 +14,7 @@ type config struct {
 	PlansDir  string     `yaml:"plans_dir"`
 	PlansDirs []string   `yaml:"plans_dirs"`
 	Ignore    []string   `yaml:"ignore"`
+	Language  string     `yaml:"language"`
 	Hooks     hookConfig `yaml:"hooks"`
 }
 
@@ -49,6 +50,10 @@ func loadConfig(start string) (config, string, error) {
 			if err := validatePlanDirs(value.PlansDirs); err != nil {
 				return config{}, "", err
 			}
+			if err := validateLanguage(value.Language); err != nil {
+				return config{}, "", fmt.Errorf("%s: %w", path, err)
+			}
+			value.Language = normalizeLanguage(value.Language)
 			if err := validateHooks(value.Hooks); err != nil {
 				return config{}, "", err
 			}
@@ -59,7 +64,7 @@ func loadConfig(start string) (config, string, error) {
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
-			return config{PlansDirs: []string{"plan"}}, start, nil
+			return config{PlansDirs: []string{"plan"}, Language: defaultLanguage}, start, nil
 		}
 		current = parent
 	}

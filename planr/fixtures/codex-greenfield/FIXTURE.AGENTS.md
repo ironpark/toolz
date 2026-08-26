@@ -48,6 +48,8 @@ planr phase add <plan-name> <title> --work "..." --done-when "..." # 진행 중 
 - `planr phase done`은 커밋되지 않은 소스 변경이 있으면 실패합니다. 먼저 커밋하세요.
   `--force`로 이 검사를 우회하지 않습니다. `planr`가 만든 초안 파일과 plan 디렉터리는
   소스 변경으로 세지 않으므로 커밋하지 않아도 됩니다.
+- `planr phase start`와 `planr phase done`은 선행 phase가 아직 `done`이 아니면
+  실패합니다. 계획한 순서대로 진행하고, `--force`로 우회하지 않습니다.
 - 계획 문서와 코드·테스트를 함께 최신 상태로 유지합니다. 계획만 갱신하고 구현이
   없거나, 구현만 하고 phase 상태가 그대로면 안 됩니다.
 - plan 문서와 `.planr.yaml`은 `planr` 명령으로 갱신합니다. 상태를 손으로 고쳐 맞추지

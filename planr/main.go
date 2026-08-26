@@ -4,14 +4,32 @@ import (
 	"context"
 	"log"
 	"os"
+	"runtime/debug"
 
 	"github.com/urfave/cli/v3"
 )
 
+// version is overridable at link time (-ldflags "-X main.version=v1.2.3") for
+// release builds. Installs made with `go install ...@latest` leave it unset and
+// fall back to the module version the binary was built from.
+var version = ""
+
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info.Main.Version == "" {
+		return "unknown"
+	}
+	return info.Main.Version
+}
+
 func main() {
 	command := &cli.Command{
-		Name:  "planr",
-		Usage: "register and track structured implementation plans",
+		Name:    "planr",
+		Usage:   "register and track structured implementation plans",
+		Version: buildVersion(),
 		// Every command reads or writes plan state inside a repository, so the
 		// check runs once here instead of at each call site.
 		Before: func(ctx context.Context, _ *cli.Command) (context.Context, error) {
@@ -94,14 +112,17 @@ func main() {
 						Name:      "start",
 						Usage:     "start a phase",
 						ArgsUsage: "<plan-name> <phase-number>",
-						Action:    phaseShortcutCommand("in-progress"),
+						Flags: []cli.Flag{
+							&cli.BoolFlag{Name: "force", Usage: "start despite unfinished dependencies"},
+						},
+						Action: phaseShortcutCommand("in-progress"),
 					},
 					{
 						Name:      "done",
 						Usage:     "complete a phase",
 						ArgsUsage: "<plan-name> <phase-number>",
 						Flags: []cli.Flag{
-							&cli.BoolFlag{Name: "force", Usage: "complete despite uncommitted source changes"},
+							&cli.BoolFlag{Name: "force", Usage: "complete despite unfinished dependencies or uncommitted source changes"},
 						},
 						Action: phaseShortcutCommand("done"),
 					},

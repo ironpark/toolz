@@ -71,28 +71,51 @@ func TestValidatePhaseDependencies(t *testing.T) {
 // A draft produced by `planr new` must be registrable by `planr add` once the
 // author fills in its placeholders, and must report every unfilled placeholder
 // at once rather than one failed `add` at a time.
-func newDraftForTest(t *testing.T) string {
+func newDraftForTest(t *testing.T, language string) string {
 	t.Helper()
-	raw, err := renderNewDraft("demo", nil, "a demo plan")
+	raw, err := renderNewDraft(language, "demo", nil, "a demo plan")
 	if err != nil {
-		t.Fatalf("renderNewDraft() unexpected error: %v", err)
+		t.Fatalf("renderNewDraft(%q) unexpected error: %v", language, err)
 	}
 	return raw
 }
 
 func TestNewDraftReportsEveryPlaceholderAtOnce(t *testing.T) {
-	_, err := parseDraft([]byte(newDraftForTest(t)), "demo.md")
-	if err == nil {
-		t.Fatal("parseDraft() accepted an unfilled draft")
+	for _, language := range sortedLanguages() {
+		t.Run(language, func(t *testing.T) {
+			_, err := parseDraft([]byte(newDraftForTest(t, language)), "demo.md")
+			if err == nil {
+				t.Fatal("parseDraft() accepted an unfilled draft")
+			}
+			message := err.Error()
+			if got := strings.Count(message, "\n  line "); got != 3 {
+				t.Fatalf("parseDraft() reported %d placeholders, want 3; error: %v", got, err)
+			}
+		})
 	}
-	message := err.Error()
-	if got := strings.Count(message, "\n  line "); got != 3 {
-		t.Fatalf("parseDraft() reported %d placeholders, want 3; error: %v", got, err)
+}
+
+// Every language's skeleton must parse, so a draft written against one
+// language is not silently unusable under another.
+func TestNewDraftRoundTripsInEveryLanguage(t *testing.T) {
+	for _, language := range sortedLanguages() {
+		t.Run(language, func(t *testing.T) {
+			raw := newDraftForTest(t, language)
+			lines := strings.Split(raw, "\n")
+			for index, line := range lines {
+				if strings.Contains(line, draftPlaceholder) {
+					lines[index] = "- filled in"
+				}
+			}
+			if _, err := parseDraft([]byte(strings.Join(lines, "\n")), "demo.md"); err != nil {
+				t.Fatalf("parseDraft() rejected a filled-in %s draft: %v", language, err)
+			}
+		})
 	}
 }
 
 func TestNewDraftRoundTripsOnceFilledIn(t *testing.T) {
-	raw := newDraftForTest(t)
+	raw := newDraftForTest(t, languageKorean)
 	lines := strings.Split(raw, "\n")
 	for index, line := range lines {
 		if strings.Contains(line, draftPlaceholder) {

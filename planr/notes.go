@@ -261,7 +261,9 @@ func readPlanNotes(repoRoot, planFilter string) ([]planNote, error) {
 			if !ok {
 				continue
 			}
-			if planFilter != "" && note.plan != planFilter {
+			// Notes record the numbered directory, but every other command
+			// accepts the bare plan name too, so both are matched here.
+			if planFilter != "" && note.plan != planFilter && planName(note.plan) != planFilter {
 				continue
 			}
 			note.commit, note.shortHash, note.subject = target.String(), shortHash, subject

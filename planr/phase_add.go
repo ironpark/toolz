@@ -119,7 +119,7 @@ func phaseAddCommand(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 	phasePath := filepath.Join(planRoot, phaseDocumentPath(phaseID, slug))
-	if err := writeFrontmatterFile(phasePath, phaseFrontmatter(planDirectory, meta), phaseDocumentBody(title, planned, completion)); err != nil {
+	if err := writeFrontmatterFile(phasePath, phaseFrontmatter(planDirectory, meta), phaseDocumentBody(settings.Language, title, planned, completion)); err != nil {
 		return err
 	}
 	planFront["plan_status"] = "in-progress"

@@ -27,7 +27,7 @@ func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
 			{Title: "Checkout UI", Meta: phaseMeta{Phase: 1, Slug: "checkout-ui", Status: "planned", DependsOn: []int{0}}, Planned: "Add the UI.", Completion: "UI tests pass."},
 		},
 	}
-	if err := writePlan(filepath.Join(plansRoot, "00-checkout-v2"), draft, "00-checkout-v2"); err != nil {
+	if err := writePlan(filepath.Join(plansRoot, "00-checkout-v2"), draft, "00-checkout-v2", languageKorean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 
@@ -54,6 +54,96 @@ func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
 	}
 	assertPlanStatus(t, planPath, "in-progress")
 	assertPlanChecklist(t, planPath, 0, false)
+}
+
+// The dependency graph `add` validates is only meaningful if it also governs
+// execution, so advancing a phase ahead of its prerequisites is refused.
+func TestEnsureDependenciesMetBlocksOutOfOrderPhases(t *testing.T) {
+	plansRoot := t.TempDir()
+	planRoot := filepath.Join(plansRoot, "00-checkout-v2")
+	if err := writePlan(planRoot, dependentTestDraft(nil), "00-checkout-v2", languageEnglish); err != nil {
+		t.Fatalf("writePlan() unexpected error: %v", err)
+	}
+	directories := []string{plansRoot}
+
+	for _, status := range []string{"in-progress", "done"} {
+		err := ensureDependenciesMet(directories, planRoot, "00-checkout-v2", 1, status)
+		if err == nil {
+			t.Fatalf("ensureDependenciesMet(%q) allowed phase 01 while phase 00 was planned", status)
+		}
+		if !strings.Contains(err.Error(), "API Contract") || !strings.Contains(err.Error(), "--force") {
+			t.Fatalf("ensureDependenciesMet(%q) error = %v, want the blocking phase and --force", status, err)
+		}
+	}
+	// Moving backwards is never blocked.
+	if err := ensureDependenciesMet(directories, planRoot, "00-checkout-v2", 1, "planned"); err != nil {
+		t.Fatalf("ensureDependenciesMet(planned) unexpected error: %v", err)
+	}
+	// A phase with no unfinished prerequisites proceeds.
+	if err := ensureDependenciesMet(directories, planRoot, "00-checkout-v2", 0, "in-progress"); err != nil {
+		t.Fatalf("ensureDependenciesMet() blocked an unblocked phase: %v", err)
+	}
+
+	if _, _, err := updatePhaseStatus(directories, "checkout-v2", 0, "done"); err != nil {
+		t.Fatalf("complete first phase: %v", err)
+	}
+	if err := ensureDependenciesMet(directories, planRoot, "00-checkout-v2", 1, "done"); err != nil {
+		t.Fatalf("ensureDependenciesMet() still blocked phase 01 after phase 00 was done: %v", err)
+	}
+}
+
+// A plan-level dependency is what `status` reports as `wait`; it blocks the
+// dependent plan's phases for the same reason a phase dependency does.
+func TestEnsureDependenciesMetBlocksOnUnfinishedPlans(t *testing.T) {
+	plansRoot := t.TempDir()
+	planRoot := filepath.Join(plansRoot, "01-checkout-v2")
+	if err := writePlan(planRoot, dependentTestDraft([]string{"api-foundation"}), "01-checkout-v2", languageEnglish); err != nil {
+		t.Fatalf("writePlan() unexpected error: %v", err)
+	}
+	directories := []string{plansRoot}
+
+	// The prerequisite plan is not registered yet, so work cannot start.
+	err := ensureDependenciesMet(directories, planRoot, "01-checkout-v2", 0, "in-progress")
+	if err == nil || !strings.Contains(err.Error(), "not registered") {
+		t.Fatalf("ensureDependenciesMet() error = %v, want an unregistered dependency", err)
+	}
+
+	apiRoot := filepath.Join(plansRoot, "00-api-foundation")
+	if err := writePlan(apiRoot, dependentTestDraft(nil), "00-api-foundation", languageEnglish); err != nil {
+		t.Fatalf("writePlan() unexpected error: %v", err)
+	}
+	err = ensureDependenciesMet(directories, planRoot, "01-checkout-v2", 0, "in-progress")
+	if err == nil || !strings.Contains(err.Error(), "in-progress") {
+		t.Fatalf("ensureDependenciesMet() error = %v, want an unfinished dependency", err)
+	}
+
+	for _, phase := range []int{0, 1} {
+		if _, _, err := updatePhaseStatus(directories, "00-api-foundation", phase, "done"); err != nil {
+			t.Fatalf("complete api-foundation phase %d: %v", phase, err)
+		}
+	}
+	if err := ensureDependenciesMet(directories, planRoot, "01-checkout-v2", 0, "in-progress"); err != nil {
+		t.Fatalf("ensureDependenciesMet() blocked on a completed plan: %v", err)
+	}
+}
+
+func dependentTestDraft(dependsOn []string) draft {
+	return draft{
+		Name:         "checkout-v2",
+		Description:  "checkout flow refresh",
+		DependsOn:    dependsOn,
+		NextPhase:    0,
+		NextText:     "Implement the API contract.",
+		Goals:        "Ship checkout.",
+		Scope:        "Checkout only.",
+		Context:      "Existing checkout.",
+		Verification: "go test ./...",
+		Ordering:     "API before UI.",
+		Phases: []draftPhase{
+			{Title: "API Contract", Meta: phaseMeta{Phase: 0, Slug: "api-contract", Status: "planned"}, Planned: "Add the API.", Completion: "API tests pass."},
+			{Title: "Checkout UI", Meta: phaseMeta{Phase: 1, Slug: "checkout-ui", Status: "planned", DependsOn: []int{0}}, Planned: "Add the UI.", Completion: "UI tests pass."},
+		},
+	}
 }
 
 func TestUpdatePhaseChecklist(t *testing.T) {

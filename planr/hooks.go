@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -93,11 +95,18 @@ func runConfiguredHooks(repoRoot string, settings config, when, event, planDirec
 	return nil
 }
 
+// hookTimeout bounds a single hook. Hooks routinely run test suites, so the
+// budget is generous, but an unbounded hook would hang planr forever with no
+// indication of which command is stuck.
+const hookTimeout = 10 * time.Minute
+
 func runHook(repoRoot, command, label, event, planDirectory string, phaseID int, status string) error {
 	if strings.TrimSpace(command) == "" {
 		return nil
 	}
-	hook := exec.Command("sh", "-c", command)
+	ctx, cancel := context.WithTimeout(context.Background(), hookTimeout)
+	defer cancel()
+	hook := exec.CommandContext(ctx, "sh", "-c", command)
 	hook.Dir = repoRoot
 	hook.Env = append(os.Environ(),
 		"PLANR_EVENT="+event,
@@ -108,6 +117,9 @@ func runHook(repoRoot, command, label, event, planDirectory string, phaseID int,
 	output, err := hook.CombinedOutput()
 	if err != nil {
 		message := strings.TrimSpace(string(output))
+		if ctx.Err() == context.DeadlineExceeded {
+			err = fmt.Errorf("timed out after %s", hookTimeout)
+		}
 		if message != "" {
 			return fmt.Errorf("%s failed: %w\n%s", label, err, message)
 		}

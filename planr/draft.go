@@ -271,17 +271,10 @@ func parsePhases(section string) ([]draftPhase, error) {
 			return nil, fmt.Errorf("planned phase %q requires entry_condition: null", title)
 		}
 		rest := strings.TrimSpace(block[close+12:])
-		const work = "### 계획된 작업"
-		const done = "### 완료 조건"
-		if !strings.HasPrefix(rest, work) {
-			return nil, fmt.Errorf("phase %q must contain %s", title, work)
+		planned, completion, err := splitPhaseSections(title, rest)
+		if err != nil {
+			return nil, err
 		}
-		split := strings.Index(rest, "\n"+done)
-		if split < 0 {
-			return nil, fmt.Errorf("phase %q must contain %s", title, done)
-		}
-		planned := strings.TrimSpace(rest[len(work):split])
-		completion := strings.TrimSpace(rest[split+len(done)+1:])
 		if planned == "" || completion == "" {
 			return nil, fmt.Errorf("phase %q work and completion must not be empty", title)
 		}
@@ -297,6 +290,29 @@ func parsePhases(section string) ([]draftPhase, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+// splitPhaseSections divides a phase block's prose into its planned-work and
+// done-when halves. A draft may use the headings of any supported language, not
+// only the configured one, so a plan authored elsewhere still parses here.
+func splitPhaseSections(title, rest string) (string, string, error) {
+	for _, pair := range phaseSectionHeadings() {
+		work, done := "### "+pair[0], "### "+pair[1]
+		if !strings.HasPrefix(rest, work) {
+			continue
+		}
+		split := strings.Index(rest, "\n"+done)
+		if split < 0 {
+			return "", "", fmt.Errorf("phase %q must contain %s", title, done)
+		}
+		return strings.TrimSpace(rest[len(work):split]), strings.TrimSpace(rest[split+len(done)+1:]), nil
+	}
+	expected := make([]string, 0, len(phaseSectionHeadings()))
+	for _, pair := range phaseSectionHeadings() {
+		expected = append(expected, fmt.Sprintf("### %s / ### %s", pair[0], pair[1]))
+	}
+	return "", "", fmt.Errorf("phase %q must contain a planned-work and a done-when section; expected one of: %s",
+		title, strings.Join(expected, " | "))
 }
 
 func validateDraftDependencies(d *draft) error {

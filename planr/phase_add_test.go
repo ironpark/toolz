@@ -32,7 +32,7 @@ func TestPhaseAddCommandAddsPhaseAndChecklist(t *testing.T) {
 			{Title: "Checkout UI", Meta: phaseMeta{Phase: 1, Slug: "checkout-ui", Status: "planned", DependsOn: []int{0}}, Planned: "Add UI.", Completion: "UI tests pass."},
 		},
 	}
-	if err := writePlan(planRoot, draft, "00-checkout-v2"); err != nil {
+	if err := writePlan(planRoot, draft, "00-checkout-v2", languageKorean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 
@@ -86,7 +86,7 @@ func TestPhaseAddRejectsCompletedPlan(t *testing.T) {
 		Goals: "Ship.", Scope: "Checkout.", Context: "Existing.", Verification: "Tests.", Ordering: "None.",
 		Phases: []draftPhase{{Title: "API", Meta: phaseMeta{Phase: 0, Slug: "api", Status: "planned"}, Planned: "Build.", Completion: "Pass."}},
 	}
-	if err := writePlan(planRoot, draft, "00-checkout-v2"); err != nil {
+	if err := writePlan(planRoot, draft, "00-checkout-v2", languageKorean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 	planPath := filepath.Join(planRoot, "PLAN.md")

@@ -8,12 +8,13 @@ fixtures:
     used_by: planr/scripts/scenario.py
     workspace: planr/run/<timestamp>-scenario/
     description: >-
-      단순 plan 생성 시나리오. 초안 하나를 여러 번 등록해 완료/진행/대기/부분
-      완료 plan을 만들고 status와 overview 출력을 눈으로 확인한다. Git 리포지토리도
-      Go 프로젝트도 없으며 planr 바이너리만 필요하다.
+      단순 plan 생성 시나리오. 초안 본문 하나를 plan마다 다른 이름·의존성으로 다시
+      써서 등록하고, 실제 planr phase 명령으로 완료/진행/대기/부분 완료 상태를 만든
+      뒤 status·overview·notes 출력을 눈으로 확인한다. 실행기가 작업공간을 git 저장소로
+      초기화한다. Go 프로젝트는 없으며 planr 바이너리만 필요하다.
     contents:
-      - .planr.yaml: plans-active와 plans-archive 두 plans_dirs 설정
-      - checkout-v2.md: 모든 plan 등록에 재사용하는 초안
+      - .planr.yaml: language, plans-active와 plans-archive 두 plans_dirs, bin/** ignore 설정
+      - checkout-v2.md: 모든 plan 등록에 본문을 재사용하는 초안
 
   - name: codex-harness
     used_by: planr/scripts/codex.py

@@ -92,7 +92,7 @@ func TestWritePlanStoresDescriptionAndRegisteredAt(t *testing.T) {
 		},
 	}
 
-	if err := writePlan(root, draft, "00-checkout-v2"); err != nil {
+	if err := writePlan(root, draft, "00-checkout-v2", languageKorean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(root, "PLAN.md"))
