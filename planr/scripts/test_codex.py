@@ -9,9 +9,16 @@ import unittest
 from codex import (
     DEFAULT_FIXTURE,
     DEFAULT_REASONING,
-    FIXTURE_INSTALLED_FILES,
+    DEFAULT_LANGUAGE,
+    INSTALLED_AGENTS_FILE,
+    SUPPORTED_LANGUAGES,
+    agents_file_for,
+    fixture_language,
+    resolve_language,
+    set_workspace_language,
+    PLANR_CONFIG_FILE,
     FIXTURE_LABELS,
-    FIXTURE_PROMPT_FILE,
+    prompt_file_for,
     FIXTURE_TEST_FILE,
     copy_plan_artifacts,
     describe_item,
@@ -22,7 +29,7 @@ from codex import (
     load_initial_prompt,
     token_usage_summary,
 )
-from common import PLANS_DIR, fixture_dir
+from common import PLANS_DIR, HarnessError, fixture_dir
 
 
 class HarnessHelpersTest(unittest.TestCase):
@@ -131,11 +138,11 @@ ALL_FIXTURES = sorted(FIXTURE_LABELS)
 class InstallFixtureTest(unittest.TestCase):
     """The agent must see repository content, never the evaluation's own files."""
 
-    def workspace_for(self, fixture: str) -> pathlib.Path:
+    def workspace_for(self, fixture: str, language: str = DEFAULT_LANGUAGE) -> pathlib.Path:
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         workspace = pathlib.Path(directory.name) / "repo"
-        install_fixture(fixture_dir(fixture), workspace)
+        install_fixture(fixture_dir(fixture), workspace, language)
         return workspace
 
     def test_no_fixture_prefixed_file_reaches_the_workspace(self) -> None:
@@ -143,21 +150,24 @@ class InstallFixtureTest(unittest.TestCase):
             with self.subTest(fixture=fixture):
                 workspace = self.workspace_for(fixture)
                 self.assertEqual([p.name for p in workspace.rglob("FIXTURE.*")], [])
-                self.assertFalse((workspace / FIXTURE_PROMPT_FILE).exists())
+                for language in SUPPORTED_LANGUAGES:
+                    self.assertFalse((workspace / prompt_file_for(language)).exists())
                 # The acceptance script grades the result; an agent that could
                 # read it could satisfy the checks instead of the request.
                 self.assertFalse((workspace / FIXTURE_TEST_FILE).exists())
 
     def test_instructions_are_installed_under_the_expected_name(self) -> None:
+        # The agent must find the instructions for the run's language, not for
+        # whichever language happens to be the fixture's default.
         for fixture in ALL_FIXTURES:
-            with self.subTest(fixture=fixture):
-                workspace = self.workspace_for(fixture)
-                for source, installed in FIXTURE_INSTALLED_FILES.items():
-                    target = workspace / installed
-                    self.assertTrue(target.is_file(), f"{installed} missing")
+            for language in SUPPORTED_LANGUAGES:
+                with self.subTest(fixture=fixture, language=language):
+                    workspace = self.workspace_for(fixture, language)
+                    target = workspace / INSTALLED_AGENTS_FILE
+                    self.assertTrue(target.is_file(), f"{INSTALLED_AGENTS_FILE} missing")
                     self.assertEqual(
                         target.read_text(encoding="utf-8"),
-                        (fixture_dir(fixture) / source).read_text(encoding="utf-8"),
+                        (fixture_dir(fixture) / agents_file_for(language)).read_text(encoding="utf-8"),
                     )
 
     def test_every_non_fixture_file_is_copied(self) -> None:
@@ -253,39 +263,58 @@ class FixtureTestScriptTest(unittest.TestCase):
         self.assertIn("PLANR_EVAL_WORKSPACE", script)
 
 
+# Each language states "keep going until it is done" in its own words; the
+# request is worthless to the harness without it, so each phrasing is pinned.
+FINISH_ON_OWN = {"en": "without stopping to ask me", "ko": "끝까지"}
+
+
 class InitialPromptTest(unittest.TestCase):
-    def test_loads_from_every_fixture(self) -> None:
+    def test_loads_from_every_fixture_and_language(self) -> None:
         for fixture in ALL_FIXTURES:
-            with self.subTest(fixture=fixture):
-                self.assertTrue(load_initial_prompt(fixture).strip())
+            for language in SUPPORTED_LANGUAGES:
+                with self.subTest(fixture=fixture, language=language):
+                    self.assertTrue(load_initial_prompt(fixture, language).strip())
 
     def test_reads_as_a_user_request_not_harness_policy(self) -> None:
         # The planr workflow belongs in AGENTS.md; if it leaks back into the
         # prompt the run stops measuring whether the agent finds it there.
         for fixture in ALL_FIXTURES:
-            with self.subTest(fixture=fixture):
-                prompt = load_initial_prompt(fixture)
-                for policy in ("planr", "phase", "--force"):
-                    self.assertNotIn(policy, prompt, f"{policy!r} belongs in AGENTS.md")
+            for language in SUPPORTED_LANGUAGES:
+                with self.subTest(fixture=fixture, language=language):
+                    prompt = load_initial_prompt(fixture, language)
+                    for policy in ("planr", "phase", "--force"):
+                        self.assertNotIn(policy, prompt, f"{policy!r} belongs in AGENTS.md")
 
     def test_asks_the_agent_to_finish_on_its_own(self) -> None:
         # Nothing nudges the agent after this message, so the request itself
         # has to say "keep going until it is done".
         for fixture in ALL_FIXTURES:
-            with self.subTest(fixture=fixture):
-                self.assertIn("끝까지", load_initial_prompt(fixture))
+            for language in SUPPORTED_LANGUAGES:
+                with self.subTest(fixture=fixture, language=language):
+                    prompt = load_initial_prompt(fixture, language)
+                    self.assertIn(FINISH_ON_OWN[language], prompt)
 
     def test_default_fixture_is_a_known_one(self) -> None:
         self.assertIn(DEFAULT_FIXTURE, FIXTURE_LABELS)
 
 
 class InstalledInstructionsTest(unittest.TestCase):
+    def test_every_language_has_instructions(self) -> None:
+        # A missing translation would only surface as a failed run, so it is
+        # checked here instead.
+        for fixture in ALL_FIXTURES:
+            for language in SUPPORTED_LANGUAGES:
+                with self.subTest(fixture=fixture, language=language):
+                    path = fixture_dir(fixture) / agents_file_for(language)
+                    self.assertTrue(path.is_file(), f"{path} missing")
+
     def test_carries_the_planr_workflow(self) -> None:
         for fixture in ALL_FIXTURES:
-            with self.subTest(fixture=fixture):
-                agents = (fixture_dir(fixture) / "FIXTURE.AGENTS.md").read_text(encoding="utf-8")
-                for policy in ("planr new", "planr add", "planr overview", "phase done", "--force"):
-                    self.assertIn(policy, agents)
+            for language in SUPPORTED_LANGUAGES:
+                with self.subTest(fixture=fixture, language=language):
+                    agents = (fixture_dir(fixture) / agents_file_for(language)).read_text(encoding="utf-8")
+                    for policy in ("planr new", "planr add", "planr overview", "phase done", "--force"):
+                        self.assertIn(policy, agents)
 
     def test_is_independent_of_this_repository(self) -> None:
         # These instructions must drop into any repository unchanged, so they
@@ -293,16 +322,104 @@ class InstalledInstructionsTest(unittest.TestCase):
         for fixture in ALL_FIXTURES:
             with self.subTest(fixture=fixture):
                 source_dir = fixture_dir(fixture)
-                agents = (source_dir / "FIXTURE.AGENTS.md").read_text(encoding="utf-8")
                 names = {
                     path.name
                     for path in source_dir.rglob("*")
                     if path.is_file() and not path.name.startswith("FIXTURE.")
                 }
-                for name in names - {".planr.yaml", "README.md", ".gitignore"}:
-                    self.assertNotIn(name, agents, f"{name!r} only exists in this fixture")
+                for language in SUPPORTED_LANGUAGES:
+                    agents = (source_dir / agents_file_for(language)).read_text(encoding="utf-8")
+                    for name in names - {".planr.yaml", "README.md", ".gitignore"}:
+                        self.assertNotIn(name, agents, f"{name!r} only exists in this fixture")
                 self.assertTrue(names, "fixture has no repository content to check against")
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ResolveLanguageTest(unittest.TestCase):
+    """`--language` overrides; otherwise the fixture's planr setting decides."""
+
+    def test_override_wins_over_the_fixture_setting(self) -> None:
+        for fixture in ALL_FIXTURES:
+            for language in SUPPORTED_LANGUAGES:
+                with self.subTest(fixture=fixture, language=language):
+                    self.assertEqual(resolve_language(fixture, language), language)
+
+    def test_falls_back_to_the_fixture_setting(self) -> None:
+        for fixture in ALL_FIXTURES:
+            with self.subTest(fixture=fixture):
+                configured = fixture_language(fixture_dir(fixture))
+                self.assertIsNotNone(configured, "fixture no longer pins a language")
+                self.assertEqual(resolve_language(fixture, None), configured)
+
+    def test_rejects_an_unsupported_language(self) -> None:
+        with self.assertRaises(HarnessError):
+            resolve_language(DEFAULT_FIXTURE, "fr")
+
+
+class FixtureLanguageTest(unittest.TestCase):
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.directory = pathlib.Path(directory.name)
+
+    def write_config(self, contents: str) -> pathlib.Path:
+        (self.directory / PLANR_CONFIG_FILE).write_text(contents, encoding="utf-8")
+        return self.directory
+
+    def test_reads_the_top_level_setting(self) -> None:
+        self.assertEqual(fixture_language(self.write_config("language: ko\nplans_dirs:\n  - p\n")), "ko")
+
+    def test_ignores_a_nested_key_of_the_same_name(self) -> None:
+        # Only planr's own top-level setting counts; an indented `language:`
+        # belongs to some other block.
+        self.assertIsNone(fixture_language(self.write_config("hooks:\n  language: ko\n")))
+
+    def test_absent_config_and_absent_key_are_unset(self) -> None:
+        self.assertIsNone(fixture_language(self.directory))
+        self.assertIsNone(fixture_language(self.write_config("plans_dirs:\n  - p\n")))
+
+
+class SetWorkspaceLanguageTest(unittest.TestCase):
+    """An override has to reach planr too, not only the instructions."""
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.workspace = pathlib.Path(directory.name)
+
+    def config(self) -> str:
+        return (self.workspace / PLANR_CONFIG_FILE).read_text(encoding="utf-8")
+
+    def test_replaces_an_existing_setting_and_keeps_the_rest(self) -> None:
+        (self.workspace / PLANR_CONFIG_FILE).write_text(
+            "language: ko\nplans_dirs:\n  - plans-active\n", encoding="utf-8"
+        )
+        set_workspace_language(self.workspace, "en")
+        self.assertIn("language: en", self.config())
+        self.assertNotIn("language: ko", self.config())
+        self.assertIn("plans-active", self.config())
+
+    def test_adds_the_setting_when_absent(self) -> None:
+        (self.workspace / PLANR_CONFIG_FILE).write_text("plans_dirs:\n  - p\n", encoding="utf-8")
+        set_workspace_language(self.workspace, "ko")
+        self.assertIn("language: ko", self.config())
+        self.assertIn("plans_dirs", self.config())
+
+    def test_creates_the_config_when_missing(self) -> None:
+        set_workspace_language(self.workspace, "ko")
+        self.assertEqual(self.config(), "language: ko\n")
+
+    def test_install_pins_planr_to_the_run_language(self) -> None:
+        # The whole point of the override: instructions and generated documents
+        # must not end up in different languages.
+        for fixture in ALL_FIXTURES:
+            for language in SUPPORTED_LANGUAGES:
+                with self.subTest(fixture=fixture, language=language):
+                    directory = tempfile.TemporaryDirectory()
+                    self.addCleanup(directory.cleanup)
+                    workspace = pathlib.Path(directory.name) / "repo"
+                    install_fixture(fixture_dir(fixture), workspace, language)
+                    self.assertEqual(fixture_language(workspace), language)

@@ -4,8 +4,10 @@ description: {{ quote .Description }}
 depends_on: [{{ join .DependsOn ", " }}]
 ---
 <!--
-planr draft. Replace every TODO(planr) line before running `planr add`;
-`add` refuses a draft that still contains one and lists all of them at once.
+planr draft. Every TODO(planr) line must be REPLACED -- overwrite the line
+itself with your own text. Writing your answer below the marker leaves the
+marker in place, and `planr add` refuses a draft that still contains one,
+listing all of them at once.
 
 Phase yaml notes:
   phase       phase number, non-negative, unique within the plan
@@ -50,11 +52,11 @@ entry_condition: null
 
 ### Planned Work
 
-- TODO(planr): describe the work this phase carries out.
+- TODO(planr): replace this line with the work this phase carries out.
 
 ### Done When
 
-- TODO(planr): state how to decide this phase is finished.
+- TODO(planr): replace this line with how to tell this phase is finished.
 
 # VERIFICATION
 
@@ -66,4 +68,4 @@ entry_condition: null
 next_phase: 0
 ```
 
-TODO(planr): describe the phase to work on next in one line.
+TODO(planr): replace this line with a one-line description of the phase to work on next.

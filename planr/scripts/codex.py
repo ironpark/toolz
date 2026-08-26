@@ -17,6 +17,7 @@ import enum
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -69,13 +70,35 @@ FIXTURE_LABELS = {
 }
 RUN_LABEL = FIXTURE_LABELS[DEFAULT_FIXTURE]
 # `FIXTURE.*` files configure the evaluation and must never reach the agent's
-# workspace verbatim: FIXTURE.PROMPT.md is only read, FIXTURE.TEST.sh is run
-# against the finished workspace from outside it, and FIXTURE.AGENTS.md is
-# installed under the name the agent is expected to find.
+# workspace verbatim: FIXTURE.PROMPT.<lang>.md is only read, FIXTURE.TEST.sh is
+# run against the finished workspace from outside it, and
+# FIXTURE.AGENTS.<lang>.md is installed under the name the agent expects.
 FIXTURE_PREFIX = "FIXTURE."
-FIXTURE_PROMPT_FILE = f"{FIXTURE_PREFIX}PROMPT.md"
 FIXTURE_TEST_FILE = f"{FIXTURE_PREFIX}TEST.sh"
-FIXTURE_INSTALLED_FILES = {f"{FIXTURE_PREFIX}AGENTS.md": "AGENTS.md"}
+INSTALLED_AGENTS_FILE = "AGENTS.md"
+
+# Both the request and the instructions exist once per language, so a run never
+# mixes them: an English request paired with Korean guidance would measure the
+# mixture rather than either language.  planr's own `language` setting decides
+# which documents are generated; these decide which ones the agent reads.
+SUPPORTED_LANGUAGES = ("en", "ko")
+DEFAULT_LANGUAGE = "en"
+PLANR_CONFIG_FILE = ".planr.yaml"
+# .planr.yaml is read here without a YAML parser: the runners depend only on
+# the standard library so the plan scenario runs on a bare interpreter.  Only
+# planr's own top-level `language:` key is needed, and planr itself rejects a
+# malformed file long before the value would matter.
+LANGUAGE_SETTING = re.compile(r"^language:\s*[\"']?([A-Za-z-]+)[\"']?\s*$", re.MULTILINE)
+
+
+def agents_file_for(language: str) -> str:
+    return f"{FIXTURE_PREFIX}AGENTS.{language}.md"
+
+
+def prompt_file_for(language: str) -> str:
+    return f"{FIXTURE_PREFIX}PROMPT.{language}.md"
+
+
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_REASONING = "medium"
 DEFAULT_TIMEOUT = 3600.0
@@ -91,14 +114,14 @@ def positive_seconds(value: str) -> float:
     return parsed
 
 
-def load_initial_prompt(fixture: str = DEFAULT_FIXTURE) -> str:
-    """Load the first user message from the fixture.
+def load_initial_prompt(fixture: str = DEFAULT_FIXTURE, language: str = DEFAULT_LANGUAGE) -> str:
+    """Load the first user message from the fixture, in the run's language.
 
     It stays out of the workspace on purpose: the agent has to work from the
     conversation, not from a task file it can re-read on disk.
     """
 
-    path = fixture_dir(fixture) / FIXTURE_PROMPT_FILE
+    path = fixture_dir(fixture) / prompt_file_for(language)
     if not path.is_file():
         raise HarnessError(f"missing initial prompt: {path}")
     prompt = path.read_text(encoding="utf-8").strip()
@@ -608,12 +631,62 @@ async def run_sdk_session(
         return 1
 
 
-def install_fixture(fixture: pathlib.Path, workspace: pathlib.Path) -> None:
+def fixture_language(fixture: pathlib.Path) -> str | None:
+    """Return the language a fixture's .planr.yaml configures, if any."""
+
+    path = fixture / PLANR_CONFIG_FILE
+    if not path.is_file():
+        return None
+    found = LANGUAGE_SETTING.search(path.read_text(encoding="utf-8"))
+    return found.group(1).strip().lower() if found else None
+
+
+def resolve_language(fixture_name: str, override: str | None = None) -> str:
+    """Decide which language a run uses.
+
+    An explicit `--language` wins, so one fixture can be evaluated in either
+    language without editing it.  Otherwise the fixture's own planr setting
+    decides, and a fixture that configures nothing gets planr's default.
+    """
+
+    language = (override or fixture_language(fixture_dir(fixture_name)) or DEFAULT_LANGUAGE).strip().lower()
+    if language not in SUPPORTED_LANGUAGES:
+        raise HarnessError(
+            f"unsupported language {language!r}; use one of: {', '.join(SUPPORTED_LANGUAGES)}"
+        )
+    return language
+
+
+def set_workspace_language(workspace: pathlib.Path, language: str) -> None:
+    """Pin planr's `language` setting in the workspace to the resolved value.
+
+    Without this a `--language` override would change only the instructions the
+    agent reads while planr kept generating documents in the fixture's own
+    language -- the run would measure a contradiction rather than a language.
+    """
+
+    path = workspace / PLANR_CONFIG_FILE
+    setting = f"language: {language}"
+    if not path.is_file():
+        path.write_text(setting + "\n", encoding="utf-8")
+        return
+    contents = path.read_text(encoding="utf-8")
+    if LANGUAGE_SETTING.search(contents):
+        contents = LANGUAGE_SETTING.sub(setting, contents, count=1)
+    else:
+        contents = setting + "\n" + contents
+    path.write_text(contents, encoding="utf-8")
+
+
+def install_fixture(
+    fixture: pathlib.Path, workspace: pathlib.Path, language: str = DEFAULT_LANGUAGE
+) -> None:
     """Copy the fixture into the agent's workspace.
 
     `FIXTURE.*` files are configuration for the evaluation, not repository
-    content, so they are skipped wholesale and only the ones with a mapping are
-    written back under the name the agent is expected to find.
+    content, so they are skipped wholesale; the instructions for the run's
+    language are then written back under the name the agent is expected to
+    find, and planr's setting is pinned to match.
     """
 
     shutil.copytree(
@@ -622,24 +695,29 @@ def install_fixture(fixture: pathlib.Path, workspace: pathlib.Path) -> None:
         dirs_exist_ok=True,
         ignore=shutil.ignore_patterns(f"{FIXTURE_PREFIX}*"),
     )
-    for source, installed in FIXTURE_INSTALLED_FILES.items():
-        shutil.copyfile(fixture / source, workspace / installed)
+    agents = fixture / agents_file_for(language)
+    if not agents.is_file():
+        raise HarnessError(f"missing fixture instructions: {agents}")
+    shutil.copyfile(agents, workspace / INSTALLED_AGENTS_FILE)
+    set_workspace_language(workspace, language)
 
 
-def prepare_workspace(fixture_name: str = DEFAULT_FIXTURE) -> tuple[pathlib.Path, pathlib.Path]:
+def prepare_workspace(
+    fixture_name: str = DEFAULT_FIXTURE, language: str = DEFAULT_LANGUAGE
+) -> tuple[pathlib.Path, pathlib.Path]:
     fixture = fixture_dir(fixture_name)
-    for required in FIXTURE_INSTALLED_FILES:
-        if not (fixture / required).is_file():
-            raise HarnessError(f"missing fixture: {fixture / required}")
+    required = fixture / agents_file_for(language)
+    if not required.is_file():
+        raise HarnessError(f"missing fixture: {required}")
     run_dir = make_run_dir(FIXTURE_LABELS.get(fixture_name, fixture_name))
-    write_metadata(run_dir, {"fixture": fixture_name})
+    write_metadata(run_dir, {"fixture": fixture_name, "language": language})
     # Outside run_dir on purpose: the agent must not be able to read this run's
     # transcripts and reports by walking up from its own working directory.
     workspace = make_agent_workspace(run_dir, FIXTURE_LABELS.get(fixture_name, fixture_name))
     (workspace / "bin").mkdir()
     (workspace / ".harness").mkdir()
     (run_dir / STATE_DIR).mkdir()
-    install_fixture(fixture, workspace)
+    install_fixture(fixture, workspace, language)
     build_planr(workspace / "bin" / "planr")
     # The agent's sandbox only grants writes inside the workspace, so Go's
     # user-level caches are unreachable: GOCACHE stops the first `go test`
@@ -665,9 +743,13 @@ def run_harness(args: argparse.Namespace) -> int:
         raise HarnessError("--model must not be empty")
     if not args.reasoning:
         raise HarnessError("--reasoning must not be empty")
-    initial_prompt = load_initial_prompt(args.fixture)
-    progress(f"preparing isolated repository from fixture {args.fixture} (build planr, git init)")
-    run_dir, workspace = prepare_workspace(args.fixture)
+    language = resolve_language(args.fixture, args.language)
+    initial_prompt = load_initial_prompt(args.fixture, language)
+    progress(
+        f"preparing isolated repository from fixture {args.fixture}"
+        f" in {language} (build planr, git init)"
+    )
+    run_dir, workspace = prepare_workspace(args.fixture, language)
     progress(f"run directory {run_dir.name}; workspace {workspace}")
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     write_run_metadata(
@@ -738,6 +820,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=sorted(FIXTURE_LABELS),
         default=os.environ.get("PLANR_HARNESS_FIXTURE") or DEFAULT_FIXTURE,
         help=f"evaluation fixture (default: {DEFAULT_FIXTURE})",
+    )
+    parser.add_argument(
+        "--language",
+        choices=SUPPORTED_LANGUAGES,
+        default=os.environ.get("PLANR_HARNESS_LANGUAGE") or None,
+        help="document language; overrides the fixture's own planr setting "
+        f"(default: the fixture's setting, otherwise {DEFAULT_LANGUAGE})",
     )
     parser.add_argument(
         "--model",

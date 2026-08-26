@@ -1,4 +1,4 @@
-language: ko
+language: en
 plans_dirs:
   - plans-active
   - plans-archive

@@ -834,6 +834,9 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
         f"- Session exit: `{session.get('exit_code', 'unknown')}`",
         f"- Plan completion: **{'done' if done else 'incomplete/unknown'}**",
         f"- Fixture: `{metadata.get('fixture', 'unknown')}`",
+        # Document language changes what the agent reads and writes, so runs
+        # are only comparable to each other when this line matches.
+        f"- Document language: `{metadata.get('language', 'unknown')}`",
         f"- Final `go test ./...`: `{data.get('final_test_exit') or 'not recorded'}`",
         f"- Final Git worktree (tracked files): **{worktree_state(data)}**",
         "",

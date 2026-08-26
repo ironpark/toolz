@@ -21,9 +21,9 @@ planr phase add <plan-name> <title> --work "..." --done-when "..." # 진행 중 
 
 `planr new`가 만든 초안에는 `GOALS`, `SCOPE`, `CONTEXT`, `PHASES`, `VERIFICATION`,
 `ORDERING`, `NEXT` 섹션이 순서대로 있습니다. 각 phase는 제목 뒤 YAML 펜스에 `phase`,
-`slug`, `status`, `depends_on`을 적고 `계획된 작업`과 `완료 조건`을 채웁니다. 초안
-파일의 기존 구조를 그대로 따르면 되고, 형식이 어긋나면 `planr add`가 무엇이 잘못됐는지
-알려 주며 등록을 거부합니다.
+`slug`, `status`, `depends_on`을 적고, 그 아래 두 소제목(계획된 작업과 완료 조건)을
+초안에 적힌 제목 그대로 채웁니다. 초안 파일의 기존 구조를 그대로 따르면 되고,
+형식이 어긋나면 `planr add`가 무엇이 잘못됐는지 알려 주며 등록을 거부합니다.
 
 초안에는 `TODO(planr)` 표시가 들어 있습니다. 전부 실제 내용으로 바꿔야 등록되며,
 `planr add`는 남아 있는 표시를 줄 번호와 함께 한 번에 모두 알려 줍니다. phase의

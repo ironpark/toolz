@@ -4,8 +4,9 @@ description: {{ quote .Description }}
 depends_on: [{{ join .DependsOn ", " }}]
 ---
 <!--
-planr draft. Replace every TODO(planr) line before running `planr add`;
-`add` refuses a draft that still contains one and lists all of them at once.
+planr draft. 모든 TODO(planr) 줄은 그 줄 자체를 내용으로 바꿔야 합니다. 표시 아래에
+답을 덧붙이면 표시가 그대로 남고, `planr add`는 표시가 남은 초안을 거부하며
+남은 것을 한 번에 모두 알려 줍니다.
 
 Phase yaml notes:
   phase       phase number, non-negative, unique within the plan
@@ -50,11 +51,11 @@ entry_condition: null
 
 ### 계획된 작업
 
-- TODO(planr): 이 phase에서 수행할 작업을 적는다.
+- TODO(planr): 이 줄을 이 phase에서 수행할 작업으로 바꾼다.
 
 ### 완료 조건
 
-- TODO(planr): 이 phase가 끝났다고 판정할 기준을 적는다.
+- TODO(planr): 이 줄을 이 phase가 끝났다고 판정할 기준으로 바꾼다.
 
 # VERIFICATION
 
@@ -66,4 +67,4 @@ entry_condition: null
 next_phase: 0
 ```
 
-TODO(planr): 다음에 진행할 phase를 한 줄로 설명한다.
+TODO(planr): 이 줄을 다음에 진행할 phase에 대한 한 줄 설명으로 바꾼다.

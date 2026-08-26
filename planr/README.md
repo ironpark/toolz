@@ -555,8 +555,8 @@ uv run --with pytest --project planr/scripts python -m pytest planr/scripts -q
 
 | 픽스처 파일 | 워크스페이스 |
 | --- | --- |
-| `FIXTURE.PROMPT.md` | **복사하지 않음.** 에이전트에게 보내는 요청으로만 사용됩니다 |
-| `FIXTURE.AGENTS.md` | `AGENTS.md`로 설치됩니다 |
+| `FIXTURE.PROMPT.<언어>.md` | **복사하지 않음.** 실행 언어에 해당하는 파일이 요청으로만 사용됩니다 |
+| `FIXTURE.AGENTS.<언어>.md` | 실행 언어에 해당하는 파일만 `AGENTS.md`로 설치됩니다 |
 | 그 외 파일 | 그대로 복사됩니다 |
 
 요청을 파일로 두지 않는 이유는, 디스크에서 다시 읽을 수 있는 과제 명세가 아니라 대화로
@@ -564,14 +564,45 @@ uv run --with pytest --project planr/scripts python -m pytest planr/scripts -q
 
 두 파일의 역할은 섞지 않습니다.
 
-- `FIXTURE.PROMPT.md`는 **실제 사용자가 보낼 법한 요청**입니다. planr을 언급하지 않고,
+- `FIXTURE.PROMPT.<언어>.md`는 **실제 사용자가 보낼 법한 요청**입니다. planr을 언급하지 않고,
   대신 "물어보지 말고 끝까지 알아서 진행해 달라"는 지시를 담습니다. 이후 개입이 없으므로
   완료 판단의 근거가 이 메시지뿐입니다.
-- `FIXTURE.AGENTS.md`는 **저장소·과제와 무관한 planr 사용 지침**입니다. 명령 레퍼런스,
-  초안 규격, 작업 흐름, 규칙만 담고 있어 다른 저장소에 그대로 옮겨도 됩니다.
+- `FIXTURE.AGENTS.<언어>.md`는 **저장소·과제와 무관한 planr 사용 지침**입니다. 명령
+  레퍼런스, 초안 규격, 작업 흐름, 규칙만 담고 있어 다른 저장소에 그대로 옮겨도 됩니다.
 
 요청 쪽에 워크플로를 다시 적으면 "에이전트가 AGENTS.md를 읽고 planr을 찾아 쓰는가"라는
 측정 자체가 무의미해집니다. 이 분리는 단위 테스트로 고정되어 있습니다.
+
+#### 실행 언어
+
+요청과 지침을 언어마다 하나씩 두고, 실행 언어에 맞는 파일만 사용합니다.
+
+| 언어 | 요청 | 지침 |
+| --- | --- | --- |
+| `en` | `FIXTURE.PROMPT.en.md` | `FIXTURE.AGENTS.en.md` |
+| `ko` | `FIXTURE.PROMPT.ko.md` | `FIXTURE.AGENTS.ko.md` |
+
+둘을 함께 고르는 이유는, 영어 요청에 한국어 지침이 붙으면 실행이 어느 한 언어가 아니라
+그 혼합을 측정하기 때문입니다. 언어는 다음 순서로 정해집니다.
+
+1. `--language en|ko` — 지정하면 이 값이 이깁니다. 픽스처를 고치지 않고 같은 과제를
+   두 언어로 평가할 수 있습니다. (`PLANR_HARNESS_LANGUAGE`로도 지정합니다.)
+2. 픽스처 `.planr.yaml`의 `language` 값
+3. 둘 다 없으면 planr 기본값인 `en`
+
+```sh
+planr-codex                             # 픽스처 설정을 따름
+planr-codex --language ko               # 픽스처가 en이어도 ko로 실행
+planr-codex --fixture codex-greenfield --language en
+```
+
+정해진 언어는 지침 선택에만 쓰이지 않고, 워크스페이스 `.planr.yaml`의 `language`에도
+그대로 기록됩니다. 그러지 않으면 `--language`가 **에이전트가 읽는 문서만 바꾸고 planr이
+생성하는 문서는 픽스처 언어 그대로** 남아, 실행이 언어가 아니라 그 모순을 측정하게
+됩니다.
+
+실행 언어는 `metadata.env`와 리포트의 `Document language`에 남습니다. 서로 다른 실행을
+비교할 때는 이 값이 같은지 먼저 확인해야 합니다.
 
 구현은 [`codex.py`](scripts/codex.py)에 있고, `openai-codex` 공식 Python SDK의
 `AsyncCodex`를 사용합니다. 따라서 별도의 `codex exec` 셸 호출 없이 원본 SDK 알림을 모두
@@ -602,6 +633,9 @@ planr-codex
 
 # 모델과 reasoning을 명시
 planr-codex --model gpt-5.6-luna --reasoning low
+
+# 문서 언어를 지정 (생략하면 픽스처의 language 설정)
+planr-codex --language ko
 
 # 오래 걸리는 과제라면 제한 시간을 늘립니다
 planr-codex --timeout 7200

@@ -188,7 +188,9 @@ func checkDraftPlaceholders(raw string) error {
 	if len(lines) == 0 {
 		return nil
 	}
-	return fmt.Errorf("draft still has %d unfilled %s placeholder(s):\n%s\nreplace each line with real content, then run planr add again",
+	// Naming the mistake explicitly: the common failure is answering on the
+	// following line, which leaves the marker itself untouched.
+	return fmt.Errorf("draft still has %d unfilled %s placeholder(s):\n%s\noverwrite each of these lines with real content -- adding text below a line leaves its marker in place -- then run planr add again",
 		len(lines), draftPlaceholder, strings.Join(lines, "\n"))
 }
 
