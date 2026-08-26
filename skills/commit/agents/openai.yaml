@@ -1,0 +1,6 @@
+interface:
+  display_name: "Commit"
+  short_description: "Review, stage, and create a precise Git commit"
+  default_prompt: "Use $commit to review, stage, and commit the current intended changes."
+policy:
+  allow_implicit_invocation: false
