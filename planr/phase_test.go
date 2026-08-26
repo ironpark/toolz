@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,8 @@ func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
 
 	planPath := filepath.Join(plansRoot, "00-checkout-v2", "PLAN.md")
 	assertPlanStatus(t, planPath, "done")
+	assertPlanChecklist(t, planPath, 0, true)
+	assertPlanChecklist(t, planPath, 1, true)
 
 	if _, done, err := updatePhaseStatus([]string{plansRoot}, "00-checkout-v2", 0, "planned"); err != nil {
 		t.Fatalf("reopen first phase: %v", err)
@@ -50,6 +53,25 @@ func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
 		t.Fatal("plan remained complete after reopening a phase")
 	}
 	assertPlanStatus(t, planPath, "in-progress")
+	assertPlanChecklist(t, planPath, 0, false)
+}
+
+func TestUpdatePhaseChecklist(t *testing.T) {
+	body := "# Phases\n\n- [ ] [Phase 00: API Contract](phases/00-api-contract.md)\n- [x] [Phase 01: Checkout UI](phases/01-checkout-ui.md)\n"
+	updated, err := updatePhaseChecklist(body, 0, true)
+	if err != nil {
+		t.Fatalf("updatePhaseChecklist() unexpected error: %v", err)
+	}
+	if !strings.Contains(updated, "- [x] [Phase 00: API Contract]") {
+		t.Fatalf("phase 00 was not checked:\n%s", updated)
+	}
+	updated, err = updatePhaseChecklist(updated, 1, false)
+	if err != nil {
+		t.Fatalf("updatePhaseChecklist() reset unexpected error: %v", err)
+	}
+	if !strings.Contains(updated, "- [ ] [Phase 01: Checkout UI]") {
+		t.Fatalf("phase 01 was not unchecked:\n%s", updated)
+	}
 }
 
 func TestValidatePhaseStatusChange(t *testing.T) {
@@ -103,5 +125,34 @@ func assertPlanStatus(t *testing.T, path, want string) {
 	}
 	if got, _ := front["plan_status"].(string); got != want {
 		t.Fatalf("plan_status = %q, want %q", got, want)
+	}
+}
+
+func assertPlanChecklist(t *testing.T, path string, phaseID int, wantDone bool) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read PLAN.md: %v", err)
+	}
+	_, body, err := frontmatter(string(raw))
+	if err != nil {
+		t.Fatalf("parse PLAN.md: %v", err)
+	}
+	marker := fmt.Sprintf("[Phase %02d:", phaseID)
+	open := strings.Index(body, marker)
+	if open < 2 {
+		t.Fatalf("phase %02d checklist entry not found", phaseID)
+	}
+	lineStart := strings.LastIndex(body[:open], "\n") + 1
+	line := body[lineStart:]
+	if newline := strings.IndexByte(line, '\n'); newline >= 0 {
+		line = line[:newline]
+	}
+	want := "- [ ]"
+	if wantDone {
+		want = "- [x]"
+	}
+	if !strings.Contains(line, want) {
+		t.Fatalf("phase %02d checklist line = %q, want %q", phaseID, line, want)
 	}
 }

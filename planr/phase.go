@@ -176,10 +176,42 @@ func updatePhaseStatus(planDirectories []string, planArg string, phaseID int, st
 	} else {
 		planFront["plan_status"] = "in-progress"
 	}
+	planBody, err = updatePhaseChecklist(planBody, phaseID, status == "done")
+	if err != nil {
+		return "", false, fmt.Errorf("update PLAN.md phase checklist: %w", err)
+	}
 	if err := writeFrontmatterFile(planPath, planFront, planBody); err != nil {
 		return "", false, err
 	}
 	return planDirectory, completed, nil
+}
+
+func updatePhaseChecklist(body string, phaseID int, done bool) (string, error) {
+	marker := fmt.Sprintf("[Phase %02d:", phaseID)
+	checkmark := " "
+	if done {
+		checkmark = "x"
+	}
+	lines := strings.SplitAfter(body, "\n")
+	updated := 0
+	for index, line := range lines {
+		if !strings.Contains(line, marker) || !strings.Contains(strings.TrimSpace(line), "- [") {
+			continue
+		}
+		open := strings.Index(line, "[")
+		if open < 0 || open+2 >= len(line) || line[open+2] != ']' {
+			continue
+		}
+		lines[index] = line[:open] + "[" + checkmark + "]" + line[open+3:]
+		updated++
+	}
+	if updated == 0 {
+		return body, fmt.Errorf("checklist entry for phase %02d not found", phaseID)
+	}
+	if updated > 1 {
+		return body, fmt.Errorf("multiple checklist entries found for phase %02d", phaseID)
+	}
+	return strings.Join(lines, ""), nil
 }
 
 func validatePhaseStatusChange(front map[string]any, status string) error {

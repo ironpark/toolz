@@ -196,6 +196,7 @@ phase 상태는 `planned`, `conditional`, `in-progress`, `done`을 사용합니�
 `phase set <plan-name> <phase-number> --status <status>`로 상태를 변경할 수 있습니다.
 일반적인 흐름에는 `phase start`, `phase done`, `phase reset` 단축 명령을 사용할 수
 있습니다. 각각 `in-progress`, `done`, `planned` 상태로 변경합니다.
+상태를 변경하면 해당 phase 문서의 frontmatter와 `PLAN.md`의 체크리스트가 함께 갱신됩니다.
 `phase done`은 plan 문서와 `.planr.yaml`을 제외한 미커밋 소스 변경이 있으면 실패합니다.
 아직 커밋하지 않은 변경을 의도적으로 포함해야 할 때만 `--force`로 검사를 우회합니다.
 모든 phase를 `done`으로 변경하면 `PLAN.md`의 `plan_status`도 자동으로 `done`이 되며,
@@ -210,8 +211,9 @@ checkout 출시 시나리오의 복합 상태 출력을 재현하려면 다음�
 ```
 
 스크립트는 `planr/test/work.*`에 새 격리 작업 디렉터리를 만들고, 완료된 인증 기반 plan,
-진행 중 checkout plan, checkout을 기다리는 결제 plan, 숨겨지는 무관한 완료 plan을
-생성한 뒤 `status` 출력을 보여 줍니다. 실행 결과는 Git에서 제외됩니다.
+진행 중 checkout plan, checkout을 기다리는 결제 plan, 일부 phase만 완료된 rollout plan,
+숨겨지는 무관한 완료 plan을 생성한 뒤 `status` 출력을 보여 줍니다. 실행 결과는 Git에서
+제외됩니다.
 
 실행 결과를 정리하려면 다음을 사용합니다.
 
