@@ -1,0 +1,6 @@
+.harness/
+bin/
+
+# Built CLI and its data file: run output, not source.
+/tasks
+/tasks.json

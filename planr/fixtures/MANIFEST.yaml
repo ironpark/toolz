@@ -28,3 +28,21 @@ fixtures:
       - FIXTURE.AGENTS.md: 워크스페이스에 AGENTS.md로 설치되는 저장소 지침
       - go.mod, main.go, main_test.go: 에이전트가 수정하는 샘플 Go 프로젝트
       - README.md: 샘플 프로젝트 설명
+
+  - name: codex-greenfield
+    used_by: planr/scripts/codex.py --fixture codex-greenfield
+    workspace: 시스템 임시 디렉터리 (산출물은 planr/run/<timestamp>-codex-greenfield/)
+    description: >-
+      백지 상태에서 시작하는 Codex 평가. Go 프로젝트가 없어 에이전트가 go.mod부터
+      직접 만들어야 하며, 과제는 하위 명령·플래그·JSON 저장소·오류 처리를 갖춘
+      할 일 관리 CLI다. codex-harness보다 요구사항이 많아 phase를 나눌 여지가 크다.
+    contents:
+      - .planr.yaml: 훅으로 planr 이벤트를 .harness/planr-events.log에 기록
+      - .gitignore: .harness/, bin/, 빌드된 tasks 바이너리와 tasks.json 제외
+      - FIXTURE.PROMPT.md: 에이전트에게 보내는 요청. 워크스페이스로 복사하지 않는다
+      - FIXTURE.AGENTS.md: 워크스페이스에 AGENTS.md로 설치되는 저장소 지침
+      - FIXTURE.TEST.sh: >-
+          세션 종료 후 하네스가 워크스페이스 밖에서 실행하는 인수 검사.
+          워크스페이스로 복사하지 않으므로 에이전트가 검사 내용을 보고 맞출 수 없다.
+          `CHECK<TAB>이름<TAB>PASS|FAIL<TAB>비고` 줄을 출력하면 analyze.py가
+          리포트의 "인수 검사" 표로 만든다.

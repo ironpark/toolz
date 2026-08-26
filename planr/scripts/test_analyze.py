@@ -9,7 +9,9 @@ from analyze import (
     build_transcript,
     error_excerpt,
     failed_executions,
+    fixture_check_rows,
     markdown_report,
+    parse_fixture_checks,
     planr_commands,
     read_session,
     token_breakdown_rows,
@@ -215,8 +217,56 @@ class ErrorExcerptTest(unittest.TestCase):
             error_excerpt(output).startswith("2026/08/27 01:17:19 NEXT description must not be empty")
         )
 
+    def test_go_test_failure_names_the_test_not_the_bare_summary(self) -> None:
+        # `go test` ends with three uninformative `FAIL` lines; the useful part
+        # is the named failure above them.
+        output = "\n".join(
+            [
+                "--- FAIL: TestAddListDoneRemoveAndIDs (0.00s)",
+                "    main_test.go:31: add requires exactly one non-empty title",
+                "FAIL",
+                "FAIL\texample.com/tasks\t0.364s",
+                "FAIL",
+            ]
+        )
+        excerpt = error_excerpt(output)
+        self.assertTrue(excerpt.startswith("--- FAIL: TestAddListDoneRemoveAndIDs"))
+        self.assertIn("main_test.go:31", excerpt)
+
     def test_falls_back_to_the_tail_when_nothing_looks_like_an_error(self) -> None:
         self.assertEqual(error_excerpt("a\nb\nc\nd", limit=2), "c\nd")
+
+
+class FixtureCheckTest(unittest.TestCase):
+    OUTPUT = "\n".join(
+        [
+            "some noise the script printed",
+            "CHECK\tbuild\tPASS\t",
+            "CHECK\ttag-filter\tFAIL\t--tag home 결과가 비어 있음",
+            "CHECK\tsummary\tFAIL\t1/2 실패",
+        ]
+    )
+
+    def test_only_well_formed_check_lines_are_parsed(self) -> None:
+        checks = parse_fixture_checks(self.OUTPUT + "\nCHECK\tbroken\nCHECK\tx\tMAYBE\t")
+        self.assertEqual([check["name"] for check in checks], ["build", "tag-filter", "summary"])
+        self.assertEqual(checks[1]["detail"], "--tag home 결과가 비어 있음")
+
+    def test_summary_is_a_headline_not_a_table_row(self) -> None:
+        rows = "\n".join(fixture_check_rows(parse_fixture_checks(self.OUTPUT), "1"))
+        self.assertIn("1/2 통과", rows)
+        self.assertIn("스크립트 보고: 1/2 실패", rows)
+        self.assertIn("| `tag-filter` | **FAIL** |", rows)
+        self.assertNotIn("| `summary` |", rows)
+
+    def test_fixture_without_a_script_says_so(self) -> None:
+        self.assertEqual(
+            fixture_check_rows([], ""), ["이 픽스처에는 인수 검사 스크립트가 없습니다."]
+        )
+
+    def test_script_that_produced_no_checks_is_flagged(self) -> None:
+        rows = "\n".join(fixture_check_rows([], "2"))
+        self.assertIn("CHECK 줄을 찾지 못했습니다", rows)
 
 
 class WorktreeStateTest(unittest.TestCase):

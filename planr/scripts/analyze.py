@@ -16,6 +16,7 @@ from common import (
     SESSION_EXIT,
     SESSION_LOG,
     SESSION_PROMPT,
+    PLANS_DIR,
     STATE_DIR,
     HarnessError,
     read_metadata as load_metadata,
@@ -454,9 +455,12 @@ def build_transcript(run_dir: pathlib.Path, session: SessionStats) -> str:
 
 # planr logs through the standard library logger, so its errors carry a
 # `2026/08/27 01:17:12 ` prefix; the rest catches the common shell and Go
-# failure shapes.
+# failure shapes. `--- FAIL:` names the failing test, which is what a reader
+# needs -- the bare `FAIL` summary lines `go test` ends with say nothing, so
+# they are deliberately not matched.
 ERROR_LINE = re.compile(
-    r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} |^(fatal|error|panic)\b|^\S+:\d+: |\berror\b",
+    # `\s*` on the file:line form because `go test` indents its failure detail.
+    r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} |^(fatal|error|panic)\b|^\s*--- FAIL:|^\s*\S+:\d+: |\berror\b",
     re.IGNORECASE,
 )
 
@@ -519,6 +523,7 @@ def make_observations(
     statuses: list[dict[str, Any]],
     final_test_exit: str,
     failures: list[dict[str, Any]] | None = None,
+    checks: list[dict[str, str]] | None = None,
 ) -> dict[str, list[str]]:
     actions = collections.Counter(
         action for command in commands for action in planr_actions(command)
@@ -593,6 +598,19 @@ def make_observations(
         else:
             workflow.append(f"{location} 명령이 실패했습니다 — “{first_error}”.")
 
+    # The acceptance script judges the requested behaviour, which `go test` does
+    # not: the agent writes those tests itself and they can pass while the
+    # request goes unmet.
+    failed_checks = [check for check in checks or [] if check["result"] == "FAIL" and check["name"] != "summary"]
+    if failed_checks:
+        listed = ", ".join(f"`{check['name']}`" for check in failed_checks)
+        workflow.append(
+            f"인수 검사 {len(failed_checks)}건이 실패했습니다: {listed}."
+            " 요청한 동작이 실제로 구현되지 않았습니다."
+        )
+    elif checks:
+        workflow.append("인수 검사를 모두 통과했습니다.")
+
     if final_test_exit and final_test_exit != "0":
         workflow.append(f"하네스 종료 검증 `go test ./...`가 exit {final_test_exit}로 끝났습니다.")
     elif final_test_exit == "0":
@@ -619,7 +637,10 @@ def result_data(run_dir: pathlib.Path, session: SessionStats) -> dict[str, Any]:
     statuses = parse_overview_statuses(read_text(run_dir / STATE_DIR / "final-overview.txt"))
     final_test_exit = read_text(run_dir / STATE_DIR / "final-go-test.exit")
     failures = failed_executions(session)
-    observations = make_observations(run_dir, session, commands, statuses, final_test_exit, failures)
+    checks = parse_fixture_checks(read_text(run_dir / STATE_DIR / "final-fixture-test.txt"))
+    observations = make_observations(
+        run_dir, session, commands, statuses, final_test_exit, failures, checks
+    )
     result = {
         "metadata": metadata,
         "session": {
@@ -643,6 +664,9 @@ def result_data(run_dir: pathlib.Path, session: SessionStats) -> dict[str, Any]:
         "planr_events": planr_event_lines(run_dir),
         "overview": statuses,
         "final_test_exit": final_test_exit,
+        "fixture_test_exit": read_text(run_dir / STATE_DIR / "final-fixture-test.exit"),
+        "fixture_checks": checks,
+        "plan_documents": plan_documents(run_dir),
         "final_git_status": read_text(run_dir / STATE_DIR / "final-git-status.txt"),
         # None (not "") when the capture is absent, so a run recorded before
         # this state file existed is not mistaken for a clean worktree.
@@ -652,6 +676,63 @@ def result_data(run_dir: pathlib.Path, session: SessionStats) -> dict[str, Any]:
         "overview_file": f"{STATE_DIR}/final-overview.txt",
     }
     return result
+
+
+def plan_documents(run_dir: pathlib.Path) -> list[str]:
+    """The plan documents copied out of the workspace, newest layout first."""
+
+    plans = run_dir / PLANS_DIR
+    if not plans.is_dir():
+        return []
+    return sorted(str(path.relative_to(plans)) for path in plans.rglob("*") if path.is_file())
+
+
+def parse_fixture_checks(output: str) -> list[dict[str, str]]:
+    """Read `CHECK<TAB>name<TAB>PASS|FAIL<TAB>detail` lines from a fixture script.
+
+    Anything the script prints that is not a CHECK line is ignored here; the
+    full output is kept in state/final-fixture-test.txt.
+    """
+
+    checks: list[dict[str, str]] = []
+    for line in output.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3 or parts[0] != "CHECK":
+            continue
+        result = parts[2].strip().upper()
+        if result not in ("PASS", "FAIL"):
+            continue
+        checks.append(
+            {
+                "name": parts[1].strip(),
+                "result": result,
+                "detail": parts[3].strip() if len(parts) > 3 else "",
+            }
+        )
+    return checks
+
+
+def fixture_check_rows(checks: list[dict[str, str]], exit_code: str) -> list[str]:
+    if not checks:
+        if exit_code:
+            return [
+                f"검사 스크립트가 exit {exit_code}로 끝났지만 CHECK 줄을 찾지 못했습니다."
+                " `state/final-fixture-test.txt`를 확인하세요."
+            ]
+        return ["이 픽스처에는 인수 검사 스크립트가 없습니다."]
+    # `summary` is the script's own tally; it is shown as the headline instead
+    # of a table row so the per-check rows stay one-to-one with real checks.
+    summary = next((check for check in checks if check["name"] == "summary"), None)
+    rows = [check for check in checks if check["name"] != "summary"]
+    passed = sum(1 for check in rows if check["result"] == "PASS")
+    headline = f"{passed}/{len(rows)} 통과"
+    if summary and summary["detail"]:
+        headline += f" (스크립트 보고: {summary['detail']})"
+    lines = [headline + f" · 종료 코드 `{exit_code or 'unknown'}`", "", "| 검사 | 결과 | 비고 |", "| --- | --- | --- |"]
+    for check in rows:
+        mark = "PASS" if check["result"] == "PASS" else "**FAIL**"
+        lines.append(f"| `{check['name']}` | {mark} | {check['detail'] or '—'} |")
+    return lines
 
 
 def worktree_state(data: dict[str, Any]) -> str:
@@ -734,6 +815,7 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
         f"- Reasoning effort: `{metadata.get('reasoning', 'unknown')}`",
         f"- Session exit: `{session.get('exit_code', 'unknown')}`",
         f"- Plan completion: **{'done' if done else 'incomplete/unknown'}**",
+        f"- Fixture: `{metadata.get('fixture', 'unknown')}`",
         f"- Final `go test ./...`: `{data.get('final_test_exit') or 'not recorded'}`",
         f"- Final Git worktree (tracked files): **{worktree_state(data)}**",
         "",
@@ -788,6 +870,20 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
     if data.get("planr_events"):
         event_counts = collections.Counter(line.split("|", 1)[0] for line in data["planr_events"])
         lines.extend(["", "planr hook 이벤트: " + ", ".join(f"`{key}`×{value}" for key, value in event_counts.items()) + "."])
+
+    documents = data.get("plan_documents") or []
+    lines.extend(["", "## planr 산출 문서", ""])
+    if documents:
+        lines.append(f"에이전트가 만든 계획 문서 {len(documents)}개를 `{PLANS_DIR}/`에 보관했습니다.")
+        lines.append("")
+        lines.extend(f"- `{PLANS_DIR}/{name}`" for name in documents)
+    else:
+        lines.append("보관된 계획 문서가 없습니다. 에이전트가 plan을 등록하지 않았을 수 있습니다.")
+
+    checks = data.get("fixture_checks") or []
+    if checks or data.get("fixture_test_exit"):
+        lines.extend(["", "## 인수 검사", ""])
+        lines.extend(fixture_check_rows(checks, data.get("fixture_test_exit", "")))
 
     failures = data.get("failed_commands") or []
     executed = session.get("commands_executed") or 0
@@ -856,6 +952,7 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
             "- `session.jsonl`: Codex 원본 JSONL 이벤트",
             "- `session.prompt.md`: 에이전트에게 전달한 요청",
             "- `state/`: 종료 시점의 overview/status/Git 상태와 종료 검증",
+            f"- `{PLANS_DIR}/`: 에이전트가 만든 planr 계획 문서 사본 (워크스페이스는 clean으로 사라짐)",
             "- `metrics.json`: 후속 실행과 비교할 수 있는 구조화 통계",
         ]
     )

@@ -9,6 +9,7 @@ library so the plan scenario runs without the Codex SDK installed.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import shutil
 import subprocess
@@ -28,6 +29,7 @@ SESSION_LOG = "session.jsonl"
 SESSION_PROMPT = "session.prompt.md"
 SESSION_EXIT = "session.exit"
 STATE_DIR = "state"
+PLANS_DIR = "plans"
 
 
 class HarnessError(RuntimeError):
@@ -135,6 +137,25 @@ def build_planr(destination: pathlib.Path) -> None:
         raise HarnessError(f"could not build planr (exit {build.returncode}):\n{build.stdout}")
 
 
+def force_remove_tree(path: pathlib.Path) -> None:
+    """Delete a tree, including files Go's module cache marks read-only.
+
+    `go` stores downloaded modules without write permission, so a plain
+    `rmtree` leaves most of the cache behind -- silently, when errors are
+    ignored -- and a workspace that once held one can never be cleaned up.
+    """
+
+    if not path.exists():
+        return
+    for parent, directories, files in os.walk(path):
+        for name in directories + files:
+            try:
+                os.chmod(os.path.join(parent, name), 0o700)
+            except OSError:
+                pass
+    shutil.rmtree(path, ignore_errors=True)
+
+
 def remove_runs(label: str) -> int:
     """Delete every run directory for a runner, plus any workspace it recorded."""
 
@@ -145,7 +166,7 @@ def remove_runs(label: str) -> int:
             continue
         workspace = read_metadata(path).get("workspace", "")
         if workspace:
-            shutil.rmtree(workspace, ignore_errors=True)
+            force_remove_tree(pathlib.Path(workspace))
         shutil.rmtree(path)
         removed += 1
     return removed

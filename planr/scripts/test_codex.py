@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import pathlib
+import shutil
+import subprocess
 import tempfile
 import unittest
 
 from codex import (
+    DEFAULT_FIXTURE,
     DEFAULT_REASONING,
     FIXTURE_INSTALLED_FILES,
-    FIXTURE_NAME,
+    FIXTURE_LABELS,
     FIXTURE_PROMPT_FILE,
+    FIXTURE_TEST_FILE,
+    copy_plan_artifacts,
     describe_item,
     elapsed,
     format_usage,
@@ -17,7 +22,7 @@ from codex import (
     load_initial_prompt,
     token_usage_summary,
 )
-from common import fixture_dir
+from common import PLANS_DIR, fixture_dir
 
 
 class HarnessHelpersTest(unittest.TestCase):
@@ -118,73 +123,185 @@ class ElapsedTest(unittest.TestCase):
         self.assertEqual(elapsed(3725), "1:02:05")
 
 
+# Every fixture has to satisfy the same contract, so each of these runs over
+# all of them rather than only the default one.
+ALL_FIXTURES = sorted(FIXTURE_LABELS)
+
+
 class InstallFixtureTest(unittest.TestCase):
     """The agent must see repository content, never the evaluation's own files."""
+
+    def workspace_for(self, fixture: str) -> pathlib.Path:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        workspace = pathlib.Path(directory.name) / "repo"
+        install_fixture(fixture_dir(fixture), workspace)
+        return workspace
+
+    def test_no_fixture_prefixed_file_reaches_the_workspace(self) -> None:
+        for fixture in ALL_FIXTURES:
+            with self.subTest(fixture=fixture):
+                workspace = self.workspace_for(fixture)
+                self.assertEqual([p.name for p in workspace.rglob("FIXTURE.*")], [])
+                self.assertFalse((workspace / FIXTURE_PROMPT_FILE).exists())
+                # The acceptance script grades the result; an agent that could
+                # read it could satisfy the checks instead of the request.
+                self.assertFalse((workspace / FIXTURE_TEST_FILE).exists())
+
+    def test_instructions_are_installed_under_the_expected_name(self) -> None:
+        for fixture in ALL_FIXTURES:
+            with self.subTest(fixture=fixture):
+                workspace = self.workspace_for(fixture)
+                for source, installed in FIXTURE_INSTALLED_FILES.items():
+                    target = workspace / installed
+                    self.assertTrue(target.is_file(), f"{installed} missing")
+                    self.assertEqual(
+                        target.read_text(encoding="utf-8"),
+                        (fixture_dir(fixture) / source).read_text(encoding="utf-8"),
+                    )
+
+    def test_every_non_fixture_file_is_copied(self) -> None:
+        for fixture in ALL_FIXTURES:
+            with self.subTest(fixture=fixture):
+                source_dir = fixture_dir(fixture)
+                workspace = self.workspace_for(fixture)
+                expected = {
+                    path.relative_to(source_dir)
+                    for path in source_dir.rglob("*")
+                    if path.is_file() and not path.name.startswith("FIXTURE.")
+                }
+                self.assertTrue(expected, f"{fixture} has no repository content")
+                for relative in expected:
+                    self.assertTrue((workspace / relative).is_file(), f"{relative} missing")
+
+    def test_greenfield_fixture_ships_no_go_scaffolding(self) -> None:
+        # Its whole point is that the agent sets the project up itself.
+        workspace = self.workspace_for("codex-greenfield")
+        self.assertEqual([p.name for p in workspace.rglob("*.go")], [])
+        self.assertFalse((workspace / "go.mod").exists())
+
+
+class CopyPlanArtifactsTest(unittest.TestCase):
+    """The workspace is temporary, so the plans must be copied out of it."""
 
     def setUp(self) -> None:
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        self.workspace = pathlib.Path(directory.name) / "repo"
-        install_fixture(fixture_dir(FIXTURE_NAME), self.workspace)
+        root = pathlib.Path(directory.name)
+        self.workspace = root / "workspace"
+        self.run_dir = root / "run"
+        self.run_dir.mkdir(parents=True)
+        plan = self.workspace / "plans-active" / "00-demo"
+        (plan / "phases").mkdir(parents=True)
+        (plan / "PLAN.md").write_text("---\nplan_status: done\n---\n", encoding="utf-8")
+        (plan / "phases" / "00-initial.md").write_text("---\nstatus: done\n---\n", encoding="utf-8")
+        (self.workspace / "demo.md").write_text(
+            '---\nplan_name: demo\ndescription: "x"\n---\n# GOALS\n', encoding="utf-8"
+        )
+        (self.workspace / "README.md").write_text("# not a plan\n", encoding="utf-8")
+        (self.workspace / "main.go").write_text("package main\n", encoding="utf-8")
+        for name in (".git", ".harness", "bin"):
+            (self.workspace / name).mkdir()
 
-    def test_no_fixture_prefixed_file_reaches_the_workspace(self) -> None:
-        leaked = [p.name for p in self.workspace.rglob("FIXTURE.*")]
-        self.assertEqual(leaked, [])
+    def test_plan_directories_and_drafts_are_copied(self) -> None:
+        copied = copy_plan_artifacts(self.workspace, self.run_dir)
+        self.assertIn("demo.md", copied)
+        self.assertIn(str(pathlib.Path("plans-active/00-demo/PLAN.md")), copied)
+        self.assertIn(str(pathlib.Path("plans-active/00-demo/phases/00-initial.md")), copied)
+        self.assertTrue((self.run_dir / PLANS_DIR / "plans-active" / "00-demo" / "PLAN.md").is_file())
 
-    def test_prompt_is_not_copied(self) -> None:
-        self.assertFalse((self.workspace / FIXTURE_PROMPT_FILE).exists())
+    def test_source_files_and_plain_markdown_are_left_out(self) -> None:
+        copied = copy_plan_artifacts(self.workspace, self.run_dir)
+        self.assertNotIn("README.md", copied)
+        self.assertNotIn("main.go", copied)
+        self.assertFalse((self.run_dir / PLANS_DIR / "README.md").exists())
 
-    def test_instructions_are_installed_under_the_expected_name(self) -> None:
-        for source, installed in FIXTURE_INSTALLED_FILES.items():
-            target = self.workspace / installed
-            self.assertTrue(target.is_file(), f"{installed} missing")
-            self.assertEqual(
-                target.read_text(encoding="utf-8"),
-                (fixture_dir(FIXTURE_NAME) / source).read_text(encoding="utf-8"),
-            )
+    def test_plan_directories_are_found_by_shape_not_by_name(self) -> None:
+        # A fixture may name its plans_dirs anything; the on-disk signature is
+        # a child directory holding PLAN.md.
+        renamed = self.workspace / "custom-plan-home" / "00-demo"
+        renamed.mkdir(parents=True)
+        (renamed / "PLAN.md").write_text("---\n---\n", encoding="utf-8")
+        copied = copy_plan_artifacts(self.workspace, self.run_dir)
+        self.assertIn(str(pathlib.Path("custom-plan-home/00-demo/PLAN.md")), copied)
 
-    def test_repository_content_is_copied(self) -> None:
-        for name in ("main.go", "main_test.go", "go.mod", "README.md", ".planr.yaml"):
-            self.assertTrue((self.workspace / name).is_file(), f"{name} missing")
+    def test_workspace_without_plans_copies_nothing(self) -> None:
+        (self.workspace / "demo.md").unlink()
+        shutil.rmtree(self.workspace / "plans-active")
+        self.assertEqual(copy_plan_artifacts(self.workspace, self.run_dir), [])
+
+
+class FixtureTestScriptTest(unittest.TestCase):
+    def test_greenfield_ships_an_acceptance_script(self) -> None:
+        self.assertTrue((fixture_dir("codex-greenfield") / FIXTURE_TEST_FILE).is_file())
+
+    def test_every_acceptance_script_is_valid_bash(self) -> None:
+        for fixture in ALL_FIXTURES:
+            script = fixture_dir(fixture) / FIXTURE_TEST_FILE
+            if not script.is_file():
+                continue
+            with self.subTest(fixture=fixture):
+                result = subprocess.run(
+                    ["bash", "-n", str(script)], capture_output=True, text=True
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_acceptance_script_reads_the_workspace_from_the_environment(self) -> None:
+        # The harness passes the workspace this way; a script that hardcoded a
+        # path would silently grade the wrong directory.
+        script = (fixture_dir("codex-greenfield") / FIXTURE_TEST_FILE).read_text(encoding="utf-8")
+        self.assertIn("PLANR_EVAL_WORKSPACE", script)
 
 
 class InitialPromptTest(unittest.TestCase):
-    def test_loads_from_the_fixture(self) -> None:
-        self.assertTrue(load_initial_prompt().strip())
+    def test_loads_from_every_fixture(self) -> None:
+        for fixture in ALL_FIXTURES:
+            with self.subTest(fixture=fixture):
+                self.assertTrue(load_initial_prompt(fixture).strip())
 
     def test_reads_as_a_user_request_not_harness_policy(self) -> None:
         # The planr workflow belongs in AGENTS.md; if it leaks back into the
         # prompt the run stops measuring whether the agent finds it there.
-        prompt = load_initial_prompt()
-        for policy in ("planr", "phase", "--force"):
-            self.assertNotIn(policy, prompt, f"{policy!r} belongs in AGENTS.md")
+        for fixture in ALL_FIXTURES:
+            with self.subTest(fixture=fixture):
+                prompt = load_initial_prompt(fixture)
+                for policy in ("planr", "phase", "--force"):
+                    self.assertNotIn(policy, prompt, f"{policy!r} belongs in AGENTS.md")
 
     def test_asks_the_agent_to_finish_on_its_own(self) -> None:
         # Nothing nudges the agent after this message, so the request itself
         # has to say "keep going until it is done".
-        self.assertIn("끝까지", load_initial_prompt())
+        for fixture in ALL_FIXTURES:
+            with self.subTest(fixture=fixture):
+                self.assertIn("끝까지", load_initial_prompt(fixture))
+
+    def test_default_fixture_is_a_known_one(self) -> None:
+        self.assertIn(DEFAULT_FIXTURE, FIXTURE_LABELS)
 
 
 class InstalledInstructionsTest(unittest.TestCase):
-    def setUp(self) -> None:
-        self.agents = (fixture_dir(FIXTURE_NAME) / "FIXTURE.AGENTS.md").read_text(encoding="utf-8")
-
     def test_carries_the_planr_workflow(self) -> None:
-        for policy in ("planr new", "planr add", "planr overview", "phase done", "--force"):
-            self.assertIn(policy, self.agents)
+        for fixture in ALL_FIXTURES:
+            with self.subTest(fixture=fixture):
+                agents = (fixture_dir(fixture) / "FIXTURE.AGENTS.md").read_text(encoding="utf-8")
+                for policy in ("planr new", "planr add", "planr overview", "phase done", "--force"):
+                    self.assertIn(policy, agents)
 
     def test_is_independent_of_this_repository(self) -> None:
         # These instructions must drop into any repository unchanged, so they
         # may not name anything that only exists in this sample project.
-        fixture = fixture_dir(FIXTURE_NAME)
-        names = {
-            path.name
-            for path in fixture.rglob("*")
-            if path.is_file() and not path.name.startswith("FIXTURE.")
-        }
-        for name in names - {".planr.yaml", "README.md", ".gitignore"}:
-            self.assertNotIn(name, self.agents, f"{name!r} only exists in this fixture")
-        self.assertTrue(names, "fixture has no repository content to check against")
+        for fixture in ALL_FIXTURES:
+            with self.subTest(fixture=fixture):
+                source_dir = fixture_dir(fixture)
+                agents = (source_dir / "FIXTURE.AGENTS.md").read_text(encoding="utf-8")
+                names = {
+                    path.name
+                    for path in source_dir.rglob("*")
+                    if path.is_file() and not path.name.startswith("FIXTURE.")
+                }
+                for name in names - {".planr.yaml", "README.md", ".gitignore"}:
+                    self.assertNotIn(name, agents, f"{name!r} only exists in this fixture")
+                self.assertTrue(names, "fixture has no repository content to check against")
 
 
 if __name__ == "__main__":
