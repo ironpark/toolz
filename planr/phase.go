@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/goccy/go-yaml"
@@ -91,8 +93,19 @@ func phaseCommand(cmd *cli.Command, status string) error {
 		return err
 	}
 	fmt.Printf("Updated %s phase %02d: %s\n", planDirectory, phaseID, status)
+	// Link the completion to the commit it landed on, for `planr notes`.
+	if status == "done" {
+		if err := recordCompletionNote(repoRoot, planDirectory, hookEventDone, phaseID); err != nil {
+			warnNoteFailure(err)
+		}
+	}
 	if completed {
 		fmt.Printf("Plan %s marked done\n", planDirectory)
+		if !planWasDone {
+			if err := recordCompletionNote(repoRoot, planDirectory, hookEventPlanDone, -1); err != nil {
+				warnNoteFailure(err)
+			}
+		}
 	}
 	if err := runConfiguredHooks(repoRoot, settings, "after", event, planDirectory, phaseID, status); err != nil {
 		return err
@@ -298,6 +311,12 @@ func updatePhaseStatus(planDirectories []string, planArg string, phaseID int, st
 		return "", false, fmt.Errorf("%s phase %02d: %w", planDirectory, phaseID, err)
 	}
 	phaseFront["status"] = status
+	// completed_at records when the phase reached done; reopening it clears the stamp.
+	if status == "done" {
+		phaseFront["completed_at"] = completionTimestamp()
+	} else {
+		delete(phaseFront, "completed_at")
+	}
 	if err := writeFrontmatterFile(phasePath, phaseFront, phaseBody); err != nil {
 		return "", false, err
 	}
@@ -324,8 +343,10 @@ func updatePhaseStatus(planDirectories []string, planArg string, phaseID int, st
 	}
 	if completed {
 		planFront["plan_status"] = "done"
+		planFront["completed_at"] = completionTimestamp()
 	} else {
 		planFront["plan_status"] = "in-progress"
+		delete(planFront, "completed_at")
 	}
 	planBody, err = updatePhaseChecklist(planBody, phaseID, status == "done")
 	if err != nil {
@@ -431,7 +452,7 @@ func findPhaseFile(planRoot string, phaseID int) (string, error) {
 }
 
 func writeFrontmatterFile(path string, front map[string]any, body string) error {
-	header, err := yaml.Marshal(front)
+	header, err := yaml.Marshal(pruneEmptyMeta(front))
 	if err != nil {
 		return fmt.Errorf("encode %s frontmatter: %w", filepath.Base(path), err)
 	}
@@ -440,4 +461,40 @@ func writeFrontmatterFile(path string, front map[string]any, body string) error 
 		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
 	}
 	return nil
+}
+
+// pruneEmptyMeta drops keys whose value carries no information: nil, empty
+// strings, and empty collections. Plan documents are read by humans, so an
+// unset field is better left out than written as `key: null` or `key: []`.
+// Booleans and numbers are kept, since false and 0 are real values.
+// completionTimestamp is the stamp written into completed_at frontmatter.
+func completionTimestamp() string {
+	return time.Now().UTC().Format(time.RFC3339)
+}
+
+func pruneEmptyMeta(front map[string]any) map[string]any {
+	for key, value := range front {
+		if isEmptyMeta(value) {
+			delete(front, key)
+		}
+	}
+	return front
+}
+
+func isEmptyMeta(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(typed) == ""
+	case *string:
+		return typed == nil || strings.TrimSpace(*typed) == ""
+	}
+	switch reflected := reflect.ValueOf(value); reflected.Kind() {
+	case reflect.Slice, reflect.Map, reflect.Array:
+		return reflected.Len() == 0
+	case reflect.Ptr, reflect.Interface:
+		return reflected.IsNil()
+	}
+	return false
 }

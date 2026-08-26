@@ -14,6 +14,15 @@
 - [라이프사이클](#라이프사이클)
 - [개발](#개발) — 기여자용: [실행기](#실행기), [실행 디렉터리](#실행-디렉터리), [Codex 평가](#codex-평가)
 
+## 요구 사항
+
+planr은 git 저장소 안에서만 동작합니다. 완료 기록을 git note로 남기고, phase 완료 시
+작업 트리 상태를 확인하기 때문입니다. 저장소 밖에서 실행하면 명령이 다음과 같이 중단됩니다.
+
+```text
+planr requires a git repository, but /tmp/scratch is not inside one; run `git init` at your project root first
+```
+
 ## 설치
 
 Go가 설치되어 있다면 다음 명령으로 최신 버전을 설치할 수 있습니다.
@@ -55,6 +64,7 @@ planr phase done checkout-v2 1
 | `planr phase add <plan-name> <title>` | 열린 plan에 phase를 추가합니다 |
 | `planr phase set <plan-name> <number> --status <status>` | phase 상태를 지정한 값으로 변경합니다 |
 | `planr phase start\|done\|reset <plan-name> <number>` | phase 상태 변경 단축 명령입니다 |
+| `planr notes [plan-name]` | 커밋에 연결된 완료 기록을 조회합니다 |
 
 ### plan 등록
 
@@ -213,6 +223,48 @@ plans-active/
 `PLAN.md` frontmatter에는 plan 수준 설명·등록 시각·의존성·상태를 저장합니다.
 `registered_at`은 초안 생성 시각이 아니라 `add`로 plan을 등록한 시각이 UTC RFC3339
 형식으로 자동 기록됩니다.
+
+값이 비어 있는 항목은 frontmatter에 쓰지 않습니다. 의존성이 없으면 `depends_on: []`
+대신 키 자체가 없고, `succeeded_by: null` 같은 줄도 남지 않습니다. `false`와 `0`은
+의미 있는 값이므로 그대로 유지됩니다.
+
+## 완료 기록
+
+phase나 plan이 `done`이 되면 두 가지가 자동으로 기록됩니다.
+
+**1. `completed_at` frontmatter** — 완료 시각(UTC RFC3339)이 해당 phase 문서와,
+plan 전체가 끝난 경우 `PLAN.md`에 기록됩니다. phase를 다시 열면 두 값 모두 지워지므로
+오래된 날짜가 남지 않습니다.
+
+**2. git note** — 완료 시점의 `HEAD` 커밋에 `refs/notes/planr` 노트를 붙여
+"이 완료가 어느 커밋에서 이뤄졌는지"를 남깁니다. 노트는 커밋 객체를 바꾸지 않으므로
+히스토리를 다시 쓰지 않습니다.
+
+```text
+planr plan=00-checkout-v2 event=done phase=01 at=2026-08-27T02:11:40Z
+planr plan=00-checkout-v2 event=plan_done at=2026-08-27T02:11:40Z
+```
+
+기록된 내용은 `planr notes`로 조회합니다.
+
+```sh
+# 전체 완료 기록
+planr notes
+
+# 특정 plan만
+planr notes 00-checkout-v2
+```
+
+```text
+COMPLETED             PLAN          EVENT      COMMIT   SUBJECT
+2026-08-27T02:11:40Z  00-demo-plan  done 00    50eb786  add demo plan
+2026-08-27T02:11:40Z  00-demo-plan  plan_done  50eb786  add demo plan
+```
+
+노트는 go-git으로 직접 기록하므로 `git` 실행 파일이 없어도 동작하고, 표준 git notes
+포맷이라 `git notes --ref=planr show <commit>` 이나 `git log --notes=refs/notes/planr`
+로도 그대로 읽힙니다. 노트를 남기지 못해도 완료 처리 자체는 유지되고 경고만 표준 오류로
+출력합니다.
 
 ```yaml
 ---

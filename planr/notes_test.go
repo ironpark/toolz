@@ -1,0 +1,211 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
+)
+
+// seedRepository builds a repository with one commit so notes have a target.
+func seedRepository(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	repository, err := git.PlainInit(root, false)
+	if err != nil {
+		t.Fatalf("git.PlainInit() unexpected error: %v", err)
+	}
+	worktree, err := repository.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "seed.txt"), []byte("seed\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree.Add("seed.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree.Commit("seed commit", &git.CommitOptions{
+		Author: &object.Signature{Name: "planr", Email: "planr@example.com", When: time.Now()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func testDraft() draft {
+	return draft{
+		Name:         "checkout-v2",
+		Description:  "checkout flow refresh",
+		NextPhase:    0,
+		NextText:     "Implement the API contract.",
+		Goals:        "Ship checkout.",
+		Scope:        "Checkout only.",
+		Context:      "Existing checkout.",
+		Verification: "go test ./...",
+		Ordering:     "API before UI.",
+		Phases: []draftPhase{
+			{Title: "API Contract", Meta: phaseMeta{Phase: 0, Slug: "api-contract", Status: "planned"}, Planned: "Add the API.", Completion: "API tests pass."},
+		},
+	}
+}
+
+func TestFrontmatterOmitsEmptyMetadata(t *testing.T) {
+	plansRoot := t.TempDir()
+	planRoot := filepath.Join(plansRoot, "00-checkout-v2")
+	if err := writePlan(planRoot, testDraft(), "00-checkout-v2"); err != nil {
+		t.Fatalf("writePlan() unexpected error: %v", err)
+	}
+
+	for _, path := range []string{
+		filepath.Join(planRoot, "PLAN.md"),
+		filepath.Join(planRoot, "phases", "00-api-contract.md"),
+	} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		front, _, err := frontmatter(string(raw))
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for key, value := range front {
+			if isEmptyMeta(value) {
+				t.Errorf("%s kept empty metadata %q: %#v", filepath.Base(path), key, value)
+			}
+		}
+	}
+
+	// The plan had no dependencies and no successors, so those keys are absent.
+	raw, _ := os.ReadFile(filepath.Join(planRoot, "PLAN.md"))
+	for _, key := range []string{"depends_on", "succeeded_by", "preceded_by"} {
+		if strings.Contains(string(raw), key+":") {
+			t.Errorf("PLAN.md still writes empty %q", key)
+		}
+	}
+}
+
+func TestCompletionStampsFrontmatter(t *testing.T) {
+	plansRoot := t.TempDir()
+	planRoot := filepath.Join(plansRoot, "00-checkout-v2")
+	if err := writePlan(planRoot, testDraft(), "00-checkout-v2"); err != nil {
+		t.Fatalf("writePlan() unexpected error: %v", err)
+	}
+
+	if _, done, err := updatePhaseStatus([]string{plansRoot}, "checkout-v2", 0, "done"); err != nil || !done {
+		t.Fatalf("complete phase: done=%v err=%v", done, err)
+	}
+	phaseStamp := frontmatterValue(t, filepath.Join(planRoot, "phases", "00-api-contract.md"), "completed_at")
+	planStamp := frontmatterValue(t, filepath.Join(planRoot, "PLAN.md"), "completed_at")
+	if phaseStamp == "" || planStamp == "" {
+		t.Fatalf("completed_at missing: phase=%q plan=%q", phaseStamp, planStamp)
+	}
+
+	// Reopening must clear both stamps so a stale date never lingers.
+	if _, _, err := updatePhaseStatus([]string{plansRoot}, "checkout-v2", 0, "planned"); err != nil {
+		t.Fatalf("reopen phase: %v", err)
+	}
+	if got := frontmatterValue(t, filepath.Join(planRoot, "phases", "00-api-contract.md"), "completed_at"); got != "" {
+		t.Errorf("phase completed_at survived reopening: %q", got)
+	}
+	if got := frontmatterValue(t, filepath.Join(planRoot, "PLAN.md"), "completed_at"); got != "" {
+		t.Errorf("plan completed_at survived reopening: %q", got)
+	}
+}
+
+func frontmatterValue(t *testing.T, path, key string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	front, _, err := frontmatter(string(raw))
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	value, _ := front[key].(string)
+	return value
+}
+
+func TestRecordAndReadCompletionNotes(t *testing.T) {
+	repoRoot := seedRepository(t)
+
+	if err := recordCompletionNote(repoRoot, "00-checkout-v2", hookEventDone, 3); err != nil {
+		t.Fatalf("record phase note: %v", err)
+	}
+	if err := recordCompletionNote(repoRoot, "00-checkout-v2", hookEventPlanDone, -1); err != nil {
+		t.Fatalf("record plan note: %v", err)
+	}
+	if err := recordCompletionNote(repoRoot, "01-other", hookEventPlanDone, -1); err != nil {
+		t.Fatalf("record other plan note: %v", err)
+	}
+
+	notes, err := readPlanNotes(repoRoot, "")
+	if err != nil {
+		t.Fatalf("readPlanNotes() unexpected error: %v", err)
+	}
+	if len(notes) != 3 {
+		t.Fatalf("expected 3 notes, got %d: %#v", len(notes), notes)
+	}
+	for _, note := range notes {
+		if note.subject != "seed commit" || note.shortHash == "" {
+			t.Errorf("note not linked to the commit: %#v", note)
+		}
+	}
+
+	filtered, err := readPlanNotes(repoRoot, "00-checkout-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("plan filter returned %d notes, want 2", len(filtered))
+	}
+	var phase string
+	for _, note := range filtered {
+		if note.event == hookEventDone {
+			phase = note.phase
+		}
+	}
+	if phase != "03" {
+		t.Errorf("phase number not recorded, got %q", phase)
+	}
+}
+
+func TestReadPlanNotesWithoutRecords(t *testing.T) {
+	repoRoot := t.TempDir()
+	if _, err := git.PlainInit(repoRoot, false); err != nil {
+		t.Fatal(err)
+	}
+	notes, err := readPlanNotes(repoRoot, "")
+	if err != nil {
+		t.Fatalf("empty notes ref should not error: %v", err)
+	}
+	if len(notes) != 0 {
+		t.Fatalf("expected no notes, got %d", len(notes))
+	}
+}
+
+func TestEnsureGitRepository(t *testing.T) {
+	repoRoot := seedRepository(t)
+	nested := filepath.Join(repoRoot, "plans", "00-demo")
+	if err := os.MkdirAll(nested, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// A subdirectory of the repository counts as inside it.
+	if err := ensureGitRepository(nested); err != nil {
+		t.Errorf("nested path rejected: %v", err)
+	}
+
+	outside := t.TempDir()
+	err := ensureGitRepository(outside)
+	if err == nil {
+		t.Fatal("expected an error outside a git repository")
+	}
+	if !strings.Contains(err.Error(), "git init") {
+		t.Errorf("error does not tell the user what to do: %v", err)
+	}
+}
