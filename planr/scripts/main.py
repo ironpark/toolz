@@ -2,8 +2,8 @@
 """Entry point for the planr development scripts.
 
 Two runners live here.  ``scenario`` reproduces the checkout release output and
-needs nothing but the standard library; ``codex`` drives a multi-turn Codex
-evaluation and needs the ``openai-codex`` SDK, so it is imported only when that
+needs nothing but the standard library; ``codex`` drives a Codex evaluation
+and needs the ``openai-codex`` SDK, so it is imported only when that
 command is actually requested.
 """
 
@@ -19,7 +19,7 @@ Usage: python3 planr/scripts/main.py <command> [options]
 
 Commands:
   scenario [clean]      reproduce the checkout release status/overview output
-  codex [options]       run an isolated multi-turn Codex evaluation
+  codex [options]       run an isolated Codex evaluation
   codex analyze <dir>   re-analyze a previous Codex run
   codex clean           remove Codex run directories
 

@@ -12,7 +12,7 @@
 - [저장 구조](#저장-구조)
 - [초안 규격](#초안-규격) — [frontmatter](#frontmatter), [섹션](#섹션), [PHASE 블록](#phase-블록), [의존성](#의존성)
 - [라이프사이클](#라이프사이클)
-- [개발](#개발) — 기여자용: [실행기](#실행기), [실행 디렉터리](#실행-디렉터리), [Codex 멀티턴 평가](#codex-멀티턴-평가)
+- [개발](#개발) — 기여자용: [실행기](#실행기), [실행 디렉터리](#실행-디렉터리), [Codex 평가](#codex-평가)
 
 ## 설치
 
@@ -343,7 +343,7 @@ phase 상태는 `planned`, `conditional`, `in-progress`, `done`을 사용합니�
 | --- | --- | --- |
 | `main.py scenario` | checkout 출시 시나리오의 `status`·`overview` 출력을 재현 | `python3`, `go` |
 | `main.py scenario clean` | 시나리오 실행 디렉터리 삭제 | `python3` |
-| `main.py codex` | 격리 저장소에서 Codex 멀티턴 평가 실행 | `uv`, `go`, `git`, Codex 로그인 |
+| `main.py codex` | 격리 저장소에서 Codex 평가 실행 | `uv`, `go`, `git`, Codex 로그인 |
 | `main.py codex analyze <dir>` | 이전 실행 재분석 | `python3` |
 | `main.py codex clean` | Codex 실행 디렉터리와 작업공간 삭제 | `python3` |
 
@@ -364,7 +364,7 @@ Codex SDK는 실제로 평가를 실행할 때만 불러오므로, `scenario`와
 ```text
 planr/run/
 ├── 20260826-123846-scenario/   시나리오 작업 디렉터리 겸 산출물
-└── 20260826-123851-codex/      Codex 평가 산출물 (REPORT.md, transcript.md, turns/, state/, metrics.json)
+└── 20260826-123851-codex/      Codex 평가 산출물 (REPORT.md, transcript.md, session.jsonl, state/, metrics.json)
 ```
 
 Codex 평가에서 **에이전트의 작업공간은 `planr/run/` 밖**, 시스템 임시 디렉터리에
@@ -423,17 +423,43 @@ go vet ./...
 uv run --with pytest --project planr/scripts python -m pytest planr/scripts -q
 ```
 
-### Codex 멀티턴 평가
+### Codex 평가
 
 실행기는 매번 시스템 임시 디렉터리에 격리된 Git 리포지토리를 만들고, 그 안에
-`codex-harness` 픽스처의 `AGENT.md`, `AGENTS.md`, 샘플 Go 프로젝트와 `planr`
-바이너리를 준비합니다. 산출물은 이 리포지토리가 아니라
-`planr/run/<타임스탬프>-codex/`에 쌓입니다. 작업 목표는 워크스페이스에 파일로 두지 않고
-[`goal.md`](scripts/goal.md)를 읽어 첫 turn의 프롬프트에 실어 전달합니다.
+`codex-harness` 픽스처의 `AGENTS.md`, 샘플 Go 프로젝트와 `planr` 바이너리를
+준비합니다. 산출물은 이 리포지토리가 아니라 `planr/run/<타임스탬프>-codex/`에
+쌓입니다.
+
+픽스처의 `FIXTURE.` 접두사 파일은 평가 설정이지 저장소 내용이 아니므로 워크스페이스로
+그대로 복사되지 않습니다.
+
+| 픽스처 파일 | 워크스페이스 |
+| --- | --- |
+| `FIXTURE.PROMPT.md` | **복사하지 않음.** 에이전트에게 보내는 요청으로만 사용됩니다 |
+| `FIXTURE.AGENTS.md` | `AGENTS.md`로 설치됩니다 |
+| 그 외 파일 | 그대로 복사됩니다 |
+
+요청을 파일로 두지 않는 이유는, 디스크에서 다시 읽을 수 있는 과제 명세가 아니라 대화로
+받은 요청만으로 일하는 상황을 재현하기 위해서입니다.
+
+두 파일의 역할은 섞지 않습니다.
+
+- `FIXTURE.PROMPT.md`는 **실제 사용자가 보낼 법한 요청**입니다. planr을 언급하지 않고,
+  대신 "물어보지 말고 끝까지 알아서 진행해 달라"는 지시를 담습니다. 이후 개입이 없으므로
+  완료 판단의 근거가 이 메시지뿐입니다.
+- `FIXTURE.AGENTS.md`는 **저장소·과제와 무관한 planr 사용 지침**입니다. 명령 레퍼런스,
+  초안 규격, 작업 흐름, 규칙만 담고 있어 다른 저장소에 그대로 옮겨도 됩니다.
+
+요청 쪽에 워크플로를 다시 적으면 "에이전트가 AGENTS.md를 읽고 planr을 찾아 쓰는가"라는
+측정 자체가 무의미해집니다. 이 분리는 단위 테스트로 고정되어 있습니다.
 
 구현은 [`codex.py`](scripts/codex.py)에 있고, `openai-codex` 공식 Python SDK의
-`AsyncCodex`와 하나의 `Thread`를 사용해 여러 turn을 이어 갑니다. 따라서 별도의
-`codex exec`/`resume` 셸 호출 없이 대화 컨텍스트와 원본 SDK 알림을 모두 보존합니다.
+`AsyncCodex`를 사용합니다. 따라서 별도의 `codex exec` 셸 호출 없이 원본 SDK 알림을 모두
+보존합니다.
+
+요청은 **한 번만** 보내고, 이후에는 개입하지 않습니다. "계속해" 같은 후속 프롬프트가
+없으므로 에이전트가 스스로 완료를 판단해야 하며, 리포트는 그 결과를 측정합니다.
+따라서 `--timeout`(기본 3600초)은 **작업 전체**에 주어지는 시간입니다.
 기본 모델은 `gpt-5.6-luna`, reasoning은 `medium`입니다. SDK 사용법은
 [공식 Python SDK 문서](https://github.com/openai/codex/tree/main/sdk/python)를 기준으로
 합니다.
@@ -451,28 +477,66 @@ Codex 인증은 로컬 Codex 설정을 사용하므로, 실제 실행 전 Codex 
 # 아래 예시는 이 별칭을 사용합니다
 alias planr-codex='uv run --locked --project planr/scripts python planr/scripts/main.py codex'
 
-# 기본 4-turn 실행
+# 기본 실행 (에이전트가 완료를 판단할 때까지 진행)
 planr-codex
 
-# turn 수와 모델을 명시 (각 turn은 같은 SDK Thread에서 실행)
-planr-codex --turns 5 --model gpt-5.6-luna --reasoning medium
+# 모델과 reasoning을 명시
+planr-codex --model gpt-5.6-luna --reasoning low
+
+# 오래 걸리는 과제라면 제한 시간을 늘립니다
+planr-codex --timeout 7200
 
 # Codex를 호출하지 않고 격리 저장소와 산출물 경로만 점검
 planr-codex --dry-run
+
+# 진행 로그 없이 실행
+planr-codex --quiet
 
 # 이전 실행 재분석 또는 임시 실행공간 정리
 planr-codex analyze planr/run/20260826-123851-codex
 planr-codex clean
 ```
 
+#### 진행 로그
+
+한 번의 세션이 최대 `--timeout`(기본 3600초)까지 이어지므로, 실행 중에는 진행 상황을
+**stderr**로 계속 출력합니다. 최종 결과 경로는 stdout으로 나가므로 `> paths.txt`처럼
+갈라 받아도 로그는 그대로 볼 수 있습니다. `--quiet`로 끌 수 있습니다.
+
+```text
+[   0:00] preparing isolated repository (copy fixture, build planr, git init)
+[   0:02] run directory 20260827-101500-codex; workspace /var/folders/.../planr-codex-ab12
+[   0:03] thread th_01J started on gpt-5.6-luna (reasoning low)
+[   0:03] session started (612 prompt chars)
+[   0:24]   think  Read AGENTS.md, then plan the work
+[   0:31]   cmd  planr new json-output --description "..."
+[   1:02]   edit  main.go, main_test.go
+[   1:14]   cmd  go test ./... (exit 1)
+[   1:48]   say  Phase 0 done: added the parser and its tests.
+...
+[41:52] session completed in 41:49 · 87 items · 268.4k tokens (in 240.1k / out 28.3k)
+[42:10] running final verification (go test) and capturing end state
+[42:18] final go test exit 0; writing report
+```
+
+- 맨 앞은 실행 시작 이후 경과 시간입니다.
+- 들여쓴 줄은 에이전트가 한 일입니다. `cmd`(명령 실행), `edit`(파일 변경),
+  `say`(에이전트 메시지), `think`(추론), `tool`, `search`, `todo`, `error`로 구분됩니다.
+- 세션 종료 줄에는 소요 시간, 항목 수, 토큰 사용량이 함께 표시됩니다.
+- 타임아웃·실패도 각각 한 줄로 남으므로, 로그가 멈춰 있으면 그때는 실제로 모델이
+  응답을 기다리는 중입니다.
+
+전체 알림 원본이 필요하면 실행 중에도 `session.jsonl`을 직접 `tail -f` 할 수 있습니다.
+
 실행이 끝나면 실행 디렉터리에 다음 산출물이 남습니다.
 
 | 파일 | 내용 |
 | --- | --- |
-| `REPORT.md` | plan 완료 여부, turn별 exit·이벤트·input/output/total token, 관찰된 `planr` 명령과 도구 호출 누락, 지침이 불명확했을 가능성이 있는 지점, 반복 turn·명령으로 추정되는 토큰 낭비 신호 |
+| `REPORT.md` | plan 완료 여부, 세션 exit·이벤트·input/output/total token, 관찰된 `planr` 명령과 도구 호출 누락, 지침이 불명확했을 가능성이 있는 지점, 반복 명령으로 추정되는 토큰 낭비 신호 |
 | `transcript.md` | 대화와 명령 추출본 |
-| `turns/turn-*.jsonl` | SDK가 전달한 원본 알림과 정규화한 turn 결과 |
-| `metrics.json` | 서로 다른 모델·turn 수 실행을 비교할 때 사용 |
+| `session.jsonl` | SDK가 전달한 원본 알림과 정규화한 세션 결과 |
+| `session.prompt.md` | 에이전트에게 보낸 요청 |
+| `metrics.json` | 서로 다른 모델·설정 실행을 비교할 때 사용 |
 
 실행기는 격리된 작업공간에서만 파일을 수정하며, 분석이 끝난 뒤에도 결과를 직접
 확인할 수 있도록 실행 디렉터리와 작업공간을 자동 삭제하지 않습니다. 정리는

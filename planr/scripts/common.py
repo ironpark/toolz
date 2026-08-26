@@ -21,6 +21,14 @@ FIXTURES_DIR = MODULE_DIR / "fixtures"
 RUN_ROOT = MODULE_DIR / "run"
 METADATA_FILE = "metadata.env"
 
+# One run directory layout, named once: codex.py writes these and analyze.py
+# reads them, and a rename that reached only one side would leave the analyzer
+# silently reporting an empty run.
+SESSION_LOG = "session.jsonl"
+SESSION_PROMPT = "session.prompt.md"
+SESSION_EXIT = "session.exit"
+STATE_DIR = "state"
+
 
 class HarnessError(RuntimeError):
     """A user-facing harness configuration or setup error."""

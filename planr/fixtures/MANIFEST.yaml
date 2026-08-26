@@ -19,11 +19,12 @@ fixtures:
     used_by: planr/scripts/codex.py
     workspace: 시스템 임시 디렉터리 (산출물은 planr/run/<timestamp>-codex/)
     description: >-
-      Codex 멀티턴 평가용 샘플 저장소. 에이전트가 실제로 작업할 Go 프로젝트와
+      Codex 평가용 샘플 저장소. 에이전트가 실제로 작업할 Go 프로젝트와
       지침 문서를 담고 있으며, 하네스가 이 디렉터리 전체를 격리 작업공간으로
       복사한 뒤 git init을 수행한다.
     contents:
       - .planr.yaml: 훅으로 planr 이벤트를 .harness/planr-events.log에 기록
-      - AGENT.md, AGENTS.md: 에이전트에게 주어지는 저장소 지침
+      - FIXTURE.PROMPT.md: 에이전트에게 보내는 요청. 워크스페이스로 복사하지 않는다
+      - FIXTURE.AGENTS.md: 워크스페이스에 AGENTS.md로 설치되는 저장소 지침
       - go.mod, main.go, main_test.go: 에이전트가 수정하는 샘플 Go 프로젝트
       - README.md: 샘플 프로젝트 설명

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Run and analyze an isolated, multi-turn planr evaluation.
+"""Run and analyze an isolated planr evaluation.
 
-The harness intentionally uses the official ``openai-codex`` Python SDK rather
-than shelling out to ``codex exec``.  A single SDK thread is reused for every
-turn so the model receives the same conversation context while the workspace
-is reset for each run.
+The agent is given the request once and left to work until it decides the task
+is finished; there are no follow-up prompts nudging it along, so the report
+measures what it does on its own.  The harness uses the official
+``openai-codex`` Python SDK rather than shelling out to ``codex exec`` so the
+raw notification stream can be preserved.
 """
 
 from __future__ import annotations
@@ -18,12 +19,17 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import time
 import traceback
-from typing import Any, Iterable
+from typing import Any
 
-from analyze import TOKEN_FIELDS, analyze
+from analyze import TEXT_KEYS, TOKEN_FIELDS, analyze, command_text, usage_total
 from common import (
+    SESSION_EXIT,
+    SESSION_LOG,
+    SESSION_PROMPT,
+    STATE_DIR,
     HarnessError,
     build_planr,
     fixture_dir,
@@ -51,55 +57,120 @@ def load_sdk():
 
 FIXTURE_NAME = "codex-harness"
 RUN_LABEL = "codex"
-GOAL_FILE = pathlib.Path(__file__).resolve().parent / "goal.md"
+# `FIXTURE.*` files configure the evaluation and must never reach the agent's
+# workspace verbatim: FIXTURE.PROMPT.md is only read, and FIXTURE.AGENTS.md is
+# installed under the name the agent is expected to find.
+FIXTURE_PREFIX = "FIXTURE."
+FIXTURE_PROMPT_FILE = f"{FIXTURE_PREFIX}PROMPT.md"
+FIXTURE_INSTALLED_FILES = {f"{FIXTURE_PREFIX}AGENTS.md": "AGENTS.md"}
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_REASONING = "medium"
-DEFAULT_TURNS = 4
-DEFAULT_TIMEOUT = 600.0
-
-INITIAL_PROMPT = """\
-You are the implementation agent in this repository. Read AGENT.md and AGENTS.md first, then inspect the existing source and tests. The task specification is included in this initial prompt. Work autonomously and do not ask for clarification.
-
-Use the planr CLI as a real part of the workflow: create a short described draft with `planr new`, edit it into an accurate multi-phase plan, and register it with `planr add`. Inspect it with both `planr status` and `planr overview`. Then implement the goal phase by phase. Keep phase state current, run verification, commit source changes before `planr phase done`, and do not use `--force`. Do not stop at a proposal: make the changes and finish the goal. Leave the repository clean with all acceptance criteria and all plan phases complete. At the end of this turn, report concise evidence and the next concrete action for the following turn.
-"""
-
-CONTINUATION_PROMPT = """\
-Continue autonomously from the current repository state. Use the task specification from the initial prompt, run `planr overview` and `planr status`, inspect git diff/log, and perform the next unfinished phase. Implement and test changes rather than merely describing them. Commit source changes before `planr phase done`; do not use `--force`. If the goal is already complete, verify every acceptance criterion, all plan phases, and a clean worktree, then give a concise evidence-based summary.
-"""
-
-FINAL_PROMPT = """\
-Final verification turn: independently check the task specification from the initial prompt, the implementation tests, `planr overview`, `planr status`, and git status. Fix any remaining issue now, update phase state, commit source before marking a phase done, and do not stop with an incomplete plan. If everything is complete, report only the key evidence and remaining risks.
-"""
+DEFAULT_TIMEOUT = 3600.0
 
 
-def positive(convert, description: str):
-    """Build an argparse type that rejects non-positive values."""
-
-    def parse(value: str):
-        try:
-            parsed = convert(value)
-        except ValueError as exc:
-            raise argparse.ArgumentTypeError(f"must be {description}") from exc
-        if parsed <= 0:
-            raise argparse.ArgumentTypeError(f"must be {description}")
-        return parsed
-
-    return parse
+def positive_seconds(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive number of seconds") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive number of seconds")
+    return parsed
 
 
-positive_int = positive(int, "a positive integer")
-positive_seconds = positive(float, "a positive number of seconds")
+def load_initial_prompt() -> str:
+    """Load the first user message from the fixture.
+
+    It stays out of the workspace on purpose: the agent has to work from the
+    conversation, not from a task file it can re-read on disk.
+    """
+
+    path = fixture_dir(FIXTURE_NAME) / FIXTURE_PROMPT_FILE
+    if not path.is_file():
+        raise HarnessError(f"missing initial prompt: {path}")
+    prompt = path.read_text(encoding="utf-8").strip()
+    if not prompt:
+        raise HarnessError(f"empty initial prompt: {path}")
+    return prompt
 
 
-def load_goal() -> str:
-    """Load the task source that is injected into the first prompt only."""
+ITEM_LABELS = {
+    "commandExecution": "cmd",
+    "agentMessage": "say",
+    "reasoning": "think",
+    "fileChange": "edit",
+    "mcpToolCall": "tool",
+    "webSearch": "search",
+    "todoList": "todo",
+    "error": "error",
+}
 
-    if not GOAL_FILE.is_file():
-        raise HarnessError(f"missing task specification: {GOAL_FILE}")
-    goal = GOAL_FILE.read_text(encoding="utf-8").strip()
-    if not goal:
-        raise HarnessError(f"empty task specification: {GOAL_FILE}")
-    return goal
+
+def elapsed(seconds: float) -> str:
+    minutes, second = divmod(int(seconds), 60)
+    hour, minute = divmod(minutes, 60)
+    return f"{hour}:{minute:02d}:{second:02d}" if hour else f"{minute}:{second:02d}"
+
+
+class Progress:
+    """Monitoring log on stderr, so stdout stays machine-readable."""
+
+    def __init__(self) -> None:
+        self.enabled = True
+        self.started = time.monotonic()
+
+    def start(self, *, enabled: bool) -> None:
+        self.enabled = enabled
+        self.started = time.monotonic()
+
+    def __call__(self, message: str) -> None:
+        if not self.enabled:
+            return
+        print(f"[{elapsed(time.monotonic() - self.started):>7}] {message}", file=sys.stderr, flush=True)
+
+
+progress = Progress()
+
+
+def one_line(value: Any, limit: int = 110) -> str:
+    # Slice before normalizing: an agent message or tool output can be tens of
+    # kilobytes, and only the first `limit` characters survive.
+    text = " ".join(str(value)[: limit * 4].split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def describe_item(item: dict[str, Any]) -> str | None:
+    """Summarize one completed thread item as a single monitoring line."""
+
+    kind = str(item.get("type", ""))
+    if not kind:
+        return None
+    label = ITEM_LABELS.get(kind, kind)
+    command = command_text(item)
+    if command:
+        exit_code = item.get("exitCode", item.get("exit_code"))
+        suffix = "" if exit_code in (0, None) else f" (exit {exit_code})"
+        return f"{label}  {one_line(command)}{suffix}"
+    for key in (*TEXT_KEYS, "query", "path"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return f"{label}  {one_line(value)}"
+    changes = item.get("changes")
+    if isinstance(changes, list) and changes:
+        paths = [str(change.get("path", "?")) for change in changes if isinstance(change, dict)]
+        return f"{label}  {one_line(', '.join(paths) or len(changes))}"
+    return label
+
+
+def format_usage(usage: dict[str, int] | None) -> str:
+    if not usage:
+        return "tokens n/a"
+    total = usage_total(usage)
+    return (
+        f"{total / 1000:.1f}k tokens"
+        f" (in {usage.get('input_tokens', 0) / 1000:.1f}k /"
+        f" out {usage.get('output_tokens', 0) / 1000:.1f}k)"
+    )
 
 
 def write_output(path: pathlib.Path, result: subprocess.CompletedProcess[str]) -> None:
@@ -109,6 +180,25 @@ def write_output(path: pathlib.Path, result: subprocess.CompletedProcess[str]) -
 def append_event(path: pathlib.Path, event: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+
+
+def append_error(path: pathlib.Path, kind: str, exc: BaseException, **extra: Any) -> None:
+    append_event(
+        path,
+        {
+            "type": kind,
+            "error": {"class": type(exc).__name__, "message": str(exc)},
+            **extra,
+        },
+    )
+
+
+async def cancel(task: "asyncio.Task[Any]") -> None:
+    task.cancel()
+    try:
+        await task
+    except BaseException:
+        pass
 
 
 def jsonable(value: Any) -> Any:
@@ -146,12 +236,11 @@ def camel_to_snake(value: str) -> str:
 
 
 def token_usage_summary(value: Any) -> dict[str, int] | None:
-    """Flatten the SDK's per-turn token breakdown for the analyzer.
+    """Flatten the SDK's token breakdown for the analyzer.
 
-    ``ThreadTokenUsage`` exposes both ``last`` (the current turn) and
-    ``total`` (the cumulative thread).  The analyzer adds turn values, so use
-    ``last`` to avoid counting the cumulative total repeatedly in multi-turn
-    runs.
+    ``ThreadTokenUsage`` exposes both ``last`` (the current turn) and ``total``
+    (the cumulative thread).  With a single session they agree; prefer ``last``
+    so the number stays correct if the SDK ever splits the work internally.
     """
 
     raw = jsonable(value)
@@ -168,8 +257,8 @@ def token_usage_summary(value: Any) -> dict[str, int] | None:
     return result or None
 
 
-def final_response_from_items(items: Iterable[dict[str, Any]]) -> str | None:
-    for item in reversed(list(items)):
+def final_response_from_items(items: list[dict[str, Any]]) -> str | None:
+    for item in reversed(items):
         if item.get("type") == "agentMessage" and isinstance(item.get("text"), str):
             return item["text"]
     return None
@@ -180,7 +269,6 @@ def write_run_metadata(
     *,
     model: str,
     reasoning: str,
-    turns: int,
     timeout: float,
     started_at: str,
 ) -> None:
@@ -190,7 +278,6 @@ def write_run_metadata(
             "run_directory": str(run_dir),
             "model": model,
             "reasoning": reasoning,
-            "turns_requested": str(turns),
             "timeout_seconds": str(timeout),
             "sdk": "openai-codex",
             "sdk_version": str(getattr(load_sdk(), "__version__", "unknown")),
@@ -200,64 +287,42 @@ def write_run_metadata(
     )
 
 
-def state_probes(workspace: pathlib.Path) -> dict[str, list[str]]:
-    """Commands captured to describe the workspace at a point in time."""
+def final_state(workspace: pathlib.Path, run_dir: pathlib.Path) -> int:
+    """Record how the workspace ended up, and whether its tests pass."""
 
+    state_dir = run_dir / STATE_DIR
     planr = str(workspace / "bin" / "planr")
-    return {
+    test = run_command(["go", "test", "./..."], cwd=workspace)
+    write_output(state_dir / "final-go-test.txt", test)
+    state_dir.joinpath("final-go-test.exit").write_text(f"{test.returncode}\n", encoding="utf-8")
+    for name, args in {
         "overview": [planr, "overview"],
         "status": [planr, "status"],
         "git-status": ["git", "status", "--short"],
         "git-log": ["git", "log", "--oneline", "--decorate", "-20"],
-    }
-
-
-def capture_state(workspace: pathlib.Path, run_dir: pathlib.Path, prefix: str) -> None:
-    state_dir = run_dir / "state"
-    for name, args in state_probes(workspace).items():
-        write_output(state_dir / f"{prefix}{name}.txt", run_command(args, cwd=workspace))
-
-
-def final_state(workspace: pathlib.Path, run_dir: pathlib.Path) -> int:
-    state_dir = run_dir / "state"
-    test = run_command(["go", "test", "./..."], cwd=workspace)
-    write_output(state_dir / "final-go-test.txt", test)
-    state_dir.joinpath("final-go-test.exit").write_text(f"{test.returncode}\n", encoding="utf-8")
-    capture_state(workspace, run_dir, "final-")
+    }.items():
+        write_output(state_dir / f"final-{name}.txt", run_command(args, cwd=workspace))
     return test.returncode
 
 
-def make_prompts(turns: int, goal: str = "") -> list[str]:
-    prompts: list[str] = []
-    for number in range(turns):
-        if number == 0:
-            task = f"\n\n## Task specification\n\n{goal.strip()}\n" if goal.strip() else ""
-            prompts.append(INITIAL_PROMPT + task)
-        elif number == turns - 1:
-            prompts.append(FINAL_PROMPT)
-        else:
-            prompts.append(CONTINUATION_PROMPT)
-    return prompts
-
-
-async def collect_sdk_turn(
+async def collect_sdk_session(
     thread: Any,
     prompt: str,
     *,
-    turn_number: int,
     thread_id: str,
     workspace: pathlib.Path,
     reasoning: str,
     log_path: pathlib.Path,
     timeout: float,
 ) -> int:
-    """Run one turn, preserving every SDK notification as JSONL."""
+    """Run the agent to completion, preserving every SDK notification as JSONL."""
+
+    progress(f"session started ({len(prompt)} prompt chars)")
 
     append_event(
         log_path,
         {
-            "type": "turn.started",
-            "turn": turn_number + 1,
+            "type": "session.started",
             "thread_id": thread_id,
             "prompt_chars": len(prompt),
         },
@@ -277,15 +342,8 @@ async def collect_sdk_turn(
             timeout=timeout,
         )
     except Exception as exc:
-        append_event(
-            log_path,
-            {
-                "type": "turn.error",
-                "turn": turn_number + 1,
-                "thread_id": thread_id,
-                "error": {"class": type(exc).__name__, "message": str(exc)},
-            },
-        )
+        append_error(log_path, "session.error", exc, thread_id=thread_id)
+        progress(f"session failed to start: {type(exc).__name__}: {one_line(exc)}")
         return 1
 
     items: list[dict[str, Any]] = []
@@ -302,7 +360,6 @@ async def collect_sdk_turn(
                 log_path,
                 {
                     "type": event_type,
-                    "turn": turn_number + 1,
                     "thread_id": thread_id,
                     "notification": raw,
                 },
@@ -313,10 +370,13 @@ async def collect_sdk_turn(
                     item = payload.get("item")
                     if isinstance(item, dict):
                         items.append(item)
+                        if progress.enabled and event_type.endswith(".completed"):
+                            line = describe_item(item)
+                            if line:
+                                progress(f"  {line}")
                     token_value = payload.get("tokenUsage") or payload.get("token_usage")
-                    summary = token_usage_summary(token_value)
-                    if summary:
-                        usage = summary
+                    if token_value:
+                        usage = token_usage_summary(token_value) or usage
                     turn_value = payload.get("turn")
                     if event_type == "turn.completed" and isinstance(turn_value, dict):
                         completed_turn = turn_value
@@ -327,11 +387,11 @@ async def collect_sdk_turn(
         await asyncio.wait_for(asyncio.shield(task), timeout=max(0.1, timeout - (time.monotonic() - started)))
     except asyncio.TimeoutError:
         timed_out = True
+        progress(f"session timed out after {timeout:.0f}s; interrupting")
         append_event(
             log_path,
             {
-                "type": "turn.timeout",
-                "turn": turn_number + 1,
+                "type": "session.timeout",
                 "thread_id": thread_id,
                 "timeout_seconds": timeout,
             },
@@ -339,74 +399,57 @@ async def collect_sdk_turn(
         try:
             await asyncio.wait_for(handle.interrupt(), timeout=5)
         except Exception as exc:
-            append_event(
-                log_path,
-                {
-                    "type": "turn.interrupt_error",
-                    "turn": turn_number + 1,
-                    "thread_id": thread_id,
-                    "error": {"class": type(exc).__name__, "message": str(exc)},
-                },
-            )
+            append_error(log_path, "session.interrupt_error", exc, thread_id=thread_id)
         try:
             await asyncio.wait_for(asyncio.shield(task), timeout=10)
         except BaseException:
-            task.cancel()
-            try:
-                await task
-            except BaseException:
-                pass
+            await cancel(task)
     except Exception as exc:
-        append_event(
-            log_path,
-            {
-                "type": "turn.error",
-                "turn": turn_number + 1,
-                "thread_id": thread_id,
-                "error": {"class": type(exc).__name__, "message": str(exc)},
-            },
-        )
-        task.cancel()
-        try:
-            await task
-        except BaseException:
-            pass
+        append_error(log_path, "session.error", exc, thread_id=thread_id)
+        await cancel(task)
+        progress(f"session failed: {type(exc).__name__}: {one_line(exc)}")
         return 1
 
     final_response = final_response_from_items(items)
     status = completed_turn.get("status") if completed_turn else None
+    outcome = status or ("interrupted" if timed_out else "unknown")
     append_event(
         log_path,
         {
-            "type": "turn.completed",
-            "turn": turn_number + 1,
+            "type": "session.completed",
             "thread_id": thread_id,
+            # `usage` and `final_response` are written exactly once: the
+            # analyzer sums every `usage` dict it finds, and a JSON round-trip
+            # turns a repeated reference into two distinct objects, so a second
+            # copy here would double every token count in the report.
             "result": {
                 "id": completed_turn.get("id") if completed_turn else None,
-                "status": status or ("interrupted" if timed_out else "unknown"),
+                "status": outcome,
                 "error": completed_turn.get("error") if completed_turn else None,
-                "final_response": final_response,
-                "items": items,
-                "usage_per_turn": usage,
+                "item_count": len(items),
             },
             "final_response": final_response,
             "usage": usage,
         },
+    )
+    progress(
+        f"session {outcome} in {elapsed(time.monotonic() - started)}"
+        f" · {len(items)} items · {format_usage(usage)}"
     )
     if timed_out:
         return 124
     return 0 if status == "completed" else 1
 
 
-async def run_sdk_turns(
+async def run_sdk_session(
     workspace: pathlib.Path,
     run_dir: pathlib.Path,
-    prompts: list[str],
+    prompt: str,
     *,
     model: str,
     reasoning: str,
     timeout: float,
-) -> list[int]:
+) -> int:
     from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 
     sdk_env = os.environ.copy()
@@ -421,64 +464,59 @@ async def run_sdk_turns(
             f'model_reasoning_effort="{reasoning}"',
         ),
     )
-    exit_codes: list[int] = []
+    log_path = run_dir / SESSION_LOG
     try:
         async with AsyncCodex(config=config) as codex:
             thread = await codex.thread_start(
                 approval_mode=ApprovalMode.deny_all,
                 cwd=str(workspace),
                 config={"model_reasoning_effort": reasoning},
-                # Keep the conversation available to this process for
-                # multi-turn evaluation, but do not persist it in the user's
-                # Codex thread history.
+                # Keep the conversation in this process only; do not persist it
+                # in the user's Codex thread history.
                 ephemeral=True,
                 model=model,
                 sandbox=Sandbox.workspace_write,
             )
             thread_id = thread.id
             write_metadata(run_dir, {"thread_id": thread_id})
-            for number, prompt in enumerate(prompts):
-                log_path = run_dir / "turns" / f"turn-{number:02d}.jsonl"
-                exit_code = await collect_sdk_turn(
-                    thread,
-                    prompt,
-                    turn_number=number,
-                    thread_id=thread_id,
-                    workspace=workspace,
-                    reasoning=reasoning,
-                    log_path=log_path,
-                    timeout=timeout,
-                )
-                exit_codes.append(exit_code)
-                # Capture the workspace as it stood at the end of this turn;
-                # snapshotting after the whole run would record the final
-                # state under every turn's label.
-                capture_state(workspace, run_dir, f"turn-{number:02d}-")
-                # An interrupted turn leaves the SDK thread usable.  Keep the
-                # conversation going so the next continuation prompt can
-                # recover unfinished work; hard SDK failures still stop the
-                # run because the thread may no longer be consistent.
-                if exit_code not in (0, 124):
-                    break
+            progress(f"thread {thread_id} started on {model} (reasoning {reasoning})")
+            return await collect_sdk_session(
+                thread,
+                prompt,
+                thread_id=thread_id,
+                workspace=workspace,
+                reasoning=reasoning,
+                log_path=log_path,
+                timeout=timeout,
+            )
     except Exception as exc:
-        log_path = run_dir / "turns" / f"turn-{len(exit_codes):02d}.jsonl"
-        append_event(
-            log_path,
-            {
-                "type": "sdk.error",
-                "error": {"class": type(exc).__name__, "message": str(exc)},
-            },
-        )
-        run_dir.joinpath("turns", f"turn-{len(exit_codes):02d}.stderr.log").write_text(
-            traceback.format_exc(), encoding="utf-8"
-        )
-        exit_codes.append(1)
-    return exit_codes
+        append_error(log_path, "sdk.error", exc)
+        (run_dir / "session.stderr.log").write_text(traceback.format_exc(), encoding="utf-8")
+        progress(f"SDK failed: {type(exc).__name__}: {one_line(exc)}")
+        return 1
+
+
+def install_fixture(fixture: pathlib.Path, workspace: pathlib.Path) -> None:
+    """Copy the fixture into the agent's workspace.
+
+    `FIXTURE.*` files are configuration for the evaluation, not repository
+    content, so they are skipped wholesale and only the ones with a mapping are
+    written back under the name the agent is expected to find.
+    """
+
+    shutil.copytree(
+        fixture,
+        workspace,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns(f"{FIXTURE_PREFIX}*"),
+    )
+    for source, installed in FIXTURE_INSTALLED_FILES.items():
+        shutil.copyfile(fixture / source, workspace / installed)
 
 
 def prepare_workspace() -> tuple[pathlib.Path, pathlib.Path]:
     fixture = fixture_dir(FIXTURE_NAME)
-    for required in ("AGENT.md", "AGENTS.md"):
+    for required in FIXTURE_INSTALLED_FILES:
         if not (fixture / required).is_file():
             raise HarnessError(f"missing fixture: {fixture / required}")
     run_dir = make_run_dir(RUN_LABEL)
@@ -487,9 +525,8 @@ def prepare_workspace() -> tuple[pathlib.Path, pathlib.Path]:
     workspace = make_agent_workspace(run_dir, RUN_LABEL)
     (workspace / "bin").mkdir()
     (workspace / ".harness").mkdir()
-    (run_dir / "turns").mkdir()
-    (run_dir / "state").mkdir()
-    shutil.copytree(fixture, workspace, dirs_exist_ok=True)
+    (run_dir / STATE_DIR).mkdir()
+    install_fixture(fixture, workspace)
     build_planr(workspace / "bin" / "planr")
     init = run_command(["git", "init", "-q"], cwd=workspace)
     if init.returncode != 0:
@@ -510,58 +547,48 @@ def prepare_workspace() -> tuple[pathlib.Path, pathlib.Path]:
 
 
 def run_harness(args: argparse.Namespace) -> int:
+    progress.start(enabled=not args.quiet)
     require_command("git")
     if not args.model:
         raise HarnessError("--model must not be empty")
     if not args.reasoning:
         raise HarnessError("--reasoning must not be empty")
-    goal = load_goal()
+    initial_prompt = load_initial_prompt()
+    progress("preparing isolated repository (copy fixture, build planr, git init)")
     run_dir, workspace = prepare_workspace()
+    progress(f"run directory {run_dir.name}; workspace {workspace}")
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     write_run_metadata(
         run_dir,
         model=args.model,
         reasoning=args.reasoning,
-        turns=args.turns,
         timeout=args.timeout,
         started_at=started_at,
     )
-    prompts = make_prompts(args.turns, goal)
-    for number, prompt in enumerate(prompts):
-        (run_dir / "turns" / f"turn-{number:02d}.prompt.md").write_text(prompt, encoding="utf-8")
+    (run_dir / SESSION_PROMPT).write_text(initial_prompt, encoding="utf-8")
 
-    overall_exit = 0
     if args.dry_run:
-        for number in range(args.turns):
-            log_path = run_dir / "turns" / f"turn-{number:02d}.jsonl"
-            append_event(
-                log_path,
-                {
-                    "type": "harness.dry_run",
-                    "turn": number + 1,
-                    "message": "Codex SDK was not invoked",
-                },
-            )
-            (run_dir / "turns" / f"turn-{number:02d}.exit").write_text("0\n", encoding="utf-8")
-            capture_state(workspace, run_dir, f"turn-{number:02d}-")
+        append_event(
+            run_dir / SESSION_LOG,
+            {"type": "harness.dry_run", "message": "Codex SDK was not invoked"},
+        )
+        session_exit = 0
+        progress("session skipped (dry run)")
     else:
-        exit_codes = asyncio.run(
-            run_sdk_turns(
+        session_exit = asyncio.run(
+            run_sdk_session(
                 workspace,
                 run_dir,
-                prompts,
+                initial_prompt,
                 model=args.model,
                 reasoning=args.reasoning,
                 timeout=args.timeout,
             )
         )
-        for number, exit_code in enumerate(exit_codes):
-            (run_dir / "turns" / f"turn-{number:02d}.exit").write_text(
-                f"{exit_code}\n", encoding="utf-8"
-            )
-            if exit_code != 0:
-                overall_exit = 1
+    (run_dir / SESSION_EXIT).write_text(f"{session_exit}\n", encoding="utf-8")
+    overall_exit = 1 if session_exit != 0 else 0
 
+    progress("running final verification (go test) and capturing end state")
     test_exit = final_state(workspace, run_dir)
     if test_exit != 0:
         overall_exit = 1
@@ -572,6 +599,7 @@ def run_harness(args: argparse.Namespace) -> int:
             "final_test_exit": str(test_exit),
         },
     )
+    progress(f"final go test exit {test_exit}; writing report")
     analyze(run_dir, run_dir / "REPORT.md")
     print(f"Run directory: {run_dir}")
     print(f"Isolated repository: {workspace}")
@@ -592,12 +620,6 @@ def build_parser() -> argparse.ArgumentParser:
         prog="main.py codex", description="run an isolated Codex planr evaluation"
     )
     parser.add_argument(
-        "--turns",
-        type=positive_int,
-        default=positive_int(os.environ.get("PLANR_HARNESS_TURNS") or str(DEFAULT_TURNS)),
-        help="number of SDK turns, including the first turn (default: 4)",
-    )
-    parser.add_argument(
         "--model",
         default=os.environ.get("PLANR_HARNESS_MODEL") or DEFAULT_MODEL,
         help=f"Codex model (default: {DEFAULT_MODEL})",
@@ -611,7 +633,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout",
         type=positive_seconds,
         default=positive_seconds(os.environ.get("PLANR_HARNESS_TIMEOUT") or str(DEFAULT_TIMEOUT)),
-        help="maximum seconds per SDK turn (default: 600)",
+        help="maximum seconds for the whole session (default: 3600)",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="suppress the progress log on stderr",
     )
     parser.add_argument(
         "--dry-run",

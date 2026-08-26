@@ -12,7 +12,14 @@ import re
 import shlex
 from typing import Any, Iterable
 
-from common import HarnessError, read_metadata as load_metadata
+from common import (
+    SESSION_EXIT,
+    SESSION_LOG,
+    SESSION_PROMPT,
+    STATE_DIR,
+    HarnessError,
+    read_metadata as load_metadata,
+)
 
 
 TOKEN_FIELDS = (
@@ -28,9 +35,7 @@ PHASE_ACTIONS = {"add", "set", "update", "start", "done", "reset"}
 
 
 @dataclasses.dataclass
-class TurnStats:
-    number: int
-    path: pathlib.Path
+class SessionStats:
     events: int = 0
     invalid_lines: int = 0
     event_types: collections.Counter[str] = dataclasses.field(
@@ -83,11 +88,22 @@ TEXT_KEYS = ("text", "message", "summary", "final_response")
 OUTPUT_KEYS = ("aggregated_output", "aggregatedOutput", "output")
 
 
-def collect_event(event: dict[str, Any], stats: TurnStats) -> None:
+def command_text(obj: dict[str, Any]) -> str | None:
+    """Render an object's `command` field, which the SDK sends as str or argv."""
+
+    command = obj.get("command")
+    if isinstance(command, str):
+        return command
+    if isinstance(command, list) and all(isinstance(part, str) for part in command):
+        return " ".join(command)
+    return None
+
+
+def collect_event(event: dict[str, Any], stats: SessionStats) -> None:
     """Harvest item types, commands, texts, outputs and usage in one walk.
 
     A single ``turn.completed`` notification embeds every item and tool output
-    of the turn, so traversing it once per key class is the dominant cost of
+    of the session, so traversing it once per key class is the dominant cost of
     reading a run.
     """
 
@@ -99,11 +115,9 @@ def collect_event(event: dict[str, Any], stats: TurnStats) -> None:
             # Counted once per event, however deeply the item is nested.
             item_types.add(item["type"])
 
-        command = obj.get("command")
-        if isinstance(command, str):
+        command = command_text(obj)
+        if command:
             stats.commands.append(command)
-        elif isinstance(command, list) and all(isinstance(part, str) for part in command):
-            stats.commands.append(" ".join(command))
 
         for key in TEXT_KEYS:
             value = obj.get(key)
@@ -145,9 +159,9 @@ def read_events(path: pathlib.Path) -> tuple[list[dict[str, Any]], int]:
     return events, invalid
 
 
-def read_turn(path: pathlib.Path, number: int) -> TurnStats:
-    events, invalid = read_events(path)
-    stats = TurnStats(number=number, path=path, events=len(events), invalid_lines=invalid)
+def read_session(run_dir: pathlib.Path) -> SessionStats:
+    events, invalid = read_events(run_dir / SESSION_LOG)
+    stats = SessionStats(events=len(events), invalid_lines=invalid)
     for event in events:
         kind = event_type(event)
         if kind:
@@ -156,10 +170,10 @@ def read_turn(path: pathlib.Path, number: int) -> TurnStats:
     stats.commands = unique_strings(stats.commands)
     stats.texts = unique_strings(stats.texts)
     stats.outputs = unique_strings(stats.outputs)
-    prompt_path = path.with_suffix(".prompt.md")
+    prompt_path = run_dir / SESSION_PROMPT
     if prompt_path.exists():
         stats.prompt_chars = len(prompt_path.read_text(encoding="utf-8", errors="replace"))
-    exit_path = path.with_suffix(".exit")
+    exit_path = run_dir / SESSION_EXIT
     if exit_path.exists():
         try:
             stats.exit_code = int(exit_path.read_text(encoding="utf-8").strip())
@@ -173,11 +187,6 @@ def read_turn(path: pathlib.Path, number: int) -> TurnStats:
 @functools.lru_cache(maxsize=None)
 def read_metadata(run_dir: pathlib.Path) -> dict[str, str]:
     return load_metadata(run_dir)
-
-
-def turn_files(run_dir: pathlib.Path) -> list[pathlib.Path]:
-    paths = list((run_dir / "turns").glob("turn-*.jsonl"))
-    return sorted(paths, key=lambda path: path.name)
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -256,13 +265,8 @@ def planr_actions(command: str) -> list[str]:
     return unique_strings(actions)
 
 
-def planr_commands(turns: Iterable[TurnStats]) -> list[str]:
-    commands: list[str] = []
-    for turn in turns:
-        for command in turn.commands:
-            if planr_actions(command):
-                commands.append(command)
-    return commands
+def planr_commands(session: SessionStats) -> list[str]:
+    return [command for command in session.commands if planr_actions(command)]
 
 
 def parse_overview_statuses(value: str) -> list[dict[str, Any]]:
@@ -286,14 +290,6 @@ def parse_overview_statuses(value: str) -> list[dict[str, Any]]:
     return result
 
 
-def latest_overview(run_dir: pathlib.Path) -> tuple[str, pathlib.Path | None]:
-    paths = sorted((run_dir / "state").glob("turn-*-overview.txt"))
-    if paths:
-        return read_text(paths[-1]), paths[-1]
-    final = run_dir / "state" / "final-overview.txt"
-    return read_text(final), final if final.exists() else None
-
-
 def planr_event_lines(run_dir: pathlib.Path) -> list[str]:
     # The workspace lives outside run_dir so the agent cannot see the run's
     # artifacts; metadata.env records where it was put.
@@ -306,63 +302,53 @@ def planr_event_lines(run_dir: pathlib.Path) -> list[str]:
     return [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line]
 
 
-def all_done_by_turn(run_dir: pathlib.Path) -> list[bool]:
-    result: list[bool] = []
-    for path in sorted((run_dir / "state").glob("turn-*-overview.txt")):
-        statuses = parse_overview_statuses(read_text(path))
-        result.append(bool(statuses) and all(item["status"] == "done" for item in statuses))
-    return result
+def output_tokens(session: SessionStats) -> int:
+    return session.usage.get("output_tokens", 0)
 
 
-def output_tokens(turn: TurnStats) -> int:
-    return turn.usage.get("output_tokens", 0)
+def usage_total(usage: dict[str, int]) -> int:
+    """Total tokens, falling back to input+output when the SDK omits it."""
+
+    if usage.get("total_tokens"):
+        return usage["total_tokens"]
+    return usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
 
 
-def total_tokens(turn: TurnStats) -> int:
-    if turn.usage.get("total_tokens"):
-        return turn.usage["total_tokens"]
-    return turn.usage.get("input_tokens", 0) + turn.usage.get("output_tokens", 0)
+def total_tokens(session: SessionStats) -> int:
+    return usage_total(session.usage)
 
 
-def build_transcript(run_dir: pathlib.Path, turns: list[TurnStats]) -> str:
+def build_transcript(run_dir: pathlib.Path, session: SessionStats) -> str:
     metadata = read_metadata(run_dir)
     lines = [
         "# Codex planr harness transcript",
         "",
         f"- Model: `{metadata.get('model', 'unknown')}`",
         f"- Reasoning effort: `{metadata.get('reasoning', 'unknown')}`",
-        "- Raw events: `turns/turn-*.jsonl`",
+        "- Raw events: `session.jsonl`",
+        f"- exit code: `{session.exit_code if session.exit_code is not None else 'unknown'}`",
+        f"- events: `{session.events}`",
+        f"- token total: `{total_tokens(session) or 'unavailable'}`",
         "",
         "이 파일은 JSONL 이벤트에서 추출한 명령과 에이전트 텍스트입니다. 정확한 원문과"
-        " 도구 입력은 각 turn의 JSONL 로그를 확인하세요.",
+        " 도구 입력은 `session.jsonl`을 확인하세요.",
         "",
     ]
-    for turn in turns:
-        lines.extend(
-            [
-                f"## Turn {turn.number + 1}",
-                "",
-                f"- exit code: `{turn.exit_code if turn.exit_code is not None else 'unknown'}`",
-                f"- events: `{turn.events}`",
-                f"- token total: `{total_tokens(turn) or 'unavailable'}`",
-                "",
-            ]
-        )
-        if turn.commands:
-            lines.extend(["### Commands", "", "```text", *turn.commands, "```", ""])
-        if turn.outputs:
-            lines.extend(["### Tool outputs", "", "```text"])
-            for output in turn.outputs:
-                excerpt = output if len(output) <= 8000 else output[:8000] + "\n[…truncated…]"
-                lines.extend([excerpt, "---"])
-            lines.extend(["```", ""])
-        if turn.texts:
-            lines.extend(["### Agent messages", ""])
-            for text in turn.texts:
-                excerpt = text if len(text) <= 8000 else text[:8000] + "\n[…truncated…]"
-                lines.extend([excerpt, "", "---", ""])
-        else:
-            lines.extend(["(추출 가능한 에이전트 메시지가 없습니다.)", ""])
+    if session.commands:
+        lines.extend(["## Commands", "", "```text", *session.commands, "```", ""])
+    if session.outputs:
+        lines.extend(["## Tool outputs", "", "```text"])
+        for output in session.outputs:
+            excerpt = output if len(output) <= 8000 else output[:8000] + "\n[…truncated…]"
+            lines.extend([excerpt, "---"])
+        lines.extend(["```", ""])
+    if session.texts:
+        lines.extend(["## Agent messages", ""])
+        for text in session.texts:
+            excerpt = text if len(text) <= 8000 else text[:8000] + "\n[…truncated…]"
+            lines.extend([excerpt, "", "---", ""])
+    else:
+        lines.extend(["(추출 가능한 에이전트 메시지가 없습니다.)", ""])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -373,7 +359,7 @@ def repeated_commands(commands: Iterable[str]) -> list[tuple[str, int]]:
 
 def make_observations(
     run_dir: pathlib.Path,
-    turns: list[TurnStats],
+    session: SessionStats,
     commands: list[str],
     statuses: list[dict[str, Any]],
     final_test_exit: str,
@@ -402,7 +388,7 @@ def make_observations(
         if not any(key.startswith("phase done") for key in actions):
             workflow.append("phase 완료 명령이 관찰되지 않았습니다. 계획을 실제 완료 상태로 연결하지 못했을 가능성이 있습니다.")
 
-    outputs = [output for turn in turns for output in turn.outputs]
+    outputs = session.outputs
     if any(
         "cannot mark phase done while source changes are uncommitted" in output.lower()
         or "cannot check uncommitted source changes" in output.lower()
@@ -443,85 +429,58 @@ def make_observations(
     for command, count in repeated_commands(commands):
         efficiency.append(f"동일한 명령이 {count}회 반복되었습니다: `{command}`. 상태 확인을 캐시하거나 한 번에 묶을 수 있는지 검토하세요.")
 
-    completion_by_turn = all_done_by_turn(run_dir)
-    first_complete = next((index for index, complete in enumerate(completion_by_turn) if complete), None)
-    if first_complete is not None and any(completion_by_turn[first_complete + 1 :]):
-        extra = len(completion_by_turn) - first_complete - 1
-        efficiency.append(f"Turn {first_complete + 1}에서 이미 모든 plan이 done으로 보인 뒤 {extra}개 turn이 더 실행되었습니다. 종료 조건을 추가하면 토큰을 절약할 수 있습니다.")
-
-    if len(turns) >= 2:
-        idle_turns = 0
-        for previous, current in zip(turns, turns[1:]):
-            if total_tokens(current) and not current.commands and not current.texts:
-                idle_turns += 1
-            elif total_tokens(current) and output_tokens(current) < 20 and not current.commands:
-                idle_turns += 1
-        if idle_turns:
-            efficiency.append(f"실질적인 명령/메시지가 거의 없는 turn이 {idle_turns}개 있습니다. 멀티턴 횟수 또는 후속 프롬프트를 줄일 수 있습니다.")
-
-    usage_available = any(total_tokens(turn) for turn in turns)
-    if not usage_available:
+    if not total_tokens(session):
         efficiency.append("Codex 이벤트에서 token usage를 찾지 못했습니다. 원본 JSONL을 보존했으므로 CLI 이벤트 형식에 맞춰 분석기를 확장할 수 있습니다.")
-
-    for turn in turns:
-        if turn.invalid_lines:
-            efficiency.append(f"Turn {turn.number + 1}에 해석할 수 없는 JSONL 줄이 {turn.invalid_lines}개 있습니다.")
-        if turn.exit_code not in (None, 0):
-            workflow.append(f"Turn {turn.number + 1}의 Codex 실행이 exit {turn.exit_code}로 실패했습니다.")
+    if session.invalid_lines:
+        efficiency.append(f"해석할 수 없는 JSONL 줄이 {session.invalid_lines}개 있습니다.")
+    if session.exit_code == 124:
+        workflow.append("세션이 타임아웃으로 중단되었습니다. 에이전트가 스스로 완료하지 못했거나 `--timeout`이 과제 대비 짧습니다.")
+    elif session.exit_code not in (None, 0):
+        workflow.append(f"Codex 세션이 exit {session.exit_code}로 실패했습니다.")
 
     return {"workflow": workflow, "documentation": documentation, "efficiency": efficiency}
 
 
-def result_data(run_dir: pathlib.Path, turns: list[TurnStats]) -> dict[str, Any]:
+def result_data(run_dir: pathlib.Path, session: SessionStats) -> dict[str, Any]:
     metadata = read_metadata(run_dir)
-    commands = planr_commands(turns)
-    overview, overview_path = latest_overview(run_dir)
-    statuses = parse_overview_statuses(overview)
-    final_test_exit = read_text(run_dir / "state" / "final-go-test.exit")
-    observations = make_observations(run_dir, turns, commands, statuses, final_test_exit)
-    usage = collections.Counter[str]()
-    for turn in turns:
-        usage.update(turn.usage)
+    commands = planr_commands(session)
+    statuses = parse_overview_statuses(read_text(run_dir / STATE_DIR / "final-overview.txt"))
+    final_test_exit = read_text(run_dir / STATE_DIR / "final-go-test.exit")
+    observations = make_observations(run_dir, session, commands, statuses, final_test_exit)
     result = {
         "metadata": metadata,
-        "turns": [
-            {
-                "number": turn.number + 1,
-                "events": turn.events,
-                "invalid_lines": turn.invalid_lines,
-                "exit_code": turn.exit_code,
-                "tokens": dict(turn.usage),
-                "total_tokens": total_tokens(turn),
-                "output_tokens": output_tokens(turn),
-                "prompt_chars": turn.prompt_chars,
-                "prompt_estimated_tokens": (turn.prompt_chars + 3) // 4 if turn.prompt_chars else 0,
-                "event_types": dict(turn.event_types),
-                "item_types": dict(turn.item_types),
-                "commands": turn.commands,
-            }
-            for turn in turns
-        ],
-        "tokens": dict(usage),
+        "session": {
+            "events": session.events,
+            "invalid_lines": session.invalid_lines,
+            "exit_code": session.exit_code,
+            "tokens": dict(session.usage),
+            "total_tokens": total_tokens(session),
+            "output_tokens": output_tokens(session),
+            "prompt_chars": session.prompt_chars,
+            "prompt_estimated_tokens": (session.prompt_chars + 3) // 4 if session.prompt_chars else 0,
+            "event_types": dict(session.event_types),
+            "item_types": dict(session.item_types),
+            "commands": session.commands,
+        },
         "planr_commands": commands,
         "planr_events": planr_event_lines(run_dir),
         "overview": statuses,
         "final_test_exit": final_test_exit,
-        "final_git_status": read_text(run_dir / "state" / "final-git-status.txt"),
-        "final_git_log": read_text(run_dir / "state" / "final-git-log.txt"),
+        "final_git_status": read_text(run_dir / STATE_DIR / "final-git-status.txt"),
+        "final_git_log": read_text(run_dir / STATE_DIR / "final-git-log.txt"),
         "observations": observations,
-        "overview_file": str(overview_path.relative_to(run_dir)) if overview_path else None,
+        "overview_file": f"{STATE_DIR}/final-overview.txt",
     }
     return result
 
 
 def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
     metadata = data.get("metadata", {})
-    turns = data.get("turns", [])
+    session = data.get("session", {})
     statuses = data.get("overview", [])
-    tokens = data.get("tokens", {})
     observations = data.get("observations", {})
-    total = tokens.get("total_tokens") or sum(turn.get("total_tokens", 0) for turn in turns)
-    output = tokens.get("output_tokens") or sum(turn.get("output_tokens", 0) for turn in turns)
+    total = session.get("total_tokens", 0)
+    output = session.get("output_tokens", 0)
     done = bool(statuses) and all(item.get("status") == "done" for item in statuses)
 
     lines = [
@@ -532,8 +491,7 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
         f"- Run directory: `{run_dir}`",
         f"- Model: `{metadata.get('model', 'unknown')}`",
         f"- Reasoning effort: `{metadata.get('reasoning', 'unknown')}`",
-        f"- Requested turns: `{metadata.get('turns_requested', 'unknown')}`",
-        f"- Recorded turns: `{len(turns)}`",
+        f"- Session exit: `{session.get('exit_code', 'unknown')}`",
         f"- Plan completion: **{'done' if done else 'incomplete/unknown'}**",
         f"- Final `go test ./...`: `{data.get('final_test_exit') or 'not recorded'}`",
         f"- Final Git worktree: **{'clean' if not data.get('final_git_status') else 'dirty'}**",
@@ -550,25 +508,17 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
     else:
         lines.append("최종 overview에서 읽을 수 있는 plan 상태가 없습니다.")
 
+    session_tokens = session.get("tokens", {})
     lines.extend(
         [
             "",
-            "## Turn·토큰 요약",
+            "## 세션·토큰 요약",
             "",
-            "| turn | exit | events | prompt≈ | input | output | total |",
-            "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-        ]
-    )
-    for turn in turns:
-        turn_tokens = turn.get("tokens", {})
-        lines.append(
-            f"| {turn['number']} | {turn.get('exit_code', 'unknown')} | {turn['events']} | "
-            f"{turn.get('prompt_estimated_tokens') or '—'} | "
-            f"{turn_tokens.get('input_tokens', '—')} | {turn_tokens.get('output_tokens', '—')} | "
-            f"{turn.get('total_tokens') or '—'} |"
-        )
-    lines.extend(
-        [
+            "| events | prompt≈ | input | output | total |",
+            "| ---: | ---: | ---: | ---: | ---: |",
+            f"| {session.get('events', 0)} | {session.get('prompt_estimated_tokens') or '—'} | "
+            f"{session_tokens.get('input_tokens', '—')} | {session_tokens.get('output_tokens', '—')} | "
+            f"{session.get('total_tokens') or '—'} |",
             "",
             f"누적 token: `{total or 'unavailable'}` (output `{output or 'unavailable'}`).",
             "",
@@ -589,9 +539,7 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
     else:
         lines.append("관찰된 `planr` 명령이 없습니다.")
 
-    item_counts = collections.Counter[str]()
-    for turn in turns:
-        item_counts.update(turn.get("item_types", {}))
+    item_counts = collections.Counter[str](session.get("item_types", {}))
     if item_counts:
         lines.extend(["", "Codex 도구 이벤트: " + ", ".join(f"`{key}`×{value}" for key, value in item_counts.items()) + "."])
     if data.get("planr_events"):
@@ -620,9 +568,9 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
             "```",
             "",
             "- `transcript.md`: 대화 텍스트·명령 추출본",
-            "- `turns/turn-*.jsonl`: Codex 원본 JSONL 이벤트",
-            "- `turns/turn-*.stderr.log`: Codex stderr",
-            "- `state/`: 매 turn의 overview/status/Git 상태와 종료 검증",
+            "- `session.jsonl`: Codex 원본 JSONL 이벤트",
+            "- `session.prompt.md`: 에이전트에게 전달한 요청",
+            "- `state/`: 종료 시점의 overview/status/Git 상태와 종료 검증",
             "- `metrics.json`: 후속 실행과 비교할 수 있는 구조화 통계",
         ]
     )
@@ -633,15 +581,14 @@ def analyze(run_dir: pathlib.Path, output: pathlib.Path | None = None) -> int:
     run_dir = run_dir.resolve()
     if not run_dir.is_dir():
         raise HarnessError(f"run directory not found: {run_dir}")
-    paths = turn_files(run_dir)
-    turns = [read_turn(path, index) for index, path in enumerate(paths)]
-    data = result_data(run_dir, turns)
+    session = read_session(run_dir)
+    data = result_data(run_dir, session)
     if output is None:
         output = run_dir / "REPORT.md"
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(markdown_report(data, run_dir), encoding="utf-8")
-    (run_dir / "transcript.md").write_text(build_transcript(run_dir, turns), encoding="utf-8")
+    (run_dir / "transcript.md").write_text(build_transcript(run_dir, session), encoding="utf-8")
     (run_dir / "metrics.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(output)
     return 0
