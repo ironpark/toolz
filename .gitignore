@@ -1,6 +1,8 @@
 # Go
 bin/
-planr/test/
+planr/test/*
+!planr/test/fixtures/
+!planr/test/fixtures/**
 *.test
 *.out
 coverage.out

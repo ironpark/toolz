@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -34,69 +35,15 @@ func newCommand(_ context.Context, cmd *cli.Command) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.WriteFile(absOutput, []byte(newDraft(name)), 0644); err != nil {
+	draft, err := renderNewDraft(name)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(absOutput, []byte(draft), 0644); err != nil {
 		return err
 	}
 	fmt.Printf("Created %s\n", absOutput)
 	return nil
-}
-
-func newDraft(name string) string {
-	return fmt.Sprintf(`---
-plan_name: %s
----
-# GOALS
-
-## 문제와 사용자 관점의 최종 결과
-
-## 측정 가능한 목표
-
-## 지원 범위와 비목표
-
-## reference source / commit / license
-
-## 계획 전체의 완료 기준
-
-# SCOPE
-
-# CONTEXT
-
-## 현재 구현과 병목
-
-## 목표 구조와 invariant
-
-# PHASES
-
-## PHASE — Initial Work
-
-`+"```yaml"+`
-phase: 0
-slug: initial-work
-perf_phase: false
-depends_on: []
-status: planned
-entry_condition: null
-`+"```"+`
-
-### 계획된 작업
-
--
-
-### 완료 조건
-
--
-
-# VERIFICATION
-
-# ORDERING
-
-# NEXT
-
-`+"```yaml"+`
-next_phase: 0
-`+"```"+`
-
-`, name)
 }
 
 func addCommand(_ context.Context, cmd *cli.Command) error {
@@ -199,16 +146,10 @@ func writePlan(root string, d draft, planDirectory string) error {
 	if err := os.WriteFile(filepath.Join(root, "CONTEXT.md"), []byte("# SCOPE\n\n"+d.Scope+"\n\n# CONTEXT\n\n"+d.Context+"\n"), 0644); err != nil {
 		return err
 	}
-	type phaseRef struct {
-		ID         int    `yaml:"id"`
-		Doc        string `yaml:"doc"`
-		Status     string `yaml:"status"`
-		ImplCommit any    `yaml:"impl_commit"`
-	}
-	refs := []phaseRef{}
+	checklist := []string{}
 	for _, p := range d.Phases {
 		doc := fmt.Sprintf("phases/%02d-%s.md", p.Meta.Phase, p.Meta.Slug)
-		refs = append(refs, phaseRef{p.Meta.Phase, doc, p.Meta.Status, nil})
+		checklist = append(checklist, fmt.Sprintf("- [ ] [Phase %02d: %s](%s)", p.Meta.Phase, p.Title, doc))
 		dependencies := make([]string, len(p.Meta.DependsOn))
 		for index, dependency := range p.Meta.DependsOn {
 			dependencies[index] = fmt.Sprintf("%s#%d", planDirectory, dependency)
@@ -224,7 +165,7 @@ func writePlan(root string, d draft, planDirectory string) error {
 			return err
 		}
 	}
-	meta := map[string]any{"plan_status": "in-progress", "phases": refs, "succeeded_by": nil, "preceded_by": nil}
+	meta := map[string]any{"plan_status": "in-progress", "succeeded_by": nil, "preceded_by": nil}
 	header, err := yaml.Marshal(meta)
 	if err != nil {
 		return err
@@ -235,7 +176,7 @@ func writePlan(root string, d draft, planDirectory string) error {
 			nextDoc = fmt.Sprintf("phases/%02d-%s.md", p.Meta.Phase, p.Meta.Slug)
 		}
 	}
-	plan := fmt.Sprintf("---\n%s---\n> NEXT: %s ([Phase %d](%s))\n\n# 공통 검증\n\n%s\n\n# 구현 순서를 제한하는 결정\n\n%s\n\n# 다음 구현 대상\n\n%s\n", header, d.NextText, d.NextPhase, nextDoc, d.Verification, d.Ordering, d.NextText)
+	plan := fmt.Sprintf("---\n%s---\n> NEXT: %s ([Phase %d](%s))\n\n# Phases\n\n%s\n\n# 공통 검증\n\n%s\n\n# 구현 순서를 제한하는 결정\n\n%s\n\n# 다음 구현 대상\n\n%s\n", header, d.NextText, d.NextPhase, nextDoc, strings.Join(checklist, "\n"), d.Verification, d.Ordering, d.NextText)
 	return os.WriteFile(filepath.Join(root, "PLAN.md"), []byte(plan), 0644)
 }
 
@@ -284,47 +225,25 @@ func statusCommand(_ context.Context, cmd *cli.Command) error {
 			if err != nil {
 				return fmt.Errorf("%s: %w", entry.Name(), err)
 			}
-			phases, _ := front["phases"].([]any)
+			phases, err := readPlanPhases(filepath.Join(plans, entry.Name()))
+			if err != nil {
+				return err
+			}
 			done := 0
 			dependencies := map[string]bool{}
 			remaining := []string{}
-			for _, value := range phases {
-				phase, ok := value.(map[string]any)
-				if !ok {
-					continue
-				}
-				phaseStatus, _ := phase["status"].(string)
-				doc, _ := phase["doc"].(string)
-				if doc != "" {
-					phaseContents, readErr := os.ReadFile(filepath.Join(plans, entry.Name(), doc))
-					if readErr == nil {
-						phaseFront, _, parseErr := frontmatter(string(phaseContents))
-						if parseErr != nil {
-							return fmt.Errorf("%s/%s: %w", entry.Name(), doc, parseErr)
-						}
-						if value, ok := phaseFront["status"].(string); ok {
-							phaseStatus = value
-						}
-						if front["plan_status"] != "done" {
-							for _, dependency := range yamlStrings(phaseFront["depends_on"]) {
-								if planName, _, found := strings.Cut(dependency, "#"); found {
-									dependencies[planName] = true
-								}
-							}
-						}
-						if phaseStatus != "done" {
-							remaining = append(remaining, fmt.Sprintf("%s (%s)", markdownTitle(string(phaseContents)), phaseStatus))
-						}
-						if phaseStatus == "done" {
-							done++
-						}
-						continue
-					}
-				}
-				if phaseStatus == "done" {
+			for _, phase := range phases {
+				if phase.status == "done" {
 					done++
 				} else {
-					remaining = append(remaining, fmt.Sprintf("Phase %v (%s)", phase["id"], phaseStatus))
+					remaining = append(remaining, fmt.Sprintf("%s (%s)", phase.title, phase.status))
+				}
+				if front["plan_status"] != "done" {
+					for _, dependency := range phase.dependencies {
+						if planName, _, found := strings.Cut(dependency, "#"); found {
+							dependencies[planName] = true
+						}
+					}
 				}
 			}
 			label := filepath.Join(filepath.Base(plans), entry.Name())
@@ -392,6 +311,46 @@ func markdownTitle(contents string) string {
 		}
 	}
 	return "unnamed phase"
+}
+
+type storedPhase struct {
+	id            int
+	title, status string
+	dependencies  []string
+}
+
+func readPlanPhases(planRoot string) ([]storedPhase, error) {
+	entries, err := os.ReadDir(filepath.Join(planRoot, "phases"))
+	if err != nil {
+		return nil, fmt.Errorf("read phases for %s: %w", filepath.Base(planRoot), err)
+	}
+	prefix := regexp.MustCompile(`^(\d+)-.*\.md$`)
+	phases := []storedPhase{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		match := prefix.FindStringSubmatch(entry.Name())
+		if len(match) != 2 {
+			continue
+		}
+		id, err := strconv.Atoi(match[1])
+		if err != nil {
+			continue
+		}
+		contents, err := os.ReadFile(filepath.Join(planRoot, "phases", entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		front, _, err := frontmatter(string(contents))
+		if err != nil {
+			return nil, fmt.Errorf("%s/%s: %w", filepath.Base(planRoot), entry.Name(), err)
+		}
+		status, _ := front["status"].(string)
+		phases = append(phases, storedPhase{id, markdownTitle(string(contents)), status, yamlStrings(front["depends_on"])})
+	}
+	sort.Slice(phases, func(i, j int) bool { return phases[i].id < phases[j].id })
+	return phases, nil
 }
 
 func planName(directory string) string {
