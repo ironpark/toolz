@@ -12,6 +12,15 @@ func main() {
 	command := &cli.Command{
 		Name:  "planr",
 		Usage: "register and track structured implementation plans",
+		// Every command reads or writes plan state inside a repository, so the
+		// check runs once here instead of at each call site.
+		Before: func(ctx context.Context, _ *cli.Command) (context.Context, error) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return ctx, err
+			}
+			return ctx, ensureGitRepository(cwd)
+		},
 		Commands: []*cli.Command{
 			{
 				Name:      "new",
@@ -44,6 +53,12 @@ func main() {
 				Usage:     "show a concise overview of all plans",
 				ArgsUsage: "[plan-name]",
 				Action:    overviewCommand,
+			},
+			{
+				Name:      "notes",
+				Usage:     "list plan and phase completions linked to commits",
+				ArgsUsage: "[plan-name]",
+				Action:    notesCommand,
 			},
 			{
 				Name:  "phase",
