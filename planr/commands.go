@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
@@ -261,7 +262,7 @@ func writePlan(root string, d draft, planDirectory string) error {
 			return err
 		}
 	}
-	meta := map[string]any{"description": d.Description, "plan_status": "in-progress", "depends_on": d.DependsOn, "succeeded_by": nil, "preceded_by": nil}
+	meta := map[string]any{"description": d.Description, "registered_at": time.Now().UTC().Format(time.RFC3339), "plan_status": "in-progress", "depends_on": d.DependsOn, "succeeded_by": nil, "preceded_by": nil}
 	header, err := yaml.Marshal(meta)
 	if err != nil {
 		return err

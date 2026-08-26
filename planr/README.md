@@ -61,8 +61,9 @@ plans-active/
         └── 02-benchmark-decision.md
 ```
 
-`PLAN.md` frontmatter에는 plan 수준 설명·의존성·상태를 저장합니다. phase 목록은 문서 본문의
-체크리스트와 링크로 관리됩니다.
+`PLAN.md` frontmatter에는 plan 수준 설명·등록 시각·의존성·상태를 저장합니다. 등록 시각은
+UTC RFC3339 형식의 `registered_at`으로 기록되며, phase 목록은 문서 본문의 체크리스트와
+링크로 관리됩니다.
 
 ```markdown
 # Phases
@@ -90,6 +91,7 @@ plans-active/
 ---
 plan_name: checkout-v2
 description: "checkout flow refresh"
+registered_at: "2026-08-26T17:30:00Z"
 depends_on: [platform-refresh, api-foundation#2]
 ---
 ```
