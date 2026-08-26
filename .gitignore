@@ -4,6 +4,9 @@ bin/
 *.out
 coverage.out
 
+# Local reference checkouts
+references/
+
 # Node.js
 node_modules/
 npm-debug.log*

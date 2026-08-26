@@ -1,0 +1,236 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+)
+
+const relayTestTimeout = 300 * time.Millisecond
+
+func newRelayTestServer(t *testing.T, config Config) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(NewRelay(config).Handler())
+	t.Cleanup(server.Close)
+	return server
+}
+
+func getResponse(t *testing.T, url string) (int, http.Header, string) {
+	t.Helper()
+	response, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read %s: %v", url, err)
+	}
+	return response.StatusCode, response.Header, string(body)
+}
+
+func relayWebSocketURL(server *httptest.Server, serverID string, role Role, version int, connectionID string) string {
+	query := url.Values{"serverId": {serverID}, "role": {string(role)}}
+	if version == 2 {
+		query.Set("v", "2")
+		if connectionID != "" {
+			query.Set("connectionId", connectionID)
+		}
+	}
+	return "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?" + query.Encode()
+}
+
+func dialRelay(t *testing.T, server *httptest.Server, serverID string, role Role, version int, connectionID string) *websocket.Conn {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), relayTestTimeout)
+	defer cancel()
+	conn, response, err := websocket.Dial(ctx, relayWebSocketURL(server, serverID, role, version, connectionID), nil)
+	if err != nil {
+		if response != nil {
+			t.Fatalf("dial relay: status=%d err=%v", response.StatusCode, err)
+		}
+		t.Fatalf("dial relay: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.CloseNow() })
+	return conn
+}
+
+func writeRelayMessage(t *testing.T, conn *websocket.Conn, messageType websocket.MessageType, payload []byte) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), relayTestTimeout)
+	defer cancel()
+	if err := conn.Write(ctx, messageType, payload); err != nil {
+		t.Fatalf("write relay message: %v", err)
+	}
+}
+
+func readRelayMessage(t *testing.T, conn *websocket.Conn) (websocket.MessageType, []byte) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), relayTestTimeout)
+	defer cancel()
+	messageType, payload, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read relay message: %v", err)
+	}
+	return messageType, payload
+}
+
+func assertRelayMessage(t *testing.T, conn *websocket.Conn, wantType websocket.MessageType, wantPayload []byte) {
+	t.Helper()
+	messageType, payload := readRelayMessage(t, conn)
+	if messageType != wantType || string(payload) != string(wantPayload) {
+		t.Fatalf("message = (%v, %q), want (%v, %q)", messageType, payload, wantType, wantPayload)
+	}
+}
+
+func assertControlMessage(t *testing.T, conn *websocket.Conn, want map[string]any) map[string]any {
+	t.Helper()
+	messageType, payload := readRelayMessage(t, conn)
+	if messageType != websocket.MessageText {
+		t.Fatalf("control message type = %v, want text", messageType)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("decode control message %q: %v", payload, err)
+	}
+	for key, value := range want {
+		if !equalJSONValue(got[key], value) {
+			t.Fatalf("control[%q] = %#v, want %#v; full=%#v", key, got[key], value, got)
+		}
+	}
+	return got
+}
+
+func equalJSONValue(got, want any) bool {
+	gotJSON, gotErr := json.Marshal(got)
+	wantJSON, wantErr := json.Marshal(want)
+	return gotErr == nil && wantErr == nil && string(gotJSON) == string(wantJSON)
+}
+
+func assertRelayClose(t *testing.T, conn *websocket.Conn, wantCode websocket.StatusCode, wantReason string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), relayTestTimeout)
+	defer cancel()
+	_, _, err := conn.Read(ctx)
+	if err == nil {
+		t.Fatal("connection remained open")
+	}
+	if websocket.CloseStatus(err) != wantCode {
+		t.Fatalf("close status = %d, want %d: %v", websocket.CloseStatus(err), wantCode, err)
+	}
+	var closeError websocket.CloseError
+	if !errors.As(err, &closeError) || closeError.Reason != wantReason {
+		t.Fatalf("close reason = %q, want %q: %v", closeError.Reason, wantReason, err)
+	}
+}
+
+func relayMetrics(t *testing.T, server *httptest.Server) string {
+	t.Helper()
+	status, _, body := getResponse(t, server.URL+"/metrics")
+	if status != http.StatusOK {
+		t.Fatalf("metrics status = %d", status)
+	}
+	return body
+}
+
+func metricValue(t *testing.T, metrics, name string) float64 {
+	t.Helper()
+	for _, line := range strings.Split(metrics, "\n") {
+		if strings.HasPrefix(line, name+" ") {
+			value, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimPrefix(line, name)), 64)
+			if err != nil {
+				t.Fatalf("parse metric %q: %v", line, err)
+			}
+			return value
+		}
+	}
+	t.Fatalf("metric %q not found", name)
+	return 0
+}
+
+func eventually(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !condition() {
+		t.Fatal("condition did not become true before timeout")
+	}
+}
+
+type relayFaultController interface {
+	testStallOwner(serverID string) (resume func(), ok bool)
+	testKillOwner(serverID string) bool
+	testMoveOwner(serverID string) bool
+	testStallCapacity() (resume func(), ok bool)
+	testKillMetrics() bool
+}
+
+// relayScenarioResult is the observable result of an internal failure scenario.
+// Production remains free of test hooks; a compatibility implementation exposes
+// these methods only to same-package tests when the behavior cannot be induced
+// through the public socket boundary deterministically.
+type relayScenarioResult struct {
+	CloseCode               websocket.StatusCode
+	CloseReason             string
+	Forwarded               [][]byte
+	ActiveWebSockets        int64
+	ActiveSessions          int64
+	IngressReservedBytes    int64
+	InflightDeliveryBytes   int64
+	BackpressuredSources    int64
+	ConnectionRejections    int64
+	FramesForwarded         int64
+	BytesForwarded          int64
+	OwnerTarget             string
+	OwnerCount              int
+	OpenedSockets           int
+	CapacityEpochChanged    bool
+	ListenerEpochChanged    bool
+	AdmissionOpen           bool
+	SourceBlocked           bool
+	DestinationClosed       bool
+	ConnectionStillAttached bool
+	ControlSocketUsed       bool
+	CleanupFailures         int
+}
+
+type relayScenarioController interface {
+	testRunScenario(name string) (relayScenarioResult, error)
+}
+
+func requireRelayScenario(t *testing.T, relay *Relay, name string) relayScenarioResult {
+	t.Helper()
+	controller, ok := any(relay).(relayScenarioController)
+	if !ok {
+		t.Fatalf("relay scenario controller is not implemented for %q", name)
+	}
+	result, err := controller.testRunScenario(name)
+	if err != nil {
+		t.Fatalf("run relay scenario %q: %v", name, err)
+	}
+	return result
+}
+
+func requireRelayFaultController(t *testing.T, relay *Relay) relayFaultController {
+	t.Helper()
+	controller, ok := any(relay).(relayFaultController)
+	if !ok {
+		t.Fatal("relay test fault controller is not implemented")
+	}
+	return controller
+}
