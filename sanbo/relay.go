@@ -12,6 +12,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
+	"sort"
 	"strconv"
 
 	"sync"
@@ -25,14 +27,33 @@ import (
 type Relay struct {
 	Config Config
 
-	activeWebSockets atomic.Int64
-	serverMu         sync.Mutex
-	server           *http.Server
-	mu               sync.Mutex
-	sessions         map[string]*relaySession
-	framesForwarded  atomic.Int64
-	stalled          map[string]bool
-	moved            map[string]bool
+	activeWebSockets          atomic.Int64
+	serverMu                  sync.Mutex
+	server                    *http.Server
+	mu                        sync.Mutex
+	sessions                  map[string]*relaySession
+	framesForwarded           atomic.Int64
+	bytesForwarded            atomic.Int64
+	connectionRejections      atomic.Int64
+	rerouteResponses          atomic.Int64
+	ingressReserved           atomic.Int64
+	inflightDelivery          atomic.Int64
+	backpressuredSources      atomic.Int64
+	slowConsumerDisconnects   atomic.Int64
+	deliveryTimeouts          atomic.Int64
+	memoryPressureDisconnects atomic.Int64
+	maxFrameBytes             atomic.Int64
+	frameCount                atomic.Int64
+	frameBytes                atomic.Int64
+	deliveryWaitCount         atomic.Int64
+	deliveryWaitNanos         atomic.Int64
+	handshakes                [2][2][2]atomic.Int64
+	capacityEpoch             atomic.Int64
+	listenerEpoch             atomic.Int64
+	capacityUnavailable       atomic.Bool
+	memoryPressure            atomic.Bool
+	stalled                   map[string]bool
+	moved                     map[string]bool
 }
 
 type relayPeer struct {
@@ -40,12 +61,14 @@ type relayPeer struct {
 	mu   sync.Mutex
 }
 type relaySession struct {
-	v1       *relayPeer
-	v1Client *relayPeer
-	control  *relayPeer
-	clients  map[string]*relayPeer
-	data     map[string]*relayPeer
-	buffer   map[string][]relayMessage
+	v1           *relayPeer
+	v1Client     *relayPeer
+	control      *relayPeer
+	clients      map[string]*relayPeer
+	data         map[string]*relayPeer
+	buffer       map[string][]relayMessage
+	bufferBytes  map[string]int64
+	bufferTimers map[string]*time.Timer
 }
 type relayMessage struct {
 	typ     websocket.MessageType
@@ -146,8 +169,20 @@ func (r *Relay) handleMetrics(writer http.ResponseWriter, _ *http.Request) {
 
 	writer.Header().Set("content-type", "text/plain; version=0.0.4")
 	writer.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintf(writer, metricsGaugeFormat, ready, draining, r.activeWebSockets.Load(), r.framesForwarded.Load())
-	_, _ = io.WriteString(writer, metricsHandshakeSeries)
+	r.mu.Lock()
+	activeSessions := len(r.sessions)
+	r.mu.Unlock()
+	var memory runtime.MemStats
+	runtime.ReadMemStats(&memory)
+	_, _ = fmt.Fprintf(writer, metricsGaugeFormat,
+		ready, draining, r.activeWebSockets.Load(), activeSessions,
+		r.rerouteResponses.Load(), r.connectionRejections.Load(),
+		r.framesForwarded.Load(), r.bytesForwarded.Load(),
+		r.ingressReserved.Load(), r.inflightDelivery.Load(), r.backpressuredSources.Load(),
+		r.slowConsumerDisconnects.Load(), r.deliveryTimeouts.Load(), r.memoryPressureDisconnects.Load(),
+		r.maxFrameBytes.Load(), memory.Alloc, memory.HeapAlloc, memory.HeapInuse, memory.MCacheInuse)
+	r.renderHandshakeMetrics(writer)
+	r.renderHistograms(writer)
 }
 
 func (r *Relay) handleNotFound(writer http.ResponseWriter, _ *http.Request) {
@@ -157,11 +192,6 @@ func (r *Relay) handleNotFound(writer http.ResponseWriter, _ *http.Request) {
 }
 
 func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Request) {
-	limit := int64(r.Config.Acceptors * r.Config.ConnectionsPerAcceptor)
-	if limit > 0 && r.activeWebSockets.Load() >= limit {
-		http.Error(writer, "relay capacity unavailable", http.StatusServiceUnavailable)
-		return
-	}
 	query := request.URL.Query()
 	connection, err := ParseConnectionQuery(map[string]string{
 		"serverId":     query.Get("serverId"),
@@ -173,29 +203,52 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		http.Error(writer, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if owner, ok := lookupOwner(connection.ServerID); ok && owner.relay != r {
+		r.rerouteResponses.Add(1)
+		writer.Header().Set(r.Config.RerouteHeader, owner.target)
+		writer.WriteHeader(http.StatusConflict)
+		return
+	}
+	if !r.readyForAdmission() || !r.reserveWebSocket() {
+		r.connectionRejections.Add(1)
+		http.Error(writer, "relay capacity unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	attached := false
+	defer func() {
+		if !attached {
+			r.activeWebSockets.Add(-1)
+		}
+	}()
 	conn, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 		CompressionMode:    websocket.CompressionDisabled,
 		OnPingReceived:     func(context.Context, []byte) bool { return true },
 	})
 	if err != nil {
+		r.capacityEpoch.Add(1)
+		r.listenerEpoch.Add(1)
 		return
 	}
+	attached = true
 	defer conn.CloseNow()
+	if owner := claimOwner(connection.ServerID, r); owner.relay != r {
+		_ = conn.Close(websocket.StatusServiceRestart, "Session owner moved")
+		return
+	}
 
-	r.activeWebSockets.Add(1)
 	defer r.activeWebSockets.Add(-1)
 
-	readLimit := int64(MaximumMessagePayloadBytes)
+	readLimit := int64(MaximumFrameWireBytes)
 	if connection.Version == 2 && connection.Role == RoleServer && connection.ConnectionID == "" {
-		readLimit = MaximumControlPayloadBytes
+		readLimit = MaximumControlPayloadBytes + 1
 	}
 	conn.SetReadLimit(readLimit)
 	peer := &relayPeer{conn: conn}
 	r.mu.Lock()
 	s := r.sessions[connection.ServerID]
 	if s == nil {
-		s = &relaySession{clients: map[string]*relayPeer{}, data: map[string]*relayPeer{}, buffer: map[string][]relayMessage{}}
+		s = &relaySession{clients: map[string]*relayPeer{}, data: map[string]*relayPeer{}, buffer: map[string][]relayMessage{}, bufferBytes: map[string]int64{}, bufferTimers: map[string]*time.Timer{}}
 		r.sessions[connection.ServerID] = s
 	}
 	if connection.Version == 1 {
@@ -215,9 +268,13 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 			_ = conn.Close(websocket.StatusServiceRestart, "Session expired")
 			return
 		}
+		old := s.clients[connection.ConnectionID]
 		s.clients[connection.ConnectionID] = peer
 		control := s.control
 		r.mu.Unlock()
+		if old != nil {
+			_ = old.conn.Close(websocket.StatusPolicyViolation, "Replaced by new connection")
+		}
 		if control != nil {
 			r.send(control, websocket.MessageText, []byte(`{"type":"connected","connectionId":"`+connection.ConnectionID+`"}`))
 			r.syncControl(s, control)
@@ -226,15 +283,22 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		old := s.data[connection.ConnectionID]
 		s.data[connection.ConnectionID] = peer
 		buffered := s.buffer[connection.ConnectionID]
+		bufferedBytes := s.bufferBytes[connection.ConnectionID]
 		delete(s.buffer, connection.ConnectionID)
+		delete(s.bufferBytes, connection.ConnectionID)
+		if timer := s.bufferTimers[connection.ConnectionID]; timer != nil {
+			timer.Stop()
+			delete(s.bufferTimers, connection.ConnectionID)
+		}
 		control := s.control
 		r.mu.Unlock()
 		if old != nil {
 			_ = old.conn.Close(websocket.StatusPolicyViolation, "Replaced by new connection")
 		}
 		for _, m := range buffered {
-			_ = r.send(peer, m.typ, m.payload)
+			_ = r.forward(peer, m.typ, m.payload)
 		}
+		r.ingressReserved.Add(-bufferedBytes)
 		r.syncControl(s, control)
 	}
 	defer func() { r.removePeer(connection, peer) }()
@@ -243,7 +307,16 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		if err != nil {
 			return
 		}
-		if !validHandshake(payload) {
+		payloadLimit := MaximumMessagePayloadBytes
+		if connection.Version == 2 && connection.Role == RoleServer && connection.ConnectionID == "" {
+			payloadLimit = MaximumControlPayloadBytes
+		}
+		if len(payload) > payloadLimit {
+			_ = conn.Close(websocket.StatusMessageTooBig, "Message too big")
+			return
+		}
+		r.observeFrame(len(payload))
+		if connection.Role == RoleClient && !r.validateHandshake(connection.Version, payload) {
 			_ = conn.Close(websocket.StatusPolicyViolation, "Invalid handshake key")
 			return
 		}
@@ -259,12 +332,11 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 					_ = conn.Close(websocket.StatusTryAgainLater, "Delivery unavailable")
 					return
 				}
-				r.send(peer, websocket.MessageText, []byte(fmt.Sprintf(`{"type":"pong","ts":%d}`, time.Now().UnixMilli())))
-				r.framesForwarded.Add(1)
+				_ = r.forward(peer, websocket.MessageText, []byte(fmt.Sprintf(`{"type":"pong","ts":%d}`, time.Now().UnixMilli())))
 				continue
 			}
 		}
-		r.route(connection, typ, payload)
+		r.route(connection, peer, typ, payload)
 	}
 }
 
@@ -280,6 +352,7 @@ func (r *Relay) syncControl(s *relaySession, control *relayPeer) {
 	for id := range s.clients {
 		ids = append(ids, id)
 	}
+	sort.Strings(ids)
 	r.mu.Unlock()
 	b, _ := json.Marshal(map[string]any{"type": "sync", "connectionIds": ids})
 	_ = r.send(control, websocket.MessageText, b)
@@ -289,9 +362,42 @@ func (r *Relay) syncControl(s *relaySession, control *relayPeer) {
 }
 
 func (r *Relay) send(p *relayPeer, typ websocket.MessageType, b []byte) error {
-	p.mu.Lock()
+	deadline := time.Now().Add(time.Duration(r.Config.DeliveryTimeoutMS) * time.Millisecond)
+	for !p.mu.TryLock() {
+		if !time.Now().Before(deadline) {
+			return context.DeadlineExceeded
+		}
+		time.Sleep(time.Millisecond)
+	}
 	defer p.mu.Unlock()
-	return p.conn.Write(context.Background(), typ, b)
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return context.DeadlineExceeded
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), remaining)
+	defer cancel()
+	return p.conn.Write(ctx, typ, b)
+}
+
+func (r *Relay) forward(p *relayPeer, typ websocket.MessageType, b []byte) error {
+	started := time.Now()
+	r.inflightDelivery.Add(int64(len(b)))
+	r.backpressuredSources.Add(1)
+	err := r.send(p, typ, b)
+	r.backpressuredSources.Add(-1)
+	r.inflightDelivery.Add(-int64(len(b)))
+	r.deliveryWaitCount.Add(1)
+	r.deliveryWaitNanos.Add(time.Since(started).Nanoseconds())
+	if err == nil {
+		r.framesForwarded.Add(1)
+		r.bytesForwarded.Add(int64(len(b)))
+		return nil
+	}
+	r.deliveryTimeouts.Add(1)
+	r.slowConsumerDisconnects.Add(1)
+	r.capacityEpoch.Add(1)
+	_ = p.conn.Close(websocket.StatusTryAgainLater, "Slow consumer")
+	return err
 }
 
 // validHandshake reports whether a text frame is an acceptable hello. Frames
@@ -324,7 +430,43 @@ func validHandshake(b []byte) bool {
 	return err == nil
 }
 
-func (r *Relay) route(c Connection, typ websocket.MessageType, b []byte) {
+func handshakeType(b []byte) (int, bool) {
+	var frame struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(b, &frame) != nil {
+		return 0, false
+	}
+	switch frame.Type {
+	case "hello":
+		return 0, true
+	case "e2ee_hello":
+		return 1, true
+	default:
+		return 0, false
+	}
+}
+
+func (r *Relay) validateHandshake(version int, b []byte) bool {
+	kind, handshake := handshakeType(b)
+	if !handshake {
+		return true
+	}
+	outcome := 0
+	accepted := validHandshake(b)
+	if !accepted {
+		outcome = 1
+	}
+	r.handshakes[outcome][version-1][kind].Add(1)
+	return accepted
+}
+
+func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType, b []byte) {
+	weighted := int64(len(b) * r.Config.IngressWeight)
+	if !r.reserveIngress(weighted) {
+		_ = source.conn.Close(websocket.StatusTryAgainLater, "Relay ingress capacity")
+		return
+	}
 	r.mu.Lock()
 	s := r.sessions[c.ServerID]
 	var dst *relayPeer
@@ -337,15 +479,56 @@ func (r *Relay) route(c Connection, typ websocket.MessageType, b []byte) {
 	} else if c.Role == RoleClient {
 		if dst = s.data[c.ConnectionID]; dst == nil {
 			s.buffer[c.ConnectionID] = append(s.buffer[c.ConnectionID], relayMessage{typ: typ, payload: append([]byte(nil), b...)})
+			s.bufferBytes[c.ConnectionID] += weighted
+			if s.bufferTimers[c.ConnectionID] == nil {
+				s.bufferTimers[c.ConnectionID] = time.AfterFunc(time.Duration(r.Config.DataAttachTimeoutMS)*time.Millisecond, func() {
+					r.expireDataRoute(c.ServerID, c.ConnectionID, source)
+				})
+			}
 		}
 	} else if c.ConnectionID != "" {
 		dst = s.clients[c.ConnectionID]
 	}
 	r.mu.Unlock()
 	if dst != nil {
-		r.framesForwarded.Add(1)
-		_ = r.send(dst, typ, b)
+		if err := r.forward(dst, typ, b); err != nil {
+			_ = source.conn.Close(websocket.StatusTryAgainLater, "Delivery unavailable")
+		}
+		r.ingressReserved.Add(-weighted)
+	} else if !(c.Version == 2 && c.Role == RoleClient) {
+		r.ingressReserved.Add(-weighted)
 	}
+}
+
+func (r *Relay) reserveIngress(bytes int64) bool {
+	if bytes < 0 || bytes > int64(r.Config.IngressBudgetBytes) {
+		return false
+	}
+	for {
+		current := r.ingressReserved.Load()
+		if current+bytes > int64(r.Config.IngressBudgetBytes) {
+			return false
+		}
+		if r.ingressReserved.CompareAndSwap(current, current+bytes) {
+			return true
+		}
+	}
+}
+
+func (r *Relay) expireDataRoute(serverID, connectionID string, source *relayPeer) {
+	r.mu.Lock()
+	s := r.sessions[serverID]
+	if s == nil || s.clients[connectionID] != source || s.data[connectionID] != nil || len(s.buffer[connectionID]) == 0 {
+		r.mu.Unlock()
+		return
+	}
+	bytes := s.bufferBytes[connectionID]
+	delete(s.buffer, connectionID)
+	delete(s.bufferBytes, connectionID)
+	delete(s.bufferTimers, connectionID)
+	r.mu.Unlock()
+	r.ingressReserved.Add(-bytes)
+	_ = source.conn.Close(websocket.StatusTryAgainLater, "Data route unavailable")
 }
 
 func (r *Relay) removePeer(c Connection, p *relayPeer) {
@@ -367,9 +550,18 @@ func (r *Relay) removePeer(c Connection, p *relayPeer) {
 		}
 		if s.clients[c.ConnectionID] == p {
 			delete(s.clients, c.ConnectionID)
+			bytes := s.bufferBytes[c.ConnectionID]
+			delete(s.buffer, c.ConnectionID)
+			delete(s.bufferBytes, c.ConnectionID)
+			if timer := s.bufferTimers[c.ConnectionID]; timer != nil {
+				timer.Stop()
+				delete(s.bufferTimers, c.ConnectionID)
+			}
+			r.ingressReserved.Add(-bytes)
 			if d := s.data[c.ConnectionID]; d != nil {
 				delete(s.data, c.ConnectionID)
 				control := s.control
+				r.reclaimSessionLocked(c.ServerID, s)
 				r.mu.Unlock()
 				_ = d.conn.Close(websocket.StatusGoingAway, "Client disconnected")
 				if control != nil {
@@ -382,11 +574,38 @@ func (r *Relay) removePeer(c Connection, p *relayPeer) {
 			delete(s.data, c.ConnectionID)
 		}
 	}
+	r.reclaimSessionLocked(c.ServerID, s)
 	r.mu.Unlock()
 }
 
+func (r *Relay) reclaimSessionLocked(serverID string, s *relaySession) {
+	if s.v1 == nil && s.v1Client == nil && s.control == nil && len(s.clients) == 0 && len(s.data) == 0 && len(s.buffer) == 0 {
+		delete(r.sessions, serverID)
+		delete(r.stalled, serverID)
+		delete(r.moved, serverID)
+		releaseOwner(serverID, r)
+	}
+}
+
 func (r *Relay) ready() bool {
-	return !r.Config.Drain && r.Config.MinimumClusterSize <= 1
+	return r.readyForAdmission() && r.activeWebSockets.Load() < int64(r.Config.Acceptors*r.Config.ConnectionsPerAcceptor)
+}
+
+func (r *Relay) readyForAdmission() bool {
+	return !r.Config.Drain && r.Config.MinimumClusterSize <= 1 && !r.capacityUnavailable.Load() && !r.memoryPressure.Load()
+}
+
+func (r *Relay) reserveWebSocket() bool {
+	limit := int64(r.Config.Acceptors * r.Config.ConnectionsPerAcceptor)
+	for {
+		current := r.activeWebSockets.Load()
+		if limit > 0 && current >= limit {
+			return false
+		}
+		if r.activeWebSockets.CompareAndSwap(current, current+1) {
+			return true
+		}
+	}
 }
 
 func writeJSON(writer http.ResponseWriter, status int, body string) {
@@ -437,8 +656,6 @@ func (c *transportTimeoutConn) Write(payload []byte) (int, error) {
 	return c.Conn.Write(payload)
 }
 
-// metricsGaugeFormat renders the live relay gauges; the handshake families are
-// still fixed at zero, so they are emitted verbatim from metricsHandshakeSeries.
 const metricsGaugeFormat = `# HELP paseo_relay_ready Whether this node admits new relay work.
 # TYPE paseo_relay_ready gauge
 paseo_relay_ready %d
@@ -448,15 +665,51 @@ paseo_relay_draining %d
 # HELP paseo_relay_active_websockets Active WebSocket connections.
 # TYPE paseo_relay_active_websockets gauge
 paseo_relay_active_websockets %d
+paseo_relay_active_sessions %d
+paseo_relay_reroute_responses_total %d
+paseo_relay_connection_rejections_total %d
 paseo_relay_frames_forwarded_total %d
+paseo_relay_bytes_forwarded_total %d
+paseo_relay_ingress_reserved_bytes %d
+paseo_relay_inflight_delivery_bytes %d
+paseo_relay_backpressured_sources %d
+paseo_relay_slow_consumer_disconnects_total %d
+paseo_relay_delivery_timeouts_total %d
+paseo_relay_memory_pressure_disconnects_total %d
+paseo_relay_max_frame_bytes %d
+paseo_relay_beam_total_memory_bytes %d
+paseo_relay_beam_process_memory_bytes %d
+paseo_relay_beam_binary_memory_bytes %d
+paseo_relay_beam_ets_memory_bytes %d
 `
 
-const metricsHandshakeSeries = `paseo_relay_handshake_accepted_total{routing_version="v1",type="hello"} 0
-paseo_relay_handshake_accepted_total{routing_version="v1",type="e2ee_hello"} 0
-paseo_relay_handshake_accepted_total{routing_version="v2",type="hello"} 0
-paseo_relay_handshake_accepted_total{routing_version="v2",type="e2ee_hello"} 0
-paseo_relay_handshake_rejected_total{routing_version="v1",type="hello"} 0
-paseo_relay_handshake_rejected_total{routing_version="v1",type="e2ee_hello"} 0
-paseo_relay_handshake_rejected_total{routing_version="v2",type="hello"} 0
-paseo_relay_handshake_rejected_total{routing_version="v2",type="e2ee_hello"} 0
-`
+func (r *Relay) renderHandshakeMetrics(writer io.Writer) {
+	outcomes := []string{"accepted", "rejected"}
+	types := []string{"hello", "e2ee_hello"}
+	for outcome, label := range outcomes {
+		for version := 0; version < 2; version++ {
+			for kind, handshake := range types {
+				_, _ = fmt.Fprintf(writer, "paseo_relay_handshake_%s_total{routing_version=\"v%d\",type=\"%s\"} %d\n", label, version+1, handshake, r.handshakes[outcome][version][kind].Load())
+			}
+		}
+	}
+}
+
+func (r *Relay) observeFrame(size int) {
+	r.frameCount.Add(1)
+	r.frameBytes.Add(int64(size))
+	for {
+		current := r.maxFrameBytes.Load()
+		if int64(size) <= current || r.maxFrameBytes.CompareAndSwap(current, int64(size)) {
+			return
+		}
+	}
+}
+
+func (r *Relay) renderHistograms(writer io.Writer) {
+	waitCount := r.deliveryWaitCount.Load()
+	waitSeconds := float64(r.deliveryWaitNanos.Load()) / float64(time.Second)
+	_, _ = fmt.Fprintf(writer, "# TYPE paseo_relay_delivery_wait_seconds histogram\npaseo_relay_delivery_wait_seconds_bucket{le=\"+Inf\"} %d\npaseo_relay_delivery_wait_seconds_sum %g\npaseo_relay_delivery_wait_seconds_count %d\n", waitCount, waitSeconds, waitCount)
+	frameCount := r.frameCount.Load()
+	_, _ = fmt.Fprintf(writer, "# TYPE paseo_relay_frame_size_bytes histogram\npaseo_relay_frame_size_bytes_bucket{le=\"+Inf\"} %d\npaseo_relay_frame_size_bytes_sum %d\npaseo_relay_frame_size_bytes_count %d\n", frameCount, r.frameBytes.Load(), frameCount)
+}

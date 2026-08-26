@@ -6,10 +6,10 @@ Sanbo는 [`getpaseo/paseo-relay`](https://github.com/getpaseo/paseo-relay)의
 기준은 paseo-relay 커밋
 `3fc41c96c8c63f3a7109e832899cc57d473c4531`입니다.
 
-> 현재는 TDD 기반 초기 구현 단계입니다. 단일 프로세스의 v1/v2 프레임 중계와
-> handshake 검증까지 구현되어 있지만 분산 세션 소유권, 엄격한 Capacity,
-> backpressure 및 다중 노드 동작은 아직 구현되지 않았습니다. 따라서 전체
-> 호환 테스트는 의도적으로 실패합니다.
+> Fly 배포 어댑터를 제외한 provider-neutral 호환 계약을 구현했습니다. v1/v2
+> 프레임 중계, 다중 relay 인스턴스의 세션 소유권과 opaque reroute, 엄격한
+> Capacity ledger, bounded delivery/backpressure, handshake 검증 및 운영 메트릭을
+> 실제 HTTP/WebSocket과 결정적 fault injection으로 검증합니다.
 
 ## 요구 사항
 
@@ -45,9 +45,9 @@ go build -o sanbo .
 | 경로 | 용도 | 현재 상태 |
 | --- | --- | --- |
 | `GET /health` | 프로세스 liveness | 구현됨 |
-| `GET /ready` | 신규 작업 수락 가능 여부 | drain 및 최소 클러스터 설정의 기본 판정 구현됨 |
-| `GET /metrics` | Prometheus 텍스트 메트릭 | 기본 readiness, drain, WebSocket gauge 구현됨 |
-| `GET /ws` | paseo-relay 호환 WebSocket 업그레이드 | 단일 프로세스 v1/v2 routing 구현됨 |
+| `GET /ready` | 신규 작업 수락 가능 여부 | drain, 클러스터 floor, 연결 ceiling, capacity/pressure 반영 |
+| `GET /metrics` | Prometheus 텍스트 메트릭 | 연결·세션·전달·용량·handshake·histogram 전체 surface |
+| `GET /ws` | paseo-relay 호환 WebSocket 업그레이드 | v1/v2 routing, ownership 및 opaque reroute 구현 |
 
 헬스 체크 예시:
 
@@ -72,7 +72,7 @@ curl http://127.0.0.1:4000/metrics
 ```
 
 같은 `serverId`의 server/client 사이에서 텍스트 및 바이너리 프레임을 순서대로
-중계하는 것이 목표 계약입니다.
+중계합니다.
 
 ### v2
 
@@ -89,8 +89,8 @@ curl http://127.0.0.1:4000/metrics
 
 v2 client에서 `connectionId`를 생략하면 relay가 `conn_` 접두사의 ID를
 생성합니다. daemon control 입력은 최대 64KiB이며, data 메시지의 최대 payload는
-`32MiB - 14바이트`입니다. 이 크기를 넘는 메시지는 최종 구현에서 WebSocket
-close code `1009`로 종료되어야 합니다.
+`32MiB - 14바이트`입니다. 이 크기를 넘는 메시지는 WebSocket close code
+`1009`로 종료됩니다.
 
 ## 환경변수
 
@@ -134,21 +134,22 @@ close code `1009`로 종료되어야 합니다.
 go test -run '^$' ./...
 ```
 
-현재 구현된 설정, 쿼리 및 기본 운영 API 테스트:
+전체 호환 계약 실행:
 
 ```sh
-go test -run '^(TestLoadConfig|TestEnvironmentVariableInventory|TestConfig|TestParseConnection|TestOperationsHealthIsAlwaysLive|TestOperationsReadyRefusesNewWorkDuringDrain|TestOperationsMetricsExposeStablePrometheusSurface|TestOperationsReadyWaitsForMinimumClusterSize|TestOperationsUnknownPathReturnsNotFound)$' ./...
-```
-
-전체 TDD 계약 실행:
-
-```sh
-go test ./...
+go test -count=1 ./...
 ```
 
 원본 109개 중 Fly 어댑터 전용 9개를 제외한 100개 테스트 계약을 포팅했으며,
-Go 전용 회귀 테스트를 포함해 총 124개 테스트가 있습니다. 미구현 기능 때문에
-전체 실행은 현재 실패하는 것이 정상입니다. 자세한 기준과 테스트 그룹은
+Go 전용 회귀 테스트를 포함해 총 124개 테스트와 5개 fuzz seed target이 있습니다.
+race detector까지 포함한 검증 명령은 다음과 같습니다.
+
+```sh
+go test -race -count=1 ./...
+go vet ./...
+```
+
+자세한 기준과 테스트 그룹은
 [`TESTING.md`](TESTING.md)를 참고하세요.
 
 ## 구현 상태
@@ -159,21 +160,19 @@ Go 전용 회귀 테스트를 포함해 총 124개 테스트가 있습니다. �
 - v1/v2 query parsing과 route ID 길이 제한
 - HTTP health, readiness, 기본 Prometheus 응답
 - `coder/websocket` 기반 upgrade와 read limit
-- 단일 프로세스 v1 및 v2 양방향 프레임 forwarding
+- v1 및 v2 양방향 프레임 forwarding과 per-destination 직렬화
 - v2 control sync, connected, disconnected 및 legacy ping/pong의 기본 경로
 - canonical X25519 handshake key 검증
+- client-originated handshake만 검증하는 role boundary와 outcome counter
+- 가중 ingress reservation, data-route attach timeout 및 buffer 정리
+- 전달 deadline, slow-consumer fail-closed 처리 및 capacity reconciliation
+- 단일 프로세스 내 다중 relay node ownership, 원자적 claim 및 opaque reroute
+- 연결 ceiling, memory-pressure admission/shedding 및 session reclamation
+- 전체 Prometheus counter/gauge/histogram surface
+- 실제 socket lifecycle을 사용하는 provider-neutral load 시나리오
 - TCP 수신 버퍼 및 전송 timeout 기반 listener wrapper
 - 정상 종료를 위한 `Shutdown`
 
-아직 구현되지 않음:
-
-- 단일/다중 노드 세션 ownership 및 opaque reroute
-- 연결 및 메시지 Capacity ledger
-- bounded pre-attach buffer와 data-route expiry
-- Writer queue, 전달 deadline과 slow-consumer 처리
-- 메모리 pressure shedding 및 epoch 재시작
-- 전체 Prometheus metric 값 계측
-- black-box load client
-
-호환 기능은 해당 테스트를 먼저 활성 상태로 유지한 채 구현합니다. 테스트를
-skip하거나 기대값을 완화하는 방식으로 호환성을 맞추지 않습니다.
+Fly deployment adapter 동작은 의도적으로 범위에서 제외됩니다. 호환 테스트는
+skip하거나 기대값을 완화하지 않으며, scheduler·transport·memory fault는 실제
+relay state에 결정적으로 주입한 뒤 socket과 production counter를 관찰합니다.
