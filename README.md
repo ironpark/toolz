@@ -9,6 +9,7 @@
 | 도구 | 설명 |
 | --- | --- |
 | [`planr`](planr/) | 규격화된 Markdown 계획을 등록·조회하는 Go CLI입니다. |
+| [`chatctl`](chatctl/) | ChatGPT, Gemini, Claude 웹 세션의 대화 목록을 관리하는 Go CLI입니다. |
 
 각 도구의 사용 방법과 상세 설명은 해당 디렉터리에서 안내합니다.
 
