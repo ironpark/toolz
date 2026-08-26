@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from analyze import (
+    find_paths_outside,
     build_transcript,
     error_excerpt,
     failed_executions,
@@ -289,3 +290,27 @@ class WorktreeStateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FindPathsOutsideTest(unittest.TestCase):
+    WORKSPACE = "/var/folders/ab/planr-codex-xyz"
+
+    def test_relative_paths_are_not_absolute(self) -> None:
+        # `./...`, `./tasks` and the `**/.git/**` glob appear in nearly every
+        # Go or ripgrep command; reading them as absolute made this signal fire
+        # on every run and say nothing.
+        commands = [
+            "go test ./... && go vet ./...",
+            "go build -o tasks . && ./tasks add 'buy milk'",
+            "rg --files -g '!**/.git/**'",
+            "cd ../sibling && ls",
+        ]
+        self.assertEqual(find_paths_outside(commands, self.WORKSPACE), [])
+
+    def test_paths_inside_the_workspace_are_allowed(self) -> None:
+        commands = [f"cat {self.WORKSPACE}/main.go", "ls /usr/bin", "mktemp -d /tmp/x"]
+        self.assertEqual(find_paths_outside(commands, self.WORKSPACE), [])
+
+    def test_reports_a_real_escape(self) -> None:
+        commands = [f"cat {self.WORKSPACE}/main.go", "cat /Users/someone/secrets.txt"]
+        self.assertEqual(find_paths_outside(commands, self.WORKSPACE), ["/Users/someone/secrets.txt"])

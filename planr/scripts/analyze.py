@@ -511,6 +511,30 @@ def failed_executions(session: SessionStats) -> list[dict[str, Any]]:
     return failures
 
 
+# A path is absolute only when the slash does not continue a word or a
+# relative prefix.  Excluding `.` and `*` is what keeps `./...`, `../x` and the
+# glob `**/.git/**` from being read as absolute paths -- they appear in almost
+# every Go or ripgrep command, so treating them as absolute made the
+# "outside the workspace" signal fire on every single run.
+ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9_.*])/(?:[^\s'\";&|]|\\ )+")
+
+# Interpreters, system binaries and scratch space are not workspace escapes.
+ALLOWED_PATH_PREFIXES = ("/bin/", "/usr/", "/sbin/", "/private/tmp/", "/tmp/", "/dev/")
+
+
+def find_paths_outside(commands: Iterable[str], workspace: str) -> list[str]:
+    """Return absolute paths a command referenced outside the isolated workspace."""
+
+    outside = []
+    for command in commands:
+        for path in ABSOLUTE_PATH.findall(command):
+            if path.startswith(ALLOWED_PATH_PREFIXES):
+                continue
+            if not path.startswith(workspace) and "/.codex/" not in path:
+                outside.append(path)
+    return outside
+
+
 def repeated_commands(commands: Iterable[str]) -> list[tuple[str, int]]:
     counts = collections.Counter(" ".join(command.split()) for command in commands)
     return sorted(((command, count) for command, count in counts.items() if count >= 3), key=lambda item: (-item[1], item[0]))
@@ -564,13 +588,7 @@ def make_observations(
 
     workspace = read_metadata(run_dir).get("workspace", "")
     if workspace:
-        outside_paths = []
-        for command in commands:
-            for path in re.findall(r"(?<![A-Za-z0-9_])/(?:[^\s'\";&|]|\\ )+", command):
-                if path.startswith(("/bin/", "/usr/", "/sbin/", "/private/tmp/", "/tmp/", "/dev/")):
-                    continue
-                if not path.startswith(workspace) and "/.codex/" not in path:
-                    outside_paths.append(path)
+        outside_paths = find_paths_outside(commands, workspace)
         if outside_paths:
             documentation.append("격리 저장소 밖의 절대 경로를 참조한 명령이 관찰되었습니다. AGENTS.md의 격리 경계를 더 강하게 하거나 허용 범위를 명시하세요.")
 
