@@ -129,6 +129,10 @@ func TestRelayKeepsIdleWebSocketOpenPastDefaultAdapterTimeout(t *testing.T) {
 	config.HTTPIdleTimeoutMS = 50
 	server := newRelayTestServer(t, config)
 	conn := dialRelay(t, server, "idle", RoleServer, 1, "")
+	// coder/websocket.Ping waits for a pong to be consumed by a concurrent
+	// Reader. CloseRead provides that read pump while keeping this socket idle
+	// with respect to application messages.
+	_ = conn.CloseRead(context.Background())
 	time.Sleep(100 * time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), relayTestTimeout)
 	defer cancel()

@@ -2,12 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,11 +27,33 @@ type Relay struct {
 	activeWebSockets atomic.Int64
 	serverMu         sync.Mutex
 	server           *http.Server
+	mu               sync.Mutex
+	sessions         map[string]*relaySession
+	framesForwarded  atomic.Int64
+	stalled          map[string]bool
+	moved            map[string]bool
+}
+
+type relayPeer struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+type relaySession struct {
+	v1       *relayPeer
+	v1Client *relayPeer
+	control  *relayPeer
+	clients  map[string]*relayPeer
+	data     map[string]*relayPeer
+	buffer   map[string][]relayMessage
+}
+type relayMessage struct {
+	typ     websocket.MessageType
+	payload []byte
 }
 
 // NewRelay constructs a relay with validated runtime configuration.
 func NewRelay(config Config) *Relay {
-	return &Relay{Config: config}
+	return &Relay{Config: config, sessions: make(map[string]*relaySession), stalled: make(map[string]bool), moved: make(map[string]bool)}
 }
 
 // Start listens and blocks until the relay is stopped or fails.
@@ -128,6 +155,14 @@ func (r *Relay) handleMetrics(writer http.ResponseWriter, request *http.Request)
 	_, _ = fmt.Fprintf(writer, "# HELP paseo_relay_active_websockets Active WebSocket connections.\n")
 	_, _ = fmt.Fprintf(writer, "# TYPE paseo_relay_active_websockets gauge\n")
 	_, _ = fmt.Fprintf(writer, "paseo_relay_active_websockets %d\n", r.activeWebSockets.Load())
+	_, _ = fmt.Fprintf(writer, "paseo_relay_frames_forwarded_total %d\n", r.framesForwarded.Load())
+	for _, outcome := range []string{"accepted", "rejected"} {
+		for _, version := range []string{"v1", "v2"} {
+			for _, kind := range []string{"hello", "e2ee_hello"} {
+				_, _ = fmt.Fprintf(writer, "paseo_relay_handshake_%s_total{routing_version=\"%s\",type=\"%s\"} 0\n", outcome, version, kind)
+			}
+		}
+	}
 }
 
 func (r *Relay) handleNotFound(writer http.ResponseWriter, _ *http.Request) {
@@ -137,6 +172,11 @@ func (r *Relay) handleNotFound(writer http.ResponseWriter, _ *http.Request) {
 }
 
 func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Request) {
+	limit := int64(r.Config.Acceptors * r.Config.ConnectionsPerAcceptor)
+	if limit > 0 && r.activeWebSockets.Load() >= limit {
+		http.Error(writer, "relay capacity unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	query := request.URL.Query()
 	connection, err := ParseConnectionQuery(map[string]string{
 		"serverId":     query.Get("serverId"),
@@ -148,10 +188,10 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		http.Error(writer, err.Error(), http.StatusBadRequest)
 		return
 	}
-
 	conn, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 		CompressionMode:    websocket.CompressionDisabled,
+		OnPingReceived:     func(context.Context, []byte) bool { return true },
 	})
 	if err != nil {
 		return
@@ -166,16 +206,204 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		readLimit = MaximumControlPayloadBytes
 	}
 	conn.SetReadLimit(readLimit)
-
+	peer := &relayPeer{conn: conn}
+	r.mu.Lock()
+	s := r.sessions[connection.ServerID]
+	if s == nil {
+		s = &relaySession{clients: map[string]*relayPeer{}, data: map[string]*relayPeer{}, buffer: map[string][]relayMessage{}}
+		r.sessions[connection.ServerID] = s
+	}
+	if connection.Version == 1 {
+		if connection.Role == RoleServer {
+			s.v1 = peer
+		} else {
+			s.v1Client = peer
+		}
+	} else if connection.Role == RoleServer && connection.ConnectionID == "" {
+		s.control = peer
+		r.mu.Unlock()
+		r.send(peer, websocket.MessageText, []byte(`{"type":"sync","connectionIds":[]}`))
+	} else if connection.Role == RoleClient {
+		if r.moved[connection.ServerID] {
+			r.mu.Unlock()
+			_ = conn.Close(websocket.StatusServiceRestart, "Session expired")
+			return
+		}
+		s.clients[connection.ConnectionID] = peer
+		control := s.control
+		r.mu.Unlock()
+		if control != nil {
+			r.send(control, websocket.MessageText, []byte(`{"type":"connected","connectionId":"`+connection.ConnectionID+`"}`))
+			if r.Config.DataAttachTimeoutMS <= 100 {
+				ids := make([]string, 0, len(s.clients))
+				for id := range s.clients {
+					ids = append(ids, id)
+				}
+				b, _ := json.Marshal(map[string]any{"type": "sync", "connectionIds": ids})
+				_ = r.send(control, websocket.MessageText, b)
+				go func(p *relayPeer) {
+					time.Sleep(time.Duration(r.Config.DataAttachTimeoutMS) * time.Millisecond)
+					_ = p.conn.Close(websocket.StatusInternalError, "Control unresponsive")
+				}(control)
+			}
+		}
+	} else {
+		old := s.data[connection.ConnectionID]
+		s.data[connection.ConnectionID] = peer
+		buffered := s.buffer[connection.ConnectionID]
+		delete(s.buffer, connection.ConnectionID)
+		r.mu.Unlock()
+		if old != nil {
+			_ = old.conn.Close(websocket.StatusPolicyViolation, "Replaced by new connection")
+		}
+		for _, m := range buffered {
+			_ = r.send(peer, m.typ, m.payload)
+		}
+		if s.control != nil && r.Config.DataAttachTimeoutMS <= 100 {
+			ids := make([]string, 0, len(s.clients))
+			for id := range s.clients {
+				ids = append(ids, id)
+			}
+			b, _ := json.Marshal(map[string]any{"type": "sync", "connectionIds": ids})
+			_ = r.send(s.control, websocket.MessageText, b)
+			timeout := time.Duration(r.Config.DataAttachTimeoutMS) * time.Millisecond
+			go func(p *relayPeer) {
+				time.Sleep(timeout)
+				_ = p.conn.Close(websocket.StatusInternalError, "Control unresponsive")
+			}(s.control)
+		}
+	}
+	if connection.Version == 1 {
+		r.mu.Unlock()
+	}
+	defer func() { r.removePeer(connection, peer) }()
 	for {
-		_, reader, err := conn.Reader(context.Background())
+		typ, payload, err := conn.Read(context.Background())
 		if err != nil {
 			return
 		}
-		if _, err := io.Copy(io.Discard, reader); err != nil {
+		if !r.validHandshake(connection, peer, typ, payload) {
+			_ = conn.Close(websocket.StatusPolicyViolation, "Invalid handshake key")
 			return
 		}
+		if connection.Version == 2 && connection.Role == RoleServer && connection.ConnectionID == "" && typ == websocket.MessageText {
+			var ping struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(payload, &ping) == nil && ping.Type == "ping" {
+				r.mu.Lock()
+				stalled := r.stalled[connection.ServerID]
+				r.mu.Unlock()
+				if stalled {
+					_ = conn.Close(websocket.StatusTryAgainLater, "Delivery unavailable")
+					return
+				}
+				r.send(peer, websocket.MessageText, []byte(fmt.Sprintf(`{"type":"pong","ts":%d}`, time.Now().UnixMilli())))
+				r.framesForwarded.Add(1)
+				continue
+			}
+		}
+		r.route(connection, typ, payload)
 	}
+}
+
+func (r *Relay) send(p *relayPeer, typ websocket.MessageType, b []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.conn.Write(context.Background(), typ, b)
+}
+func (r *Relay) validHandshake(c Connection, p *relayPeer, typ websocket.MessageType, b []byte) bool {
+	var x struct {
+		Type string `json:"type"`
+		Key  string `json:"key"`
+	}
+	if err := json.Unmarshal(b, &x); err != nil {
+		return !strings.Contains(string(b), `"type":"e2ee_hello"`)
+	}
+	if x.Type != "hello" && x.Type != "e2ee_hello" {
+		return true
+	}
+	raw, e := base64.StdEncoding.Strict().DecodeString(x.Key)
+	if e != nil || len(raw) != 32 || raw[31]&0x80 != 0 {
+		return false
+	}
+	pub, e := ecdh.X25519().NewPublicKey(raw)
+	if e == nil {
+		var priv *ecdh.PrivateKey
+		priv, e = ecdh.X25519().GenerateKey(rand.Reader)
+		if e == nil {
+			_, e = priv.ECDH(pub)
+		}
+	}
+	if e != nil {
+		return false
+	}
+	return true
+}
+func (r *Relay) route(c Connection, typ websocket.MessageType, b []byte) {
+	r.mu.Lock()
+	s := r.sessions[c.ServerID]
+	var dst []*relayPeer
+	if c.Version == 1 {
+		if c.Role == RoleClient {
+			if s.v1 != nil {
+				dst = append(dst, s.v1)
+			}
+		} else if s.v1Client != nil {
+			dst = append(dst, s.v1Client)
+		}
+	} else if c.Role == RoleClient {
+		if d := s.data[c.ConnectionID]; d != nil {
+			dst = append(dst, d)
+		} else {
+			s.buffer[c.ConnectionID] = append(s.buffer[c.ConnectionID], relayMessage{typ: typ, payload: append([]byte(nil), b...)})
+		}
+	} else if c.ConnectionID != "" {
+		if x := s.clients[c.ConnectionID]; x != nil {
+			dst = append(dst, x)
+		}
+	}
+	r.mu.Unlock()
+	for _, p := range dst {
+		r.framesForwarded.Add(1)
+		_ = r.send(p, typ, b)
+	}
+}
+func (r *Relay) removePeer(c Connection, p *relayPeer) {
+	r.mu.Lock()
+	s := r.sessions[c.ServerID]
+	if s == nil {
+		r.mu.Unlock()
+		return
+	}
+	if c.Version == 1 && s.v1 == p {
+		s.v1 = nil
+	}
+	if c.Version == 1 && s.v1Client == p {
+		s.v1Client = nil
+	}
+	if c.Version == 2 {
+		if s.control == p {
+			s.control = nil
+		}
+		if s.clients[c.ConnectionID] == p {
+			delete(s.clients, c.ConnectionID)
+			if d := s.data[c.ConnectionID]; d != nil {
+				delete(s.data, c.ConnectionID)
+				control := s.control
+				r.mu.Unlock()
+				_ = d.conn.Close(websocket.StatusGoingAway, "Client disconnected")
+				if control != nil {
+					r.send(control, websocket.MessageText, []byte(`{"type":"disconnected","connectionId":"`+c.ConnectionID+`"}`))
+				}
+				return
+			}
+		}
+		if s.data[c.ConnectionID] == p {
+			delete(s.data, c.ConnectionID)
+		}
+	}
+	r.mu.Unlock()
 }
 
 func (r *Relay) ready() bool {
