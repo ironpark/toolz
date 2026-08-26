@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -147,7 +146,7 @@ func listCommand() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.BoolFlag{Name: "json", Usage: "JSON 으로 출력합니다"},
 			&cli.BoolFlag{Name: "show", Usage: "브라우저 창을 표시합니다 (chrome 엔진으로 전환됩니다)"},
-			&cli.IntFlag{Name: "limit", Usage: "서비스별 최대 출력 개수 (0이면 전체)"},
+			&cli.IntFlag{Name: "limit", Usage: "서비스별 최대 개수 (0이면 끝까지 스크롤해 전체를 가져옵니다)"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			targets, err := resolveTargets(cmd.Args().Slice())
@@ -162,15 +161,16 @@ func listCommand() *cli.Command {
 			defer sess.Close()
 
 			timeout := cmd.Duration("timeout")
+			limit := int(cmd.Int("limit"))
 			var all []provider.Conversation
 			var failures []error
 			for _, p := range targets {
-				convs, err := p.List(sess.Ctx, timeout/time.Duration(len(targets)))
+				convs, err := p.List(sess.Ctx, limit, timeout/time.Duration(len(targets)))
 				if err != nil {
 					failures = append(failures, err)
 					continue
 				}
-				if limit := int(cmd.Int("limit")); limit > 0 && len(convs) > limit {
+				if limit > 0 && len(convs) > limit {
 					convs = convs[:limit]
 				}
 				all = append(all, convs...)
@@ -200,13 +200,10 @@ func openCommand() *cli.Command {
 			if err != nil {
 				return err
 			}
-			target := cmd.Args().Get(1)
-			if target == "" {
+			if cmd.Args().Get(1) == "" {
 				return fmt.Errorf("열 대화 ID 또는 URL 을 지정하세요")
 			}
-			if !strings.HasPrefix(target, "http") {
-				target = strings.TrimSuffix(p.HomeURL, "/") + "/" + strings.TrimPrefix(target, "/")
-			}
+			target := p.ConversationURL(cmd.Args().Get(1))
 
 			// 사람이 보라고 여는 명령이므로 창이 필요합니다.
 			sess, err := openSession(ctx, cmd, browser.Options{Headless: false})
