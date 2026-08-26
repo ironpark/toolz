@@ -17,9 +17,9 @@ Run the suite from this directory:
 go test ./...
 ```
 
-The suite is intentionally red while relay ownership, forwarding, Capacity,
-Writer backpressure, and the load client remain unimplemented. Compile all
-tests without running them with:
+The suite is intentionally red while distributed ownership, Capacity, Writer
+backpressure, and the load client remain unimplemented. Compile all tests
+without running them with:
 
 ```sh
 go test -run '^$' ./...
@@ -31,11 +31,19 @@ Run the currently implemented configuration, query, and operations baseline:
 go test -run '^(TestLoadConfig|TestEnvironmentVariableInventory|TestConfig|TestParseConnection|TestOperationsHealthIsAlwaysLive|TestOperationsReadyRefusesNewWorkDuringDrain|TestOperationsMetricsExposeStablePrometheusSurface|TestOperationsReadyWaitsForMinimumClusterSize|TestOperationsUnknownPathReturnsNotFound)$' ./...
 ```
 
-Internal scheduler, process-death, memory-pressure, and multi-node cases use a
-same-package scenario controller. Each scenario still asserts public outcomes
-such as WebSocket close status/reason, forwarding order, ownership cardinality,
-capacity gauges, and cleanup. Implement scenarios incrementally together with
-their production subsystem; do not skip or weaken them.
+The 100 upstream ports are supplemented by 24 Go regression tests, for 124
+ordinary tests in total. `production_contract_test.go` adds real socket/state
+coverage for readiness at capacity, the complete metrics surface, session and
+buffer cleanup, handshake role boundaries, data-attach expiry, ingress budget
+enforcement, rejection accounting, and the control read limit.
+
+Internal scheduler, process-death, memory-pressure, multi-node, and load cases
+still enter through the same-package scenario boundary. That boundary now
+returns an explicit error instead of fabricated success values. Those tests
+remain red until each scenario is backed by real sockets, state transitions,
+and fault injection. Their assertions continue to define the required public
+close codes, forwarding order, ownership cardinality, capacity gauges, and
+cleanup behavior; do not skip or weaken them.
 
 ## Fuzzing
 

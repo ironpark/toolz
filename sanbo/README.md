@@ -6,10 +6,10 @@ Sanbo는 [`getpaseo/paseo-relay`](https://github.com/getpaseo/paseo-relay)의
 기준은 paseo-relay 커밋
 `3fc41c96c8c63f3a7109e832899cc57d473c4531`입니다.
 
-> 현재는 TDD 기반 초기 구현 단계입니다. 설정 로딩, 요청 검증, HTTP 운영
-> 엔드포인트와 WebSocket 수락 기반은 구현되어 있지만 실제 프레임 중계,
-> 세션 소유권, backpressure 및 다중 노드 동작은 아직 구현되지 않았습니다.
-> 따라서 전체 호환 테스트는 의도적으로 실패합니다.
+> 현재는 TDD 기반 초기 구현 단계입니다. 단일 프로세스의 v1/v2 프레임 중계와
+> handshake 검증까지 구현되어 있지만 분산 세션 소유권, 엄격한 Capacity,
+> backpressure 및 다중 노드 동작은 아직 구현되지 않았습니다. 따라서 전체
+> 호환 테스트는 의도적으로 실패합니다.
 
 ## 요구 사항
 
@@ -47,7 +47,7 @@ go build -o sanbo .
 | `GET /health` | 프로세스 liveness | 구현됨 |
 | `GET /ready` | 신규 작업 수락 가능 여부 | drain 및 최소 클러스터 설정의 기본 판정 구현됨 |
 | `GET /metrics` | Prometheus 텍스트 메트릭 | 기본 readiness, drain, WebSocket gauge 구현됨 |
-| `GET /ws` | paseo-relay 호환 WebSocket 업그레이드 | 쿼리 검증과 업그레이드만 구현됨 |
+| `GET /ws` | paseo-relay 호환 WebSocket 업그레이드 | 단일 프로세스 v1/v2 routing 구현됨 |
 
 헬스 체크 예시:
 
@@ -147,7 +147,7 @@ go test ./...
 ```
 
 원본 109개 중 Fly 어댑터 전용 9개를 제외한 100개 테스트 계약을 포팅했으며,
-Go 전용 회귀 테스트를 포함해 총 111개 테스트가 있습니다. 미구현 기능 때문에
+Go 전용 회귀 테스트를 포함해 총 124개 테스트가 있습니다. 미구현 기능 때문에
 전체 실행은 현재 실패하는 것이 정상입니다. 자세한 기준과 테스트 그룹은
 [`TESTING.md`](TESTING.md)를 참고하세요.
 
@@ -159,18 +159,20 @@ Go 전용 회귀 테스트를 포함해 총 111개 테스트가 있습니다. �
 - v1/v2 query parsing과 route ID 길이 제한
 - HTTP health, readiness, 기본 Prometheus 응답
 - `coder/websocket` 기반 upgrade와 read limit
+- 단일 프로세스 v1 및 v2 양방향 프레임 forwarding
+- v2 control sync, connected, disconnected 및 legacy ping/pong의 기본 경로
+- canonical X25519 handshake key 검증
 - TCP 수신 버퍼 및 전송 timeout 기반 listener wrapper
 - 정상 종료를 위한 `Shutdown`
 
 아직 구현되지 않음:
 
-- v1 및 v2 양방향 프레임 forwarding
-- v2 control sync, connected, disconnected 및 legacy ping/pong
-- X25519 handshake key 검증과 관련 메트릭
 - 단일/다중 노드 세션 ownership 및 opaque reroute
 - 연결 및 메시지 Capacity ledger
+- bounded pre-attach buffer와 data-route expiry
 - Writer queue, 전달 deadline과 slow-consumer 처리
 - 메모리 pressure shedding 및 epoch 재시작
+- 전체 Prometheus metric 값 계측
 - black-box load client
 
 호환 기능은 해당 테스트를 먼저 활성 상태로 유지한 채 구현합니다. 테스트를
