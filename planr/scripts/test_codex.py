@@ -21,7 +21,9 @@ from common import fixture_dir
 
 
 class HarnessHelpersTest(unittest.TestCase):
-    def test_token_usage_prefers_last_turn_breakdown(self) -> None:
+    def test_token_usage_prefers_cumulative_thread_breakdown(self) -> None:
+        # `last` covers only the most recent model request; an agentic session
+        # issues one per tool call, so only `total` describes the whole run.
         usage = token_usage_summary(
             {
                 "last": {
@@ -43,13 +45,17 @@ class HarnessHelpersTest(unittest.TestCase):
         self.assertEqual(
             usage,
             {
-                "input_tokens": 11,
-                "cached_input_tokens": 3,
-                "output_tokens": 7,
-                "reasoning_output_tokens": 2,
-                "total_tokens": 18,
+                "input_tokens": 99,
+                "cached_input_tokens": 50,
+                "output_tokens": 40,
+                "reasoning_output_tokens": 10,
+                "total_tokens": 139,
             },
         )
+
+    def test_token_usage_falls_back_to_last_when_total_absent(self) -> None:
+        usage = token_usage_summary({"last": {"outputTokens": 7, "totalTokens": 18}})
+        self.assertEqual(usage, {"output_tokens": 7, "total_tokens": 18})
 
     def test_final_response_uses_last_agent_message(self) -> None:
         items = [

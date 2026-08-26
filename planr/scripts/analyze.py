@@ -35,6 +35,22 @@ PHASE_ACTIONS = {"add", "set", "update", "start", "done", "reset"}
 
 
 @dataclasses.dataclass
+class CommandExecution:
+    """One shell command the agent ran, kept together with its own output.
+
+    Commands and outputs used to be gathered into two independent deduplicated
+    lists, so the transcript's two sections drifted out of step and a reader
+    would attribute an output to the wrong command. Pairing them by item id
+    keeps the association the SDK already provides.
+    """
+
+    command: str = ""
+    output: str = ""
+    exit_code: int | None = None
+    status: str = ""
+
+
+@dataclasses.dataclass
 class SessionStats:
     events: int = 0
     invalid_lines: int = 0
@@ -47,6 +63,9 @@ class SessionStats:
     commands: list[str] = dataclasses.field(default_factory=list)
     texts: list[str] = dataclasses.field(default_factory=list)
     outputs: list[str] = dataclasses.field(default_factory=list)
+    # Keyed by SDK item id, in first-seen order; later notifications for the
+    # same id (started -> completed) overwrite the earlier snapshot.
+    executions: dict[str, CommandExecution] = dataclasses.field(default_factory=dict)
     usage: collections.Counter[str] = dataclasses.field(default_factory=collections.Counter)
     exit_code: int | None = None
     prompt_chars: int = 0
@@ -99,6 +118,31 @@ def command_text(obj: dict[str, Any]) -> str | None:
     return None
 
 
+def record_execution(item: dict[str, Any], stats: SessionStats) -> None:
+    """Keep a commandExecution item's command and output paired by item id."""
+
+    if item.get("type") != "commandExecution":
+        return
+    item_id = item.get("id")
+    if not isinstance(item_id, str) or not item_id:
+        return
+    command = command_text(item)
+    execution = stats.executions.setdefault(item_id, CommandExecution())
+    if command:
+        execution.command = command
+    for key in OUTPUT_KEYS:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            execution.output = value
+            break
+    exit_code = item.get("exitCode", item.get("exit_code"))
+    if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+        execution.exit_code = exit_code
+    status = item.get("status")
+    if isinstance(status, str) and status:
+        execution.status = status
+
+
 def collect_event(event: dict[str, Any], stats: SessionStats) -> None:
     """Harvest item types, commands, texts, outputs and usage in one walk.
 
@@ -114,6 +158,7 @@ def collect_event(event: dict[str, Any], stats: SessionStats) -> None:
         if isinstance(item, dict) and isinstance(item.get("type"), str):
             # Counted once per event, however deeply the item is nested.
             item_types.add(item["type"])
+            record_execution(item, stats)
 
         command = command_text(obj)
         if command:
@@ -135,7 +180,11 @@ def collect_event(event: dict[str, Any], stats: SessionStats) -> None:
             for field in TOKEN_FIELDS:
                 value = usage.get(field)
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    stats.usage[field] += int(value)
+                    # Each usage record is a cumulative thread total, not a
+                    # delta, so keep the largest one seen. Summing would
+                    # multiply the run's token count by however many snapshots
+                    # happen to be present.
+                    stats.usage[field] = max(stats.usage[field], int(value))
     stats.item_types.update(item_types)
 
 
@@ -193,6 +242,10 @@ def read_text(path: pathlib.Path) -> str:
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8", errors="replace").strip()
+
+
+def optional_text(path: pathlib.Path) -> str | None:
+    return None if not path.exists() else read_text(path)
 
 
 def command_words(command: str) -> list[str]:
@@ -266,7 +319,18 @@ def planr_actions(command: str) -> list[str]:
 
 
 def planr_commands(session: SessionStats) -> list[str]:
-    return [command for command in session.commands if planr_actions(command)]
+    """The planr invocations the agent actually made, counted once each.
+
+    ``session.commands`` holds both the `/bin/zsh -lc '...'` wrapper and the
+    inner command it carries, so counting actions over it reported every planr
+    call twice. The per-item executions carry one entry per real invocation.
+    """
+
+    if session.executions:
+        commands = [item.command for item in session.executions.values() if item.command]
+    else:
+        commands = session.commands
+    return [command for command in commands if planr_actions(command)]
 
 
 def parse_overview_statuses(value: str) -> list[dict[str, Any]]:
@@ -318,6 +382,32 @@ def total_tokens(session: SessionStats) -> int:
     return usage_total(session.usage)
 
 
+def ratio(part: int, whole: int) -> float | None:
+    return None if not whole else round(part / whole, 4)
+
+
+def token_shares(tokens: dict[str, int]) -> dict[str, float | None]:
+    """Token ratios worth comparing across runs.
+
+    Each is a share of its parent, matching how the SDK nests the counts:
+    cached input inside input, reasoning output inside output.
+    """
+
+    input_tokens = tokens.get("input_tokens", 0)
+    output_tokens = tokens.get("output_tokens", 0)
+    total = tokens.get("total_tokens") or (input_tokens + output_tokens)
+    return {
+        "input_of_total": ratio(input_tokens, total),
+        "output_of_total": ratio(output_tokens, total),
+        "cached_of_input": ratio(tokens.get("cached_input_tokens", 0), input_tokens),
+        "reasoning_of_output": ratio(tokens.get("reasoning_output_tokens", 0), output_tokens),
+    }
+
+
+def excerpt_text(value: str, limit: int = 8000) -> str:
+    return value if len(value) <= limit else value[:limit] + "\n[…truncated…]"
+
+
 def build_transcript(run_dir: pathlib.Path, session: SessionStats) -> str:
     metadata = read_metadata(run_dir)
     lines = [
@@ -334,22 +424,87 @@ def build_transcript(run_dir: pathlib.Path, session: SessionStats) -> str:
         " 도구 입력은 `session.jsonl`을 확인하세요.",
         "",
     ]
-    if session.commands:
+    executions = list(session.executions.values())
+    if executions:
+        lines.extend(["## Command executions", ""])
+        for number, execution in enumerate(executions, start=1):
+            heading = f"### {number}. exit {execution.exit_code}" if execution.exit_code is not None else f"### {number}. {execution.status or 'no exit code'}"
+            lines.extend([heading, "", "```text", execution.command or "(command unavailable)", "```", ""])
+            if execution.output.strip():
+                lines.extend(["```text", excerpt_text(execution.output), "```", ""])
+            else:
+                lines.extend(["(출력 없음)", ""])
+    elif session.commands:
+        # Older JSONL without per-item ids: fall back to the unpaired listing
+        # rather than dropping the commands from the transcript.
         lines.extend(["## Commands", "", "```text", *session.commands, "```", ""])
-    if session.outputs:
-        lines.extend(["## Tool outputs", "", "```text"])
-        for output in session.outputs:
-            excerpt = output if len(output) <= 8000 else output[:8000] + "\n[…truncated…]"
-            lines.extend([excerpt, "---"])
-        lines.extend(["```", ""])
+        if session.outputs:
+            lines.extend(["## Tool outputs (명령과 짝지어지지 않음)", "", "```text"])
+            for output in session.outputs:
+                lines.extend([excerpt_text(output), "---"])
+            lines.extend(["```", ""])
     if session.texts:
         lines.extend(["## Agent messages", ""])
         for text in session.texts:
-            excerpt = text if len(text) <= 8000 else text[:8000] + "\n[…truncated…]"
-            lines.extend([excerpt, "", "---", ""])
+            lines.extend([excerpt_text(text), "", "---", ""])
     else:
         lines.extend(["(추출 가능한 에이전트 메시지가 없습니다.)", ""])
     return "\n".join(lines).rstrip() + "\n"
+
+
+# planr logs through the standard library logger, so its errors carry a
+# `2026/08/27 01:17:12 ` prefix; the rest catches the common shell and Go
+# failure shapes.
+ERROR_LINE = re.compile(
+    r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} |^(fatal|error|panic)\b|^\S+:\d+: |\berror\b",
+    re.IGNORECASE,
+)
+
+
+def one_line(value: str, limit: int = 160) -> str:
+    """Collapse a message to a single readable line for a bullet list."""
+
+    collapsed = " ".join(value.split())
+    return collapsed if len(collapsed) <= limit else collapsed[: limit - 1] + "…"
+
+
+def error_excerpt(output: str, limit: int = 3) -> str:
+    """The lines of a failed command's output that explain the failure.
+
+    Agents chain steps with `;`, so the tail of the output is often the
+    downstream fallout ("plan not found") rather than the root cause ("NEXT
+    description must not be empty") that scrolled past above it. Prefer lines
+    that look like error messages, oldest first, and fall back to the tail when
+    nothing matches.
+    """
+
+    lines = [line.rstrip() for line in output.splitlines() if line.strip()]
+    errors = [line for line in lines if ERROR_LINE.search(line)]
+    return "\n".join(errors[:limit] if errors else lines[-limit:])
+
+
+def failed_executions(session: SessionStats) -> list[dict[str, Any]]:
+    """Commands that ended non-zero, numbered as in the transcript.
+
+    A failed command is the clearest evidence that the tool or its
+    documentation misled the agent, so the report names each one instead of
+    leaving it buried in the transcript.
+    """
+
+    failures: list[dict[str, Any]] = []
+    for number, execution in enumerate(session.executions.values(), start=1):
+        if execution.exit_code in (None, 0):
+            continue
+        failures.append(
+            {
+                "index": number,
+                "command": execution.command,
+                "exit_code": execution.exit_code,
+                "planr_actions": planr_actions(execution.command) if execution.command else [],
+                "error": error_excerpt(execution.output),
+            }
+        )
+    return failures
 
 
 def repeated_commands(commands: Iterable[str]) -> list[tuple[str, int]]:
@@ -363,6 +518,7 @@ def make_observations(
     commands: list[str],
     statuses: list[dict[str, Any]],
     final_test_exit: str,
+    failures: list[dict[str, Any]] | None = None,
 ) -> dict[str, list[str]]:
     actions = collections.Counter(
         action for command in commands for action in planr_actions(command)
@@ -421,6 +577,22 @@ def make_observations(
         pending = ", ".join(f"{item['name']}={item['status']}" for item in statuses if item["status"] != "done")
         workflow.append(f"완료되지 않은 plan이 남아 있습니다: {pending}.")
 
+    # A failed planr call is a documentation/UX signal; a failed shell command
+    # around it is a workflow signal. Both matter, but they point at different
+    # fixes, so they are reported separately.
+    for failure in failures or []:
+        location = f"실행 #{failure['index']} (exit {failure['exit_code']})"
+        # The first error line is the root cause; later ones are its fallout.
+        first_error = one_line(failure["error"].splitlines()[0]) if failure["error"] else "출력 없음"
+        if failure["planr_actions"]:
+            actions = ", ".join(f"`planr {action}`" for action in failure["planr_actions"])
+            documentation.append(
+                f"{location}에서 {actions} 호출이 실패했습니다 — “{first_error}”."
+                " 명령 형식이나 오류 메시지가 다음 행동을 바로 알려 주는지 확인하세요."
+            )
+        else:
+            workflow.append(f"{location} 명령이 실패했습니다 — “{first_error}”.")
+
     if final_test_exit and final_test_exit != "0":
         workflow.append(f"하네스 종료 검증 `go test ./...`가 exit {final_test_exit}로 끝났습니다.")
     elif final_test_exit == "0":
@@ -446,7 +618,8 @@ def result_data(run_dir: pathlib.Path, session: SessionStats) -> dict[str, Any]:
     commands = planr_commands(session)
     statuses = parse_overview_statuses(read_text(run_dir / STATE_DIR / "final-overview.txt"))
     final_test_exit = read_text(run_dir / STATE_DIR / "final-go-test.exit")
-    observations = make_observations(run_dir, session, commands, statuses, final_test_exit)
+    failures = failed_executions(session)
+    observations = make_observations(run_dir, session, commands, statuses, final_test_exit, failures)
     result = {
         "metadata": metadata,
         "session": {
@@ -454,6 +627,8 @@ def result_data(run_dir: pathlib.Path, session: SessionStats) -> dict[str, Any]:
             "invalid_lines": session.invalid_lines,
             "exit_code": session.exit_code,
             "tokens": dict(session.usage),
+            # Derived here so runs of different sizes can be compared directly.
+            "token_shares": token_shares(dict(session.usage)),
             "total_tokens": total_tokens(session),
             "output_tokens": output_tokens(session),
             "prompt_chars": session.prompt_chars,
@@ -461,17 +636,83 @@ def result_data(run_dir: pathlib.Path, session: SessionStats) -> dict[str, Any]:
             "event_types": dict(session.event_types),
             "item_types": dict(session.item_types),
             "commands": session.commands,
+            "commands_executed": len(session.executions),
         },
         "planr_commands": commands,
+        "failed_commands": failures,
         "planr_events": planr_event_lines(run_dir),
         "overview": statuses,
         "final_test_exit": final_test_exit,
         "final_git_status": read_text(run_dir / STATE_DIR / "final-git-status.txt"),
+        # None (not "") when the capture is absent, so a run recorded before
+        # this state file existed is not mistaken for a clean worktree.
+        "final_git_status_tracked": optional_text(run_dir / STATE_DIR / "final-git-status-tracked.txt"),
         "final_git_log": read_text(run_dir / STATE_DIR / "final-git-log.txt"),
         "observations": observations,
         "overview_file": f"{STATE_DIR}/final-overview.txt",
     }
     return result
+
+
+def worktree_state(data: dict[str, Any]) -> str:
+    """Judge the end state by tracked files only.
+
+    An untracked draft is planr's normal output, not work the agent forgot to
+    commit; older runs without the tracked-only capture fall back to the full
+    status.
+    """
+
+    tracked = data.get("final_git_status_tracked")
+    if tracked is None:
+        tracked = data.get("final_git_status")
+    if tracked:
+        return "dirty"
+    untracked = len([line for line in (data.get("final_git_status") or "").splitlines() if line.strip()])
+    if untracked:
+        return f"clean (untracked만 {untracked}건)"
+    return "clean"
+
+
+def share(part: int, whole: int) -> str:
+    return "—" if not whole else f"{part / whole * 100:.1f}%"
+
+
+def token_breakdown_rows(tokens: dict[str, int]) -> list[str]:
+    """Per-kind token table.
+
+    `cached_input_tokens` and `reasoning_output_tokens` are *subsets* of input
+    and output respectively, not sibling buckets, so each is shown as a share of
+    its parent. Adding all four together would double-count the run.
+    """
+
+    if not tokens:
+        return ["토큰 사용량을 읽지 못했습니다."]
+    input_tokens = tokens.get("input_tokens", 0)
+    output_tokens = tokens.get("output_tokens", 0)
+    cached = tokens.get("cached_input_tokens", 0)
+    reasoning = tokens.get("reasoning_output_tokens", 0)
+    total = tokens.get("total_tokens") or (input_tokens + output_tokens)
+
+    rows = [
+        "| 종류 | 토큰 | 비율 |",
+        "| --- | ---: | ---: |",
+        f"| input | {input_tokens:,} | {share(input_tokens, total)} (전체 대비) |",
+        f"| └ cached input | {cached:,} | {share(cached, input_tokens)} (input 대비) |",
+        f"| └ uncached input | {input_tokens - cached:,} | {share(input_tokens - cached, input_tokens)} (input 대비) |",
+        f"| output | {output_tokens:,} | {share(output_tokens, total)} (전체 대비) |",
+        f"| └ reasoning output | {reasoning:,} | {share(reasoning, output_tokens)} (output 대비) |",
+        f"| └ 그 외 output | {output_tokens - reasoning:,} | {share(output_tokens - reasoning, output_tokens)} (output 대비) |",
+        f"| **합계** | **{total:,}** | 100% |",
+    ]
+    if total and input_tokens + output_tokens != total:
+        rows.extend(
+            [
+                "",
+                f"주의: input+output({input_tokens + output_tokens:,})가 보고된 total({total:,})과"
+                " 일치하지 않습니다. SDK가 집계하지 않은 항목이 있을 수 있습니다.",
+            ]
+        )
+    return rows
 
 
 def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
@@ -494,7 +735,7 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
         f"- Session exit: `{session.get('exit_code', 'unknown')}`",
         f"- Plan completion: **{'done' if done else 'incomplete/unknown'}**",
         f"- Final `go test ./...`: `{data.get('final_test_exit') or 'not recorded'}`",
-        f"- Final Git worktree: **{'clean' if not data.get('final_git_status') else 'dirty'}**",
+        f"- Final Git worktree (tracked files): **{worktree_state(data)}**",
         "",
         "## Plan 상태",
         "",
@@ -522,10 +763,12 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
             "",
             f"누적 token: `{total or 'unavailable'}` (output `{output or 'unavailable'}`).",
             "",
-            "## 도구 사용 관찰",
+            "### 토큰 종류별",
             "",
         ]
     )
+    lines.extend(token_breakdown_rows(session_tokens))
+    lines.extend(["", "## 도구 사용 관찰", ""])
     if data.get("planr_commands"):
         action_counts = collections.Counter(
             action
@@ -545,6 +788,48 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
     if data.get("planr_events"):
         event_counts = collections.Counter(line.split("|", 1)[0] for line in data["planr_events"])
         lines.extend(["", "planr hook 이벤트: " + ", ".join(f"`{key}`×{value}" for key, value in event_counts.items()) + "."])
+
+    failures = data.get("failed_commands") or []
+    executed = session.get("commands_executed") or 0
+    lines.extend(["", "## 실패한 명령", ""])
+    if failures:
+        # planr failures are evidence about the tool under evaluation; the rest
+        # are the agent's own shell mistakes. Keeping them in one list makes the
+        # planr signal easy to miss, so each group gets its own heading.
+        planr_failures = [failure for failure in failures if failure["planr_actions"]]
+        other_failures = [failure for failure in failures if not failure["planr_actions"]]
+        summary = f"{len(failures)}건 실패"
+        if executed:
+            summary += f" / 전체 {executed}건"
+        summary += f" (`planr` {len(planr_failures)}건, 기타 {len(other_failures)}건)"
+        lines.extend([summary + ".", ""])
+        for heading, group, empty in (
+            ("### `planr` 명령 실패", planr_failures, "없음."),
+            ("### 기타 명령 실패", other_failures, "없음."),
+        ):
+            lines.extend([heading, ""])
+            if not group:
+                lines.extend([empty, ""])
+                continue
+            for failure in group:
+                label = ", ".join(f"planr {action}" for action in failure["planr_actions"]) or "shell"
+                lines.extend(
+                    [
+                        f"- **실행 #{failure['index']} · exit {failure['exit_code']} · {label}**",
+                        "",
+                        "  ```text",
+                        *[f"  {line}" for line in (failure["command"] or "(command unavailable)").splitlines()],
+                        "  ```",
+                        "",
+                        "  ```text",
+                        *[f"  {line}" for line in (failure["error"] or "(출력 없음)").splitlines()],
+                        "  ```",
+                        "",
+                    ]
+                )
+        lines.append("전체 출력은 `transcript.md`의 같은 번호 항목에 있습니다.")
+    else:
+        lines.append("0건. 실행된 모든 명령이 exit 0으로 끝났습니다.")
 
     for title, key in (
         ("도구/워크플로", "workflow"),

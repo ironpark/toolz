@@ -9,21 +9,26 @@
 
 ## 명령
 
-| 명령 | 용도 |
-| --- | --- |
-| `planr new <kebab-name> --description "짧은 설명"` | 계획 초안 파일 생성 |
-| `planr add <draft-file>` | 초안을 검증하고 plan으로 등록 |
-| `planr overview` | 모든 plan의 진행률 요약 |
-| `planr status` | 남은 phase와 대기 중인 의존성 상세 |
-| `planr phase start <plan-name> <number>` | phase 착수 |
-| `planr phase done <plan-name> <number>` | phase 완료 |
-| `planr phase add <plan-name> <title> --work "..." --done-when "..."` | 진행 중 plan에 phase 추가 |
+```sh
+planr new <kebab-name> --description "200 글자 이내 짧은 설명" # 계획 초안 파일 생성
+planr add <draft-file> # 초안을 검증하고 plan으로 등록
+planr overview # 모든 plan의 진행률 요약
+planr status # 남은 phase와 대기 중인 의존성 상세
+planr phase start <plan-name> <number> # phase 착수
+planr phase done <plan-name> <number> # phase 완료
+planr phase add <plan-name> <title> --work "..." --done-when "..." # 진행 중 plan에 phase 추가
+```
 
 `planr new`가 만든 초안에는 `GOALS`, `SCOPE`, `CONTEXT`, `PHASES`, `VERIFICATION`,
 `ORDERING`, `NEXT` 섹션이 순서대로 있습니다. 각 phase는 제목 뒤 YAML 펜스에 `phase`,
 `slug`, `status`, `depends_on`을 적고 `계획된 작업`과 `완료 조건`을 채웁니다. 초안
 파일의 기존 구조를 그대로 따르면 되고, 형식이 어긋나면 `planr add`가 무엇이 잘못됐는지
 알려 주며 등록을 거부합니다.
+
+초안에는 `TODO(planr)` 표시가 들어 있습니다. 전부 실제 내용으로 바꿔야 등록되며,
+`planr add`는 남아 있는 표시를 줄 번호와 함께 한 번에 모두 알려 줍니다. phase의
+`depends_on`에는 같은 plan 안의 phase를 번호나 slug로 적습니다(`[0]`, `[initial-work]`,
+혼용 모두 가능). 초안 맨 위 주석에 각 필드 규칙이 정리돼 있습니다.
 
 ## 작업 흐름
 
@@ -40,8 +45,9 @@
 
 ## 규칙
 
-- `planr phase done`은 커밋되지 않은 변경이 있으면 실패합니다. 먼저 커밋하세요.
-  `--force`로 이 검사를 우회하지 않습니다.
+- `planr phase done`은 커밋되지 않은 소스 변경이 있으면 실패합니다. 먼저 커밋하세요.
+  `--force`로 이 검사를 우회하지 않습니다. `planr`가 만든 초안 파일과 plan 디렉터리는
+  소스 변경으로 세지 않으므로 커밋하지 않아도 됩니다.
 - 계획 문서와 코드·테스트를 함께 최신 상태로 유지합니다. 계획만 갱신하고 구현이
   없거나, 구현만 하고 phase 상태가 그대로면 안 됩니다.
 - plan 문서와 `.planr.yaml`은 `planr` 명령으로 갱신합니다. 상태를 손으로 고쳐 맞추지

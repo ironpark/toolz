@@ -238,15 +238,18 @@ def camel_to_snake(value: str) -> str:
 def token_usage_summary(value: Any) -> dict[str, int] | None:
     """Flatten the SDK's token breakdown for the analyzer.
 
-    ``ThreadTokenUsage`` exposes both ``last`` (the current turn) and ``total``
-    (the cumulative thread).  With a single session they agree; prefer ``last``
-    so the number stays correct if the SDK ever splits the work internally.
+    ``ThreadTokenUsage`` exposes both ``last`` and ``total``.  ``last`` covers
+    only the most recent model request, and an agentic session issues one per
+    tool call, so it undercounts a run by an order of magnitude -- reading it
+    reported 173 output tokens for a session that actually spent 6223.
+    ``total`` is the cumulative thread figure and is the one worth comparing
+    across runs.
     """
 
     raw = jsonable(value)
     if not isinstance(raw, dict):
         return None
-    total = raw.get("last") or raw.get("total") or raw
+    total = raw.get("total") or raw.get("last") or raw
     result: dict[str, int] = {}
     for key, item in total.items():
         field = camel_to_snake(str(key))
@@ -299,6 +302,10 @@ def final_state(workspace: pathlib.Path, run_dir: pathlib.Path) -> int:
         "overview": [planr, "overview"],
         "status": [planr, "status"],
         "git-status": ["git", "status", "--short"],
+        # planr deliberately leaves its own draft and plan files untracked, so
+        # judging the run by the full status would call every successful run
+        # dirty. Tracked-file changes are the ones the agent failed to commit.
+        "git-status-tracked": ["git", "status", "--short", "--untracked-files=no"],
         "git-log": ["git", "log", "--oneline", "--decorate", "-20"],
     }.items():
         write_output(state_dir / f"final-{name}.txt", run_command(args, cwd=workspace))
@@ -461,6 +468,11 @@ async def run_sdk_session(
         config_overrides=(
             'approval_policy="never"',
             'sandbox_mode="workspace-write"',
+            # workspace-write keeps `.git` read-only by default, which makes
+            # `git commit` fail on `.git/index.lock`. The scenario requires the
+            # agent to commit, so hand it back write access to this workspace's
+            # own Git directory.
+            f'sandbox_workspace_write.writable_roots=["{workspace.resolve() / ".git"}"]',
             f'model_reasoning_effort="{reasoning}"',
         ),
     )
@@ -526,6 +538,11 @@ def prepare_workspace() -> tuple[pathlib.Path, pathlib.Path]:
     (workspace / "bin").mkdir()
     (workspace / ".harness").mkdir()
     (run_dir / STATE_DIR).mkdir()
+    # The agent's sandbox only grants writes inside the workspace, so the
+    # default user-level build cache is unreachable and its first `go test`
+    # dies before compiling anything. Point the cache at a gitignored directory
+    # in the workspace so the harness and the agent share one writable location.
+    os.environ["GOCACHE"] = str(workspace / ".harness" / "go-cache")
     install_fixture(fixture, workspace)
     build_planr(workspace / "bin" / "planr")
     init = run_command(["git", "init", "-q"], cwd=workspace)
