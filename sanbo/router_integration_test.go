@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -12,14 +11,7 @@ import (
 // Ported from references/paseo-relay/test/paseo_relay/router_integration_test.exs.
 func TestRouterLocallyOwnedWebSocketUpgrades(t *testing.T) {
 	server := newRelayTestServer(t, DefaultConfig())
-	endpoint := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?serverId=local&role=server"
-	connection, response, err := websocket.Dial(context.Background(), endpoint, nil)
-	if err != nil {
-		if response != nil {
-			t.Fatalf("dial status %d: %v", response.StatusCode, err)
-		}
-		t.Fatal(err)
-	}
+	connection := dialRelay(t, server, "local", RoleServer, 1, "")
 	if err := connection.Close(websocket.StatusNormalClosure, ""); err != nil {
 		t.Fatalf("close websocket: %v", err)
 	}

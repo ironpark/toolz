@@ -20,9 +20,7 @@ const relayTestTimeout = 300 * time.Millisecond
 
 func newRelayTestServer(t *testing.T, config Config) *httptest.Server {
 	t.Helper()
-	server := httptest.NewServer(NewRelay(config).Handler())
-	t.Cleanup(server.Close)
-	return server
+	return httptestServerForRelay(t, NewRelay(config))
 }
 
 func getResponse(t *testing.T, url string) (int, http.Header, string) {
@@ -172,14 +170,6 @@ func eventually(t *testing.T, timeout time.Duration, condition func() bool) {
 	}
 }
 
-type relayFaultController interface {
-	testStallOwner(serverID string) (resume func(), ok bool)
-	testKillOwner(serverID string) bool
-	testMoveOwner(serverID string) bool
-	testStallCapacity() (resume func(), ok bool)
-	testKillMetrics() bool
-}
-
 // relayScenarioResult is the observable result of an internal failure scenario.
 // Production remains free of test hooks; a compatibility implementation exposes
 // these methods only to same-package tests when the behavior cannot be induced
@@ -209,28 +199,11 @@ type relayScenarioResult struct {
 	CleanupFailures         int
 }
 
-type relayScenarioController interface {
-	testRunScenario(name string) (relayScenarioResult, error)
-}
-
 func requireRelayScenario(t *testing.T, relay *Relay, name string) relayScenarioResult {
 	t.Helper()
-	controller, ok := any(relay).(relayScenarioController)
-	if !ok {
-		t.Fatalf("relay scenario controller is not implemented for %q", name)
-	}
-	result, err := controller.testRunScenario(name)
+	result, err := relay.testRunScenario(name)
 	if err != nil {
 		t.Fatalf("run relay scenario %q: %v", name, err)
 	}
 	return result
-}
-
-func requireRelayFaultController(t *testing.T, relay *Relay) relayFaultController {
-	t.Helper()
-	controller, ok := any(relay).(relayFaultController)
-	if !ok {
-		t.Fatal("relay test fault controller is not implemented")
-	}
-	return controller
 }

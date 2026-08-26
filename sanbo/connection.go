@@ -36,7 +36,7 @@ func ParseConnectionQuery(query map[string]string) (Connection, error) {
 	if serverID == "" {
 		return Connection{}, fmt.Errorf("Missing serverId parameter")
 	}
-	if len([]byte(serverID)) > maximumRouteIDBytes {
+	if len(serverID) > maximumRouteIDBytes {
 		return Connection{}, fmt.Errorf("serverId is too long")
 	}
 
@@ -55,7 +55,7 @@ func ParseConnectionQuery(query map[string]string) (Connection, error) {
 	connectionID := ""
 	if version == 2 {
 		connectionID = strings.TrimSpace(query["connectionId"])
-		if len([]byte(connectionID)) > maximumRouteIDBytes {
+		if len(connectionID) > maximumRouteIDBytes {
 			return Connection{}, fmt.Errorf("connectionId is too long")
 		}
 		if role == string(RoleClient) && connectionID == "" {

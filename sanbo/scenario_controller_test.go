@@ -189,5 +189,3 @@ func (r *Relay) testMoveOwner(id string) bool {
 	r.mu.Unlock()
 	return s != nil
 }
-func (r *Relay) testStallCapacity() (func(), bool) { return func() {}, true }
-func (r *Relay) testKillMetrics() bool             { return true }

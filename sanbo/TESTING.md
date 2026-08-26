@@ -36,3 +36,28 @@ same-package scenario controller. Each scenario still asserts public outcomes
 such as WebSocket close status/reason, forwarding order, ownership cardinality,
 capacity gauges, and cleanup. Implement scenarios incrementally together with
 their production subsystem; do not skip or weaken them.
+
+## Fuzzing
+
+`fuzz_test.go` fuzzes the pure, attacker-reachable parsers rather than the
+socket loop, so each target is fast enough to be useful:
+
+| Target | Property under test |
+| --- | --- |
+| `FuzzParseConnectionQuery` | Accepted `/ws` queries always yield a routable `Connection`, and re-parsing one is a fixed point. |
+| `FuzzRelayWebSocketURLRoundTrip` | Identifiers survive URL encoding unchanged on the way to the parser. |
+| `FuzzValidHandshake` | Arbitrary frames never panic the read loop, and well-formed non-handshake frames stay opaque. |
+| `FuzzValidHandshakeKey` | A handshake is admitted exactly when its key is a canonical, non low-order X25519 point. |
+| `FuzzLoadConfig` | No environment yields a `Config` that violates the bounds `LoadConfig` advertises. |
+
+Seed corpora run as ordinary tests under `go test ./...`. To fuzz for real, one
+target at a time:
+
+```sh
+go test -run '^FuzzValidHandshake$' -fuzz '^FuzzValidHandshake$' -fuzztime 60s .
+```
+
+`FuzzValidHandshakeKey` performs a real ECDH per execution, so it explores
+orders of magnitude more slowly than the others; give it a longer `-fuzztime`.
+Any failing input is written to `testdata/fuzz/<Target>/` — commit it, since it
+then replays as a regression case in the normal suite.

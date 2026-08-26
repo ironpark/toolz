@@ -63,7 +63,7 @@ func TestRelayV2ControlFailsClosedWhenOwnerStallsDuringPing(t *testing.T) {
 	serverID := "v2-stalled-owner"
 	control := dialRelay(t, server, serverID, RoleServer, 2, "")
 	assertControlMessage(t, control, map[string]any{"type": "sync"})
-	resume, ok := requireRelayFaultController(t, relay).testStallOwner(serverID)
+	resume, ok := relay.testStallOwner(serverID)
 	if !ok {
 		t.Fatal("owner was not found")
 	}
@@ -105,7 +105,7 @@ func TestRelayV2SocketsFailClosedWhenSessionOwnerExits(t *testing.T) {
 	serverID := "v2-owner-exit"
 	control := dialRelay(t, server, serverID, RoleServer, 2, "")
 	assertControlMessage(t, control, map[string]any{"type": "sync"})
-	if !requireRelayFaultController(t, relay).testKillOwner(serverID) {
+	if !relay.testKillOwner(serverID) {
 		t.Fatal("owner was not found")
 	}
 	assertRelayClose(t, control, websocket.StatusServiceRestart, "Session owner moved")
@@ -117,7 +117,7 @@ func TestRelayV2SocketInitializationFailsClosedWhenOwnerMoves(t *testing.T) {
 	serverID := "v2-owner-moved"
 	control := dialRelay(t, server, serverID, RoleServer, 2, "")
 	assertControlMessage(t, control, map[string]any{"type": "sync"})
-	if !requireRelayFaultController(t, relay).testMoveOwner(serverID) {
+	if !relay.testMoveOwner(serverID) {
 		t.Fatal("owner was not found")
 	}
 	late := dialRelay(t, server, serverID, RoleClient, 2, "late")
