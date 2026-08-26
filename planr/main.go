@@ -39,6 +39,44 @@ func main() {
 				ArgsUsage: "[plan-name]",
 				Action:    statusCommand,
 			},
+			{
+				Name:  "phase",
+				Usage: "update a phase status",
+				Commands: []*cli.Command{
+					{
+						Name:      "set",
+						Aliases:   []string{"update"},
+						Usage:     "set a phase status",
+						ArgsUsage: "<plan-name> <phase-number>",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "status", Usage: "planned, conditional, in-progress, or done"},
+							&cli.BoolFlag{Name: "force", Usage: "mark done despite uncommitted source changes"},
+						},
+						Action: phaseSetCommand,
+					},
+					{
+						Name:      "start",
+						Usage:     "start a phase",
+						ArgsUsage: "<plan-name> <phase-number>",
+						Action:    phaseShortcutCommand("in-progress"),
+					},
+					{
+						Name:      "done",
+						Usage:     "complete a phase",
+						ArgsUsage: "<plan-name> <phase-number>",
+						Flags: []cli.Flag{
+							&cli.BoolFlag{Name: "force", Usage: "complete despite uncommitted source changes"},
+						},
+						Action: phaseShortcutCommand("done"),
+					},
+					{
+						Name:      "reset",
+						Usage:     "reset a phase to planned",
+						ArgsUsage: "<plan-name> <phase-number>",
+						Action:    phaseShortcutCommand("planned"),
+					},
+				},
+			},
 		},
 	}
 

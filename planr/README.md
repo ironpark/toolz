@@ -2,24 +2,43 @@
 
 규격화된 Markdown 계획을 분할 저장하고 진행 상태를 조회하는 Go CLI입니다.
 
+## 설치
+
+Go가 설치되어 있다면 다음 명령으로 최신 버전을 설치할 수 있습니다.
+
+```sh
+go install github.com/ironpark/toolz/planr@latest
+```
+
+Go의 바이너리 설치 경로가 `PATH`에 포함되어 있으면 어디서든 `planr` 명령을
+사용할 수 있습니다.
+
 ## 사용
 
 ```sh
 # 규격 초안 생성
-go run . new platform-refresh --description "platform plan refresh"
+planr new platform-refresh --description "platform plan refresh"
 
 # 다른 plan이 끝난 뒤 시작하는 초안 (여러 번 지정 가능)
-go run . new checkout-v2 --description "checkout flow refresh" \
+planr new checkout-v2 --description "checkout flow refresh" \
   --depends-on platform-refresh --depends-on api-foundation#2
 
 # 초안을 채운 뒤 plan으로 등록
-go run . add platform-refresh.md
+planr add platform-refresh.md
 
 # 등록된 진행 중 plan 조회
-go run . status
+planr status
 
 # 특정 plan 조회 (완료된 plan 포함)
-go run . status platform-refresh
+planr status platform-refresh
+
+# phase 상태 변경
+planr phase start checkout-v2 1
+planr phase done checkout-v2 1
+planr phase done checkout-v2 1 --force
+
+# 기타 상태로 직접 변경
+planr phase set checkout-v2 1 --status conditional
 ```
 
 `new`는 `--description` 옵션(또는 plan 이름 뒤의 두 번째 인자)을 반드시 요구하며,
@@ -65,6 +84,19 @@ plans-active/
 UTC RFC3339 형식의 `registered_at`으로 기록되며, phase 목록은 문서 본문의 체크리스트와
 링크로 관리됩니다.
 
+`registered_at`은 초안 생성 시각이 아니라 `add`로 plan을 등록한 시각에 자동으로 기록됩니다.
+
+등록 후 `PLAN.md`에는 다음과 같은 plan 메타데이터가 저장됩니다.
+
+```yaml
+---
+description: "checkout flow refresh"
+registered_at: "2026-08-26T17:30:00Z"
+plan_status: in-progress
+depends_on: [platform-refresh, api-foundation#2]
+---
+```
+
 ```markdown
 # Phases
 
@@ -91,7 +123,6 @@ UTC RFC3339 형식의 `registered_at`으로 기록되며, phase 목록은 문서
 ---
 plan_name: checkout-v2
 description: "checkout flow refresh"
-registered_at: "2026-08-26T17:30:00Z"
 depends_on: [platform-refresh, api-foundation#2]
 ---
 ```
@@ -148,7 +179,8 @@ YAML 펜스의 `next_phase`와 다음 작업 설명을 작성합니다.
 
 ## 라이프사이클
 
-1. `planr new <plan-name> --description "짧은 설명"`으로 초안을 생성하고, 목표·phase·검증 조건을 채웁니다.
+1. `planr new <plan-name> --description "짧은 설명"`으로 초안을 생성하고, 목표·phase·검증
+   조건을 채웁니다.
 2. `planr add <draft-file>`로 검증된 초안을 번호가 붙은 plan 디렉터리로 등록합니다.
    등록은 임시 디렉터리에서 준비한 후 이동하므로 파싱 오류가 나면 부분 파일을 남기지
    않습니다.
@@ -156,10 +188,18 @@ YAML 펜스의 `next_phase`와 다음 작업 설명을 작성합니다.
    변경하고 구현·검증 결과를 기록합니다.
 4. phase 완료 시 `status: done`으로 변경합니다. 다음 phase가 실측 조건을 만족하면
    `conditional` phase를 `in-progress`로 전환합니다.
-5. 모든 phase가 끝나면 `PLAN.md` frontmatter의 `plan_status: done`으로 변경합니다.
+5. 모든 phase를 `phase done`으로 완료하면 `PLAN.md`의 `plan_status: done`이 자동으로
+   기록됩니다.
 
 phase 상태는 `planned`, `conditional`, `in-progress`, `done`을 사용합니다. `status`는
 `phases/*.md`의 현재 frontmatter를 읽어 남은 phase와 `wait` 목록을 출력합니다.
+`phase set <plan-name> <phase-number> --status <status>`로 상태를 변경할 수 있습니다.
+일반적인 흐름에는 `phase start`, `phase done`, `phase reset` 단축 명령을 사용할 수
+있습니다. 각각 `in-progress`, `done`, `planned` 상태로 변경합니다.
+`phase done`은 plan 문서와 `.planr.yaml`을 제외한 미커밋 소스 변경이 있으면 실패합니다.
+아직 커밋하지 않은 변경을 의도적으로 포함해야 할 때만 `--force`로 검사를 우회합니다.
+모든 phase를 `done`으로 변경하면 `PLAN.md`의 `plan_status`도 자동으로 `done`이 되며,
+완료된 phase를 다시 미완료 상태로 바꾸면 plan은 `in-progress`로 돌아갑니다.
 
 ## 재현 가능한 예제
 
@@ -177,4 +217,11 @@ checkout 출시 시나리오의 복합 상태 출력을 재현하려면 다음�
 
 ```sh
 ./planr/test-planr.sh clean
+```
+
+Go 코드와 단위 테스트를 검증하려면 다음을 실행합니다.
+
+```sh
+go test ./...
+go vet ./...
 ```
