@@ -31,6 +31,8 @@ type draftPhase struct {
 }
 type draft struct {
 	Name, Goals, Scope, Context, Verification, Ordering, NextText string
+	Description                                                   string
+	DependsOn                                                     []string
 	Phases                                                        []draftPhase
 	NextPhase                                                     int
 }
@@ -65,6 +67,14 @@ func parseDraft(raw []byte, fallback string) (draft, error) {
 	if !kebab.MatchString(name) {
 		return draft{}, fmt.Errorf("plan name %q must be lowercase kebab-case", name)
 	}
+	description, err := draftDescription(front)
+	if err != nil {
+		return draft{}, fmt.Errorf("invalid description for plan %q: %w", name, err)
+	}
+	dependsOn, err := canonicalPlanDependencies(yamlStrings(front["depends_on"]))
+	if err != nil {
+		return draft{}, fmt.Errorf("invalid plan dependencies: %w", err)
+	}
 	phases, err := parsePhases(sections["PHASES"])
 	if err != nil {
 		return draft{}, err
@@ -82,7 +92,19 @@ func parseDraft(raw []byte, fallback string) (draft, error) {
 	if !found {
 		return draft{}, fmt.Errorf("NEXT references undefined phase %d", next)
 	}
-	return draft{Name: name, Goals: sections["GOALS"], Scope: sections["SCOPE"], Context: sections["CONTEXT"], Phases: phases, Verification: sections["VERIFICATION"], Ordering: sections["ORDERING"], NextPhase: next, NextText: nextText}, nil
+	return draft{Name: name, Goals: sections["GOALS"], Scope: sections["SCOPE"], Context: sections["CONTEXT"], Description: description, DependsOn: dependsOn, Phases: phases, Verification: sections["VERIFICATION"], Ordering: sections["ORDERING"], NextPhase: next, NextText: nextText}, nil
+}
+
+func draftDescription(front map[string]any) (string, error) {
+	value, found := front["description"]
+	if !found {
+		return "", nil
+	}
+	description, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("description must be a string of 200 characters or fewer")
+	}
+	return normalizeDescription(description, false)
 }
 
 func frontmatter(input string) (map[string]any, string, error) {
@@ -126,6 +148,9 @@ func parsePhases(section string) ([]draftPhase, error) {
 		if err := yaml.Unmarshal([]byte(block[8:close+8]), &meta); err != nil {
 			return nil, fmt.Errorf("parse phase %q: %w", title, err)
 		}
+		if meta.Phase < 0 {
+			return nil, fmt.Errorf("phase %q has invalid number %d; phase numbers must be non-negative", title, meta.Phase)
+		}
 		if !kebab.MatchString(meta.Slug) || (meta.Status != "planned" && meta.Status != "conditional") {
 			return nil, fmt.Errorf("phase %q has invalid slug or status", title)
 		}
@@ -157,15 +182,96 @@ func parsePhases(section string) ([]draftPhase, error) {
 		slugs[meta.Slug] = true
 		result = append(result, draftPhase{title, meta, planned, completion})
 	}
-	for _, p := range result {
-		for _, dep := range p.Meta.DependsOn {
-			if !ids[dep] {
-				return nil, fmt.Errorf("phase %d depends on undefined phase %d", p.Meta.Phase, dep)
+	sort.Slice(result, func(i, j int) bool { return result[i].Meta.Phase < result[j].Meta.Phase })
+	return result, nil
+}
+
+func validateDraftDependencies(d *draft) error {
+	dependencies, err := normalizePlanDependencies(d.DependsOn, d.Name)
+	if err != nil {
+		return fmt.Errorf("invalid dependencies for plan %q: %w", d.Name, err)
+	}
+	d.DependsOn = dependencies
+	if err := validatePhaseDependencies(d.Phases); err != nil {
+		return fmt.Errorf("invalid phase dependencies in plan %q: %w", d.Name, err)
+	}
+	return nil
+}
+
+func validatePhaseDependencies(phases []draftPhase) error {
+	defined := map[int]bool{}
+	phaseTitles := map[int]string{}
+	for _, phase := range phases {
+		defined[phase.Meta.Phase] = true
+		phaseTitles[phase.Meta.Phase] = phase.Title
+	}
+	for _, phase := range phases {
+		seen := map[int]bool{}
+		for _, dependency := range phase.Meta.DependsOn {
+			if dependency == phase.Meta.Phase {
+				return fmt.Errorf("phase %d %q cannot depend on itself; remove %d from depends_on", phase.Meta.Phase, phase.Title, dependency)
+			}
+			if !defined[dependency] {
+				return fmt.Errorf("phase %d %q depends on phase %d, but phase %d is not defined in this plan", phase.Meta.Phase, phase.Title, dependency, dependency)
+			}
+			if seen[dependency] {
+				return fmt.Errorf("phase %d %q lists phase %d more than once in depends_on", phase.Meta.Phase, phase.Title, dependency)
+			}
+			seen[dependency] = true
+		}
+	}
+
+	state := map[int]int{}
+	stack := []int{}
+	var visit func(int) error
+	visit = func(id int) error {
+		state[id] = 1
+		stack = append(stack, id)
+		var phase draftPhase
+		for _, candidate := range phases {
+			if candidate.Meta.Phase == id {
+				phase = candidate
+				break
+			}
+		}
+		for _, dependency := range phase.Meta.DependsOn {
+			if state[dependency] == 1 {
+				cycleStart := 0
+				for index, value := range stack {
+					if value == dependency {
+						cycleStart = index
+						break
+					}
+				}
+				cycle := append(append([]int{}, stack[cycleStart:]...), dependency)
+				return fmt.Errorf("phase dependency cycle detected: %s", formatPhaseCycle(cycle, phaseTitles))
+			}
+			if state[dependency] == 0 {
+				if err := visit(dependency); err != nil {
+					return err
+				}
+			}
+		}
+		stack = stack[:len(stack)-1]
+		state[id] = 2
+		return nil
+	}
+	for _, phase := range phases {
+		if state[phase.Meta.Phase] == 0 {
+			if err := visit(phase.Meta.Phase); err != nil {
+				return err
 			}
 		}
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Meta.Phase < result[j].Meta.Phase })
-	return result, nil
+	return nil
+}
+
+func formatPhaseCycle(cycle []int, titles map[int]string) string {
+	parts := make([]string, len(cycle))
+	for index, id := range cycle {
+		parts[index] = fmt.Sprintf("%d %q", id, titles[id])
+	}
+	return strings.Join(parts, " -> ")
 }
 
 func parseNext(section string) (int, string, error) {

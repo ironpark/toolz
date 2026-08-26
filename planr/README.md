@@ -6,7 +6,11 @@
 
 ```sh
 # 규격 초안 생성
-go run . new platform-refresh
+go run . new platform-refresh --description "platform plan refresh"
+
+# 다른 plan이 끝난 뒤 시작하는 초안 (여러 번 지정 가능)
+go run . new checkout-v2 --description "checkout flow refresh" \
+  --depends-on platform-refresh --depends-on api-foundation#2
 
 # 초안을 채운 뒤 plan으로 등록
 go run . add platform-refresh.md
@@ -18,7 +22,14 @@ go run . status
 go run . status platform-refresh
 ```
 
-`new`는 생성한 초안 파일의 절대 경로를 출력합니다. `add --name <name>`으로
+`new`는 `--description` 옵션(또는 plan 이름 뒤의 두 번째 인자)을 반드시 요구하며,
+공백을 포함해 200자 이내의 짧은 설명을 초안 frontmatter에 기록합니다. 생성한 초안
+파일의 절대 경로를 출력합니다.
+`--depends-on <plan-name>`으로
+선행 plan 또는 특정 phase를 하나 이상 지정할 수 있으며, 이 정보는 초안과 등록된 `PLAN.md`의
+frontmatter에 보존됩니다. 같은 옵션을 반복하거나 쉼표로 구분해 지정합니다.
+특정 phase는 `plan-name#phase-number` 형식으로 지정합니다.
+`add --name <name>`으로
 초안 frontmatter나 파일명 대신 plan 이름을 지정할 수 있습니다.
 
 ## 설정
@@ -50,7 +61,7 @@ plans-active/
         └── 02-benchmark-decision.md
 ```
 
-`PLAN.md` frontmatter에는 plan 수준 상태만 저장합니다. phase 목록은 문서 본문의
+`PLAN.md` frontmatter에는 plan 수준 설명·의존성·상태를 저장합니다. phase 목록은 문서 본문의
 체크리스트와 링크로 관리됩니다.
 
 ```markdown
@@ -78,8 +89,20 @@ plans-active/
 ```yaml
 ---
 plan_name: checkout-v2
+description: "checkout flow refresh"
+depends_on: [platform-refresh, api-foundation#2]
 ---
 ```
+
+plan 의존성은 plan 이름을 기준으로 하며, `plan-name#phase-number`를 사용하면 특정
+phase까지 기다리도록 지정할 수 있습니다. 완료되지 않은 선행 plan 또는 phase가 있으면
+`status` 출력의 `wait` 목록에 표시됩니다. 존재하지 않는 이름도 초안에는 기록할 수
+있으므로, 나중에 추가할 plan을 미리 연결하는 것도 가능합니다.
+
+`new`는 plan 의존성의 형식, 중복, 자기 자신에 대한 의존성을 검사합니다. `add`는
+등록 직전에 이 검사를 다시 수행하고, phase가 같은 plan 안에서 다른 phase만 의존하는지,
+참조한 phase가 존재하는지, 의존성 순환이 없는지도 검사합니다. 문제가 있으면 어떤
+plan·phase의 의존성이 잘못되었는지 오류 메시지로 안내하며 파일을 등록하지 않습니다.
 
 모든 최상위 섹션은 아래 순서로 한 번씩 작성합니다.
 
@@ -95,7 +118,7 @@ plan_name: checkout-v2
 
 `PHASES`의 각 phase는 제목 직후 YAML 펜스를 두고, `계획된 작업`과 `완료 조건`을
 모두 채웁니다. phase 번호는 비연속이어도 되지만 중복될 수 없고, `depends_on`은 같은
-초안에 정의된 phase 번호만 참조할 수 있습니다.
+초안에 정의된 자신 이외의 phase 번호만 참조할 수 있습니다.
 
 ````markdown
 ## PHASE — Checkout UI
@@ -123,7 +146,7 @@ YAML 펜스의 `next_phase`와 다음 작업 설명을 작성합니다.
 
 ## 라이프사이클
 
-1. `planr new <plan-name>`으로 초안을 생성하고, 목표·phase·검증 조건을 채웁니다.
+1. `planr new <plan-name> --description "짧은 설명"`으로 초안을 생성하고, 목표·phase·검증 조건을 채웁니다.
 2. `planr add <draft-file>`로 검증된 초안을 번호가 붙은 plan 디렉터리로 등록합니다.
    등록은 임시 디렉터리에서 준비한 후 이동하므로 파싱 오류가 나면 부분 파일을 남기지
    않습니다.

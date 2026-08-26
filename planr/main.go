@@ -16,9 +16,11 @@ func main() {
 			{
 				Name:      "new",
 				Usage:     "create a structured Markdown draft",
-				ArgsUsage: "<plan-name>",
+				ArgsUsage: "<plan-name> [description]",
 				Flags: []cli.Flag{
 					&cli.StringFlag{Name: "output", Usage: "draft file path"},
+					&cli.StringSliceFlag{Name: "depends-on", Usage: "plan dependency (repeatable)"},
+					&cli.StringFlag{Name: "description", Usage: "short plan description (max 200 characters)"},
 				},
 				Action: newCommand,
 			},

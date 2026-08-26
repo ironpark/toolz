@@ -1,5 +1,7 @@
 ---
 plan_name: {{ .Name }}
+description: {{ quote .Description }}
+depends_on: [{{ join .DependsOn ", " }}]
 ---
 # GOALS
 
