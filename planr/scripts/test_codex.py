@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from main import (
+from codex import (
     DEFAULT_REASONING,
     final_response_from_items,
     make_prompts,

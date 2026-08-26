@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
 import collections
 import dataclasses
 import functools
@@ -11,8 +10,9 @@ import json
 import pathlib
 import re
 import shlex
-import sys
 from typing import Any, Iterable
+
+from common import HarnessError
 
 
 TOKEN_FIELDS = (
@@ -166,23 +166,6 @@ def read_turn(path: pathlib.Path, number: int) -> TurnStats:
         except ValueError:
             stats.exit_code = None
     return stats
-
-
-def session_id_from_events(events: Iterable[dict[str, Any]]) -> str:
-    preferred_types = {"thread.started", "session.started", "conversation.started"}
-    candidates: list[tuple[int, str]] = []
-    for event in events:
-        kind = event_type(event)
-        priority = 0 if kind in preferred_types else 1
-        for obj in walk_dicts(event):
-            for key in ("thread_id", "session_id", "conversation_id"):
-                value = obj.get(key)
-                if isinstance(value, str) and value.strip():
-                    candidates.append((priority, value.strip()))
-    if not candidates:
-        return ""
-    candidates.sort(key=lambda item: item[0])
-    return candidates[0][1]
 
 
 @functools.lru_cache(maxsize=None)
@@ -635,7 +618,7 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
             "## 재현·원본 자료",
             "",
             "```sh",
-            "./planr/codex-harness.sh analyze <run-directory>",
+            "python3 planr/scripts/main.py codex analyze <run-directory>",
             "```",
             "",
             "- `transcript.md`: 대화 텍스트·명령 추출본",
@@ -651,8 +634,7 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
 def analyze(run_dir: pathlib.Path, output: pathlib.Path | None = None) -> int:
     run_dir = run_dir.resolve()
     if not run_dir.is_dir():
-        print(f"run directory not found: {run_dir}", file=sys.stderr)
-        return 2
+        raise HarnessError(f"run directory not found: {run_dir}")
     paths = turn_files(run_dir)
     turns = [read_turn(path, index) for index, path in enumerate(paths)]
     data = result_data(run_dir, turns)
@@ -667,23 +649,3 @@ def analyze(run_dir: pathlib.Path, output: pathlib.Path | None = None) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
-    if argv and argv[0] == "session-id":
-        if len(argv) != 2:
-            print("usage: analyze.py session-id <jsonl>", file=sys.stderr)
-            return 2
-        events, _ = read_events(pathlib.Path(argv[1]))
-        value = session_id_from_events(events)
-        if value:
-            print(value)
-        return 0
-
-    parser = argparse.ArgumentParser(description="analyze a Codex planr harness run")
-    parser.add_argument("run_dir", type=pathlib.Path)
-    parser.add_argument("--output", type=pathlib.Path)
-    args = parser.parse_args(argv)
-    return analyze(args.run_dir, args.output)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))

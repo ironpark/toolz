@@ -40,7 +40,7 @@ wheels = [
 ]
 
 [[package]]
-name = "planr-codex-harness"
+name = "planr-scripts"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

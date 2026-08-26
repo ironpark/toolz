@@ -248,39 +248,74 @@ plan에는 phase를 추가할 수 없습니다.
 모든 phase를 `done`으로 변경하면 `PLAN.md`의 `plan_status`도 자동으로 `done`이 되며,
 완료된 phase를 다시 미완료 상태로 바꾸면 plan은 `in-progress`로 돌아갑니다.
 
+## 개발용 실행기
+
+`planr` 자체를 검증하는 스크립트는 모두 [`planr/scripts`](scripts)의 uv 프로젝트에
+있고, 단일 진입점 [`planr/scripts/main.py`](scripts/main.py)의 하위 명령으로
+실행합니다.
+
+| 명령 | 하는 일 | 필요한 것 |
+| --- | --- | --- |
+| `main.py scenario` | checkout 출시 시나리오의 `status`·`overview` 출력을 재현 | `python3`, `go` |
+| `main.py scenario clean` | 시나리오 작업 디렉터리 삭제 | `python3` |
+| `main.py codex` | 격리 저장소에서 Codex 멀티턴 평가 실행 | `uv`, `go`, `git`, Codex 로그인 |
+| `main.py codex analyze <dir>` | 이전 실행 재분석 | `python3` |
+| `main.py codex clean` | Codex 실행공간 삭제 | `python3` |
+
+Codex SDK는 실제로 평가를 실행할 때만 불러오므로, `scenario`와 `codex`의
+`analyze`·`clean`은 `python3`로 바로 실행됩니다. `codex` 실행만 uv가 필요하고, SDK
+없이 호출하면 실행할 명령을 알려 주고 종료합니다. 오류 메시지와 종료 코드는 모두
+[`main.py`](scripts/main.py) 한 곳에서 처리하며, 두 실행기가 공유하는 준비 과정(픽스처
+복사, `planr` 빌드, 작업 디렉터리 생성·정리)은
+[`planr/scripts/common.py`](scripts/common.py)에 있습니다.
+
+## 테스트 픽스처
+
+실행기가 사용하는 픽스처는 모두 [`planr/fixtures`](fixtures) 아래에 있습니다.
+`plan-scenario`는 `scenario.py`의 단순 plan 생성 시나리오이고, `codex-harness`는
+Codex 평가 실행기가 복사하는 샘플 Git·Go 저장소입니다. 각 픽스처의 용도와 구성
+파일은 [`planr/fixtures/MANIFEST.yaml`](fixtures/MANIFEST.yaml)에 정리되어 있으며,
+픽스처를 추가하면 이 파일에도 항목을 추가합니다. 실행기는 픽스처를 `planr/test/`
+아래 격리 작업 디렉터리로 복사한 뒤 그 안에서만 파일을 수정하므로 픽스처 원본은
+변경되지 않습니다.
+
 ## 재현 가능한 예제
 
 checkout 출시 시나리오의 복합 상태 출력을 재현하려면 다음을 실행합니다.
 
 ```sh
-./planr/test-planr.sh
+python3 planr/scripts/main.py scenario
+
+# 실행 결과 정리
+python3 planr/scripts/main.py scenario clean
 ```
 
-스크립트는 `planr/test/work.*`에 새 격리 작업 디렉터리를 만들고, 완료된 인증 기반 plan,
+시나리오는 [`planr/fixtures/plan-scenario`](fixtures/plan-scenario)를
+`planr/test/work.*`의 새 격리 작업 디렉터리로 복사하고, 완료된 인증 기반 plan,
 진행 중 checkout plan, checkout을 기다리는 결제 plan, 일부 phase만 완료된 rollout plan,
 숨겨지는 무관한 완료 plan을 생성한 뒤 상세한 `status`와 간단한 `overview` 출력을 차례로
-보여 줍니다. 실행 결과는 Git에서 제외됩니다.
-
-실행 결과를 정리하려면 다음을 사용합니다.
-
-```sh
-./planr/test-planr.sh clean
-```
+보여 줍니다. 같은 초안을 여러 번 등록하면 동일한 진행 중 plan만 나오므로, 완료·대기·부분
+완료 상태는 등록 후 frontmatter를 고쳐서 만들어 냅니다. 이 치환이 하나도 일치하지 않으면
+plan 형식이 바뀐 것으로 보고 실패합니다. 실행 결과는 Git에서 제외됩니다.
 
 Go 코드와 단위 테스트를 검증하려면 다음을 실행합니다.
 
 ```sh
 go test ./...
 go vet ./...
+
+# 실행기의 Python 단위 테스트
+uv run --with pytest --project planr/scripts python -m pytest planr/scripts -q
 ```
 
-## Codex 멀티턴 평가 하네스
+## Codex 멀티턴 평가
 
-하네스는 `planr/test/codex-harness.*` 아래에 매번 격리된 Git 리포지토리를 만들고, 그 안에
-`AGENT.md`, `AGENTS.md`, 샘플 Go 프로젝트와 `planr` 바이너리를 준비합니다. 작업 목표는
-워크스페이스에 파일로 두지 않고 [`planr/harness/goal.md`](harness/goal.md)를 읽어 첫 turn의
+실행기는 `planr/test/codex-harness.*` 아래에 매번 격리된 Git 리포지토리를 만들고, 그 안에
+[`planr/fixtures/codex-harness`](fixtures/codex-harness)의 `AGENT.md`, `AGENTS.md`,
+샘플 Go 프로젝트와 `planr` 바이너리를 준비합니다. 작업 목표는
+워크스페이스에 파일로 두지 않고 [`planr/scripts/goal.md`](scripts/goal.md)를 읽어 첫 turn의
 프롬프트에 실어 전달합니다.
-실행기는 [`planr/harness/pyproject.toml`](harness/pyproject.toml)의 uv 프로젝트이며,
+구현은 [`planr/scripts/codex.py`](scripts/codex.py)에 있고,
 `openai-codex` 공식 Python SDK의 `AsyncCodex`와 하나의 `Thread`를 사용해 여러 turn을
 이어 갑니다. 따라서 별도의 `codex exec`/`resume` 셸 호출 없이 대화 컨텍스트와 원본 SDK
 알림을 모두 보존합니다. 기본 모델은 `gpt-5.6-luna`, reasoning은 `medium`입니다.
@@ -290,7 +325,7 @@ SDK 사용법은 [공식 Python SDK 문서](https://github.com/openai/codex/tree
 처음 clone한 환경에서는 의존성을 동기화합니다.
 
 ```sh
-uv sync --project planr/harness
+uv sync --project planr/scripts
 ```
 
 Codex 인증은 로컬 Codex 설정을 사용하므로, 실제 실행 전 Codex 로그인이 되어 있어야
@@ -298,23 +333,25 @@ Codex 인증은 로컬 Codex 설정을 사용하므로, 실제 실행 전 Codex 
 
 ```sh
 # 기본 4-turn 실행
-./planr/codex-harness.sh
+uv run --locked --project planr/scripts python planr/scripts/main.py codex
 
 # turn 수와 모델을 명시 (각 turn은 같은 SDK Thread에서 실행)
-./planr/codex-harness.sh --turns 5 --model gpt-5.6-luna --reasoning medium
+uv run --locked --project planr/scripts python planr/scripts/main.py codex \
+  --turns 5 --model gpt-5.6-luna --reasoning medium
 
 # Codex를 호출하지 않고 격리 저장소와 산출물 경로만 점검
-./planr/codex-harness.sh --dry-run
+uv run --locked --project planr/scripts python planr/scripts/main.py codex --dry-run
 
 # 이전 실행 재분석 또는 임시 실행공간 정리
-./planr/codex-harness.sh analyze planr/test/codex-harness.XXX
-./planr/codex-harness.sh clean
+uv run --locked --project planr/scripts python planr/scripts/main.py codex \
+  analyze planr/test/codex-harness.XXX
+uv run --locked --project planr/scripts python planr/scripts/main.py codex clean
 ```
 
 실행 결과의 `REPORT.md`에는 plan 완료 여부, turn별 exit·이벤트·input/output/total
 token, 관찰된 `planr` 명령과 도구 호출 누락, 지침이 불명확했을 가능성이 있는 지점,
 반복 turn·명령으로 추정되는 토큰 낭비 신호가 기록됩니다. `transcript.md`는 대화와
 명령 추출본이며, `turns/turn-*.jsonl`은 SDK가 전달한 원본 알림과 정규화한 turn 결과입니다.
-`metrics.json`은 서로 다른 모델·turn 수 실행을 비교할 때 사용합니다. 하네스는 목표 저장소
+`metrics.json`은 서로 다른 모델·turn 수 실행을 비교할 때 사용합니다. 실행기는 목표 저장소
 밖의 임시 디렉터리에서만 파일을 수정하며, 분석이 끝난 뒤에도 결과를 직접 확인할 수 있도록
 실행공간을 자동 삭제하지 않습니다.

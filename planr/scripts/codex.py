@@ -18,28 +18,38 @@ import os
 import pathlib
 import shutil
 import subprocess
-import sys
-import tempfile
 import time
 import traceback
 from typing import Any, Iterable
 
 from analyze import TOKEN_FIELDS, analyze
+from common import (
+    HarnessError,
+    build_planr,
+    fixture_dir,
+    make_run_dir,
+    remove_runs,
+    require_command,
+    run_command,
+)
 
 
-try:
+def load_sdk():
+    """Import the Codex SDK on demand.
+
+    `codex clean` and `codex analyze` only touch local files, so importing the
+    SDK at module scope would charge them for a dependency they never use --
+    and would make this module unimportable without it.
+    """
+
     import openai_codex
-    from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
-except ImportError as exc:  # pragma: no cover - uv installs this dependency.
-    raise SystemExit(
-        "openai-codex is not installed; run `uv sync --project planr/harness`"
-    ) from exc
+
+    return openai_codex
 
 
-MODULE_DIR = pathlib.Path(__file__).resolve().parents[1]
-FIXTURE_DIR = pathlib.Path(__file__).resolve().parent / "fixture"
+FIXTURE_NAME = "codex-harness"
+RUN_PREFIX = "codex-harness."
 GOAL_FILE = pathlib.Path(__file__).resolve().parent / "goal.md"
-RUN_ROOT = MODULE_DIR / "test"
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_REASONING = "medium"
 DEFAULT_TURNS = 4
@@ -60,43 +70,23 @@ Final verification turn: independently check the task specification from the ini
 """
 
 
-class HarnessError(RuntimeError):
-    """A user-facing harness configuration or setup error."""
+def positive(convert, description: str):
+    """Build an argparse type that rejects non-positive values."""
+
+    def parse(value: str):
+        try:
+            parsed = convert(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(f"must be {description}") from exc
+        if parsed <= 0:
+            raise argparse.ArgumentTypeError(f"must be {description}")
+        return parsed
+
+    return parse
 
 
-def die(message: str) -> int:
-    print(f"codex harness: {message}", file=sys.stderr)
-    return 2
-
-
-def env_or_default(name: str, default: str) -> str:
-    value = os.environ.get(name)
-    return value if value is not None and value != "" else default
-
-
-def positive_int(value: str) -> int:
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("must be a positive integer") from exc
-    if parsed < 1:
-        raise argparse.ArgumentTypeError("must be a positive integer")
-    return parsed
-
-
-def positive_seconds(value: str) -> float:
-    try:
-        parsed = float(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("must be a positive number of seconds") from exc
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("must be a positive number of seconds")
-    return parsed
-
-
-def require_command(name: str) -> None:
-    if shutil.which(name) is None:
-        raise HarnessError(f"command not found: {name}")
+positive_int = positive(int, "a positive integer")
+positive_seconds = positive(float, "a positive number of seconds")
 
 
 def load_goal() -> str:
@@ -108,23 +98,6 @@ def load_goal() -> str:
     if not goal:
         raise HarnessError(f"empty task specification: {GOAL_FILE}")
     return goal
-
-
-def run_command(
-    args: list[str], *, cwd: pathlib.Path | None = None, env: dict[str, str] | None = None
-) -> subprocess.CompletedProcess[str]:
-    try:
-        return subprocess.run(
-            args,
-            cwd=str(cwd) if cwd else None,
-            env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
-    except OSError as exc:
-        return subprocess.CompletedProcess(args, 127, str(exc))
 
 
 def write_output(path: pathlib.Path, result: subprocess.CompletedProcess[str]) -> None:
@@ -210,7 +183,7 @@ def write_metadata(
     timeout: float,
     started_at: str,
 ) -> None:
-    version = getattr(openai_codex, "__version__", "unknown")
+    version = getattr(load_sdk(), "__version__", "unknown")
     values = {
         "run_directory": str(run_dir),
         "workspace": str(workspace),
@@ -244,10 +217,6 @@ def capture_state(workspace: pathlib.Path, run_dir: pathlib.Path, prefix: str) -
     state_dir = run_dir / "state"
     for name, args in state_probes(workspace).items():
         write_output(state_dir / f"{prefix}{name}.txt", run_command(args, cwd=workspace))
-
-
-def snapshot_state(workspace: pathlib.Path, run_dir: pathlib.Path, turn_number: int) -> None:
-    capture_state(workspace, run_dir, f"turn-{turn_number:02d}-")
 
 
 def final_state(workspace: pathlib.Path, run_dir: pathlib.Path) -> int:
@@ -294,6 +263,8 @@ async def collect_sdk_turn(
             "prompt_chars": len(prompt),
         },
     )
+    from openai_codex import ApprovalMode, Sandbox
+
     started = time.monotonic()
     try:
         handle = await asyncio.wait_for(
@@ -437,6 +408,8 @@ async def run_sdk_turns(
     reasoning: str,
     timeout: float,
 ) -> list[int]:
+    from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
+
     sdk_env = os.environ.copy()
     sdk_path = str(workspace / "bin")
     sdk_env["PATH"] = sdk_path + os.pathsep + sdk_env.get("PATH", "")
@@ -482,7 +455,7 @@ async def run_sdk_turns(
                 # Capture the workspace as it stood at the end of this turn;
                 # snapshotting after the whole run would record the final
                 # state under every turn's label.
-                snapshot_state(workspace, run_dir, number)
+                capture_state(workspace, run_dir, f"turn-{number:02d}-")
                 # An interrupted turn leaves the SDK thread usable.  Keep the
                 # conversation going so the next continuation prompt can
                 # recover unfinished work; hard SDK failures still stop the
@@ -506,23 +479,19 @@ async def run_sdk_turns(
 
 
 def prepare_workspace() -> tuple[pathlib.Path, pathlib.Path]:
-    if not (FIXTURE_DIR / "AGENT.md").is_file():
-        raise HarnessError(f"missing fixture: {FIXTURE_DIR / 'AGENT.md'}")
-    if not (FIXTURE_DIR / "AGENTS.md").is_file():
-        raise HarnessError(f"missing fixture: {FIXTURE_DIR / 'AGENTS.md'}")
-    RUN_ROOT.mkdir(parents=True, exist_ok=True)
-    run_dir = pathlib.Path(tempfile.mkdtemp(prefix="codex-harness.", dir=RUN_ROOT))
+    fixture = fixture_dir(FIXTURE_NAME)
+    for required in ("AGENT.md", "AGENTS.md"):
+        if not (fixture / required).is_file():
+            raise HarnessError(f"missing fixture: {fixture / required}")
+    run_dir = make_run_dir(RUN_PREFIX)
     workspace = run_dir / "repo"
     workspace.mkdir()
     (workspace / "bin").mkdir()
     (workspace / ".harness").mkdir()
     (run_dir / "turns").mkdir()
     (run_dir / "state").mkdir()
-    shutil.copytree(FIXTURE_DIR, workspace, dirs_exist_ok=True)
-    build = run_command(["go", "build", "-o", str(workspace / "bin" / "planr"), "."], cwd=MODULE_DIR)
-    if build.returncode != 0:
-        (run_dir / "state" / "build.txt").write_text(build.stdout or "", encoding="utf-8")
-        raise HarnessError(f"could not build planr (exit {build.returncode}); see {run_dir / 'state' / 'build.txt'}")
+    shutil.copytree(fixture, workspace, dirs_exist_ok=True)
+    build_planr(workspace / "bin" / "planr")
     init = run_command(["git", "init", "-q"], cwd=workspace)
     if init.returncode != 0:
         raise HarnessError(f"could not initialize isolated Git repository: {init.stdout.strip()}")
@@ -542,7 +511,6 @@ def prepare_workspace() -> tuple[pathlib.Path, pathlib.Path]:
 
 
 def run_harness(args: argparse.Namespace) -> int:
-    require_command("go")
     require_command("git")
     if not args.model:
         raise HarnessError("--model must not be empty")
@@ -577,7 +545,7 @@ def run_harness(args: argparse.Namespace) -> int:
                 },
             )
             (run_dir / "turns" / f"turn-{number:02d}.exit").write_text("0\n", encoding="utf-8")
-            snapshot_state(workspace, run_dir, number)
+            capture_state(workspace, run_dir, f"turn-{number:02d}-")
     else:
         exit_codes = asyncio.run(
             run_sdk_turns(
@@ -615,40 +583,34 @@ def run_harness(args: argparse.Namespace) -> int:
 
 
 def clean_runs() -> int:
-    RUN_ROOT.mkdir(parents=True, exist_ok=True)
-    removed = 0
-    for path in RUN_ROOT.glob("codex-harness.*"):
-        if path.is_dir() and path.name.startswith("codex-harness."):
-            shutil.rmtree(path)
-            removed += 1
-    print(f"Removed {removed} Codex harness run(s)")
+    print(f"Removed {remove_runs(RUN_PREFIX)} Codex harness run(s)")
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="codex-harness.sh", description="run an isolated Codex planr evaluation"
+        prog="main.py codex", description="run an isolated Codex planr evaluation"
     )
     parser.add_argument(
         "--turns",
         type=positive_int,
-        default=positive_int(env_or_default("PLANR_HARNESS_TURNS", str(DEFAULT_TURNS))),
+        default=positive_int(os.environ.get("PLANR_HARNESS_TURNS") or str(DEFAULT_TURNS)),
         help="number of SDK turns, including the first turn (default: 4)",
     )
     parser.add_argument(
         "--model",
-        default=env_or_default("PLANR_HARNESS_MODEL", DEFAULT_MODEL),
+        default=os.environ.get("PLANR_HARNESS_MODEL") or DEFAULT_MODEL,
         help=f"Codex model (default: {DEFAULT_MODEL})",
     )
     parser.add_argument(
         "--reasoning",
-        default=env_or_default("PLANR_HARNESS_REASONING", DEFAULT_REASONING),
+        default=os.environ.get("PLANR_HARNESS_REASONING") or DEFAULT_REASONING,
         help=f"reasoning effort (default: {DEFAULT_REASONING})",
     )
     parser.add_argument(
         "--timeout",
         type=positive_seconds,
-        default=positive_seconds(env_or_default("PLANR_HARNESS_TIMEOUT", str(DEFAULT_TIMEOUT))),
+        default=positive_seconds(os.environ.get("PLANR_HARNESS_TIMEOUT") or str(DEFAULT_TIMEOUT)),
         help="maximum seconds per SDK turn (default: 600)",
     )
     parser.add_argument(
@@ -659,27 +621,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    values = list(sys.argv[1:] if argv is None else argv)
-    try:
-        if values and values[0] == "clean":
-            if len(values) != 1:
-                return die("clean accepts no options")
-            return clean_runs()
-        if values and values[0] == "analyze":
-            if len(values) != 2:
-                return die("analyze requires exactly one run directory")
-            return analyze(pathlib.Path(values[1]))
-        if values and values[0] == "run":
-            values = values[1:]
-        parser = build_parser()
-        args = parser.parse_args(values)
-        return run_harness(args)
-    except HarnessError as exc:
-        return die(str(exc))
-    except KeyboardInterrupt:
-        return die("interrupted")
+def main(argv: list[str]) -> int:
+    """Run a Codex evaluation. Errors are reported by the caller in main.py."""
 
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    if argv and argv[0] == "clean":
+        if len(argv) != 1:
+            raise HarnessError("clean accepts no options")
+        return clean_runs()
+    if argv and argv[0] == "analyze":
+        if len(argv) != 2:
+            raise HarnessError("analyze requires exactly one run directory")
+        return analyze(pathlib.Path(argv[1]))
+    return run_harness(build_parser().parse_args(argv))

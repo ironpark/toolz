@@ -1,0 +1,29 @@
+# planr 테스트 픽스처 목록
+#
+# 각 픽스처는 서로 다른 실행기가 사용하며, 격리된 작업 디렉터리로 복사된 뒤
+# 그 안에서만 수정됩니다. 새 픽스처를 추가하면 이 파일에도 항목을 추가합니다.
+
+fixtures:
+  - name: plan-scenario
+    used_by: planr/scripts/scenario.py
+    workspace: planr/test/work.*
+    description: >-
+      단순 plan 생성 시나리오. 초안 하나를 여러 번 등록해 완료/진행/대기/부분
+      완료 plan을 만들고 status와 overview 출력을 눈으로 확인한다. Git 리포지토리도
+      Go 프로젝트도 없으며 planr 바이너리만 필요하다.
+    contents:
+      - .planr.yaml: plans-active와 plans-archive 두 plans_dirs 설정
+      - checkout-v2.md: 모든 plan 등록에 재사용하는 초안
+
+  - name: codex-harness
+    used_by: planr/scripts/codex.py
+    workspace: planr/test/codex-harness.*
+    description: >-
+      Codex 멀티턴 평가용 샘플 저장소. 에이전트가 실제로 작업할 Go 프로젝트와
+      지침 문서를 담고 있으며, 하네스가 이 디렉터리 전체를 격리 작업공간으로
+      복사한 뒤 git init을 수행한다.
+    contents:
+      - .planr.yaml: 훅으로 planr 이벤트를 .harness/planr-events.log에 기록
+      - AGENT.md, AGENTS.md: 에이전트에게 주어지는 저장소 지침
+      - go.mod, main.go, main_test.go: 에이전트가 수정하는 샘플 Go 프로젝트
+      - README.md: 샘플 프로젝트 설명
