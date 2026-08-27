@@ -107,12 +107,12 @@ func newRelayPeer(conn *websocket.Conn) *relayPeer {
 	return &relayPeer{conn: conn, writeSlot: make(chan struct{}, 1)}
 }
 
-// chargeHeap accounts bytes against this socket's heap fuse, reporting false
-// when the socket has exceeded it. A socket over the fuse is killed outright
+// chargeHeapOrKill accounts bytes against this socket's heap fuse and kills the
+// socket when the charge exceeds it, reporting false in that case. A socket over the fuse is killed outright
 // rather than closed, mirroring a BEAM socket process reaching max_heap_size
 // with kill: true — the peer sees a transport-level disconnect, not a close
 // frame.
-func (p *relayPeer) chargeHeap(bytes, limit int64) bool {
+func (p *relayPeer) chargeHeapOrKill(bytes, limit int64) bool {
 	if reserveCounter(&p.heapBytes, bytes, limit) {
 		return true
 	}
@@ -632,7 +632,7 @@ func (r *Relay) send(p *relayPeer, typ websocket.MessageType, b []byte) error {
 		return context.DeadlineExceeded
 	}
 	defer func() { <-p.writeSlot }()
-	if !p.chargeHeap(int64(len(b)), r.heapFuse()) {
+	if !p.chargeHeapOrKill(int64(len(b)), r.heapFuse()) {
 		return errHeapFuse
 	}
 	defer p.releaseHeap(int64(len(b)))
@@ -669,7 +669,7 @@ func (r *Relay) sendControl(p *relayPeer, b []byte) error {
 		return errControlQueue
 	}
 	defer p.controlQueued.Add(-queued)
-	if !p.chargeHeap(queued, r.heapFuse()) {
+	if !p.chargeHeapOrKill(queued, r.heapFuse()) {
 		return errHeapFuse
 	}
 	defer p.releaseHeap(queued)
@@ -849,7 +849,7 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 		_ = source.conn.Close(websocket.StatusTryAgainLater, "Relay memory pressure")
 		return
 	}
-	if !source.chargeHeap(int64(len(b)), r.heapFuse()) {
+	if !source.chargeHeapOrKill(int64(len(b)), r.heapFuse()) {
 		r.releaseInFlight(weighted)
 		return
 	}
