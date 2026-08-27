@@ -176,6 +176,15 @@ func relayMetrics(t *testing.T, server *httptest.Server) string {
 	return body
 }
 
+func requireMetricLines(t *testing.T, metrics string, lines ...string) {
+	t.Helper()
+	for _, line := range lines {
+		if !strings.Contains(metrics, line) {
+			t.Errorf("metrics missing %q", line)
+		}
+	}
+}
+
 func metricValue(t *testing.T, metrics, name string) float64 {
 	t.Helper()
 	for _, line := range strings.Split(metrics, "\n") {

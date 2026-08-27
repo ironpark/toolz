@@ -33,7 +33,7 @@ func TestOperationsMetricsExposeStablePrometheusSurface(t *testing.T) {
 	if status != http.StatusOK || header.Get("content-type") != "text/plain; version=0.0.4" {
 		t.Fatalf("metrics response = (%d, %q)", status, header.Get("content-type"))
 	}
-	for _, line := range []string{
+	requireMetricLines(t, body,
 		"# HELP paseo_relay_ready Whether this node admits new relay work.\n",
 		"# TYPE paseo_relay_ready gauge\n",
 		"# HELP paseo_relay_draining Whether this node is draining.\n",
@@ -83,11 +83,7 @@ func TestOperationsMetricsExposeStablePrometheusSurface(t *testing.T) {
 		"paseo_relay_ready 1\n",
 		"paseo_relay_draining 0\n",
 		"paseo_relay_active_websockets 0\n",
-	} {
-		if !strings.Contains(body, line) {
-			t.Errorf("metrics missing %q", line)
-		}
-	}
+	)
 }
 
 func TestOperationsReadyWaitsForMinimumClusterSize(t *testing.T) {

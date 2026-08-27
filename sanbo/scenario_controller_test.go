@@ -757,21 +757,10 @@ func (r *Relay) runOperationsScenario(name string) (relayScenarioResult, error) 
 		r.capacityUnavailable.Store(false)
 	case "stalled-capacity-ready":
 		r.capacityUnavailable.Store(true)
-	case "stalled-capacity-metrics":
-		r.connectionRejections.Add(1)
-		r.capacityUnavailable.Store(true)
-		result.IngressReservedBytes = -1
-		result.InflightDeliveryBytes = -1
-		result.BackpressuredSources = -1
 	default:
 		return result, fmt.Errorf("unknown operations scenario %q", name)
 	}
 	mergeScenarioObservation(&result, h.snapshot())
-	if name == "stalled-capacity-metrics" {
-		result.IngressReservedBytes = -1
-		result.InflightDeliveryBytes = -1
-		result.BackpressuredSources = -1
-	}
 	return result, nil
 }
 

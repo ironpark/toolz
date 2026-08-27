@@ -51,8 +51,8 @@ type Relay struct {
 	frameBytes                atomic.Int64
 	deliveryWaitCount         atomic.Int64
 	deliveryWaitMicroseconds  atomic.Int64
-	deliveryWaitBuckets       [histogramBucketCount]atomic.Int64
-	frameSizeBuckets          [histogramBucketCount]atomic.Int64
+	deliveryWaitBuckets       [len(deliveryWaitBucketDefinitions)]atomic.Int64
+	frameSizeBuckets          [len(frameSizeBucketDefinitions)]atomic.Int64
 	handshakes                [2][2][2]atomic.Int64
 	capacityEpoch             atomic.Int64
 	listenerEpoch             atomic.Int64
@@ -288,10 +288,15 @@ func isWebSocketUpgradeRequest(request *http.Request) bool {
 
 func headerContainsToken(values []string, want string) bool {
 	for _, value := range values {
-		for _, token := range strings.Split(value, ",") {
+		for {
+			token, rest, more := strings.Cut(value, ",")
 			if strings.EqualFold(strings.TrimSpace(token), want) {
 				return true
 			}
+			if !more {
+				break
+			}
+			value = rest
 		}
 	}
 	return false
@@ -331,53 +336,21 @@ func (r *Relay) handleMetrics(writer http.ResponseWriter, _ *http.Request) {
 		"/memory/classes/heap/unused:bytes",
 		"/memory/classes/metadata/mcache/inuse:bytes",
 	)
-	heapAlloc, heapInuse, mcacheInuse := read[0], read[0]+read[1], read[2]
-	writeMetric(writer, "paseo_relay_ready", "gauge", "Whether this node admits new relay work.", ready)
-	writeMetric(writer, "paseo_relay_draining", "gauge", "Whether this node is draining.", draining)
+	snapshot := metricsSnapshot{
+		ready:          int64(ready),
+		draining:       int64(draining),
+		activeSessions: int64(activeSessions),
+		heapAlloc:      int64(read[0]),
+		heapInuse:      int64(read[0] + read[1]),
+		mcacheInuse:    int64(read[2]),
+	}
 
-	capacityAvailable := !r.capacityUnavailable.Load()
+	capacityUnavailable := r.capacityUnavailable.Load()
 	for _, metric := range relayMetricDefinitions {
-		if metric.capacity && !capacityAvailable {
+		if metric.capacity && capacityUnavailable {
 			continue
 		}
-		var value any
-		switch metric.name {
-		case "paseo_relay_active_websockets":
-			value = r.activeWebSockets.Load()
-		case "paseo_relay_active_sessions":
-			value = activeSessions
-		case "paseo_relay_reroute_responses_total":
-			value = r.rerouteResponses.Load()
-		case "paseo_relay_connection_rejections_total":
-			value = r.connectionRejections.Load()
-		case "paseo_relay_frames_forwarded_total":
-			value = r.framesForwarded.Load()
-		case "paseo_relay_bytes_forwarded_total":
-			value = r.bytesForwarded.Load()
-		case "paseo_relay_ingress_reserved_bytes":
-			value = r.ingressReserved.Load()
-		case "paseo_relay_inflight_delivery_bytes":
-			value = r.inflightDelivery.Load()
-		case "paseo_relay_backpressured_sources":
-			value = r.backpressuredSources.Load()
-		case "paseo_relay_slow_consumer_disconnects_total":
-			value = r.slowConsumerDisconnects.Load()
-		case "paseo_relay_delivery_timeouts_total":
-			value = r.deliveryTimeouts.Load()
-		case "paseo_relay_memory_pressure_disconnects_total":
-			value = r.memoryPressureDisconnects.Load()
-		case "paseo_relay_max_frame_bytes":
-			value = r.maxFrameBytes.Load()
-		case "paseo_relay_beam_total_memory_bytes":
-			value = heapAlloc
-		case "paseo_relay_beam_process_memory_bytes":
-			value = heapAlloc
-		case "paseo_relay_beam_binary_memory_bytes":
-			value = heapInuse
-		case "paseo_relay_beam_ets_memory_bytes":
-			value = mcacheInuse
-		}
-		writeMetric(writer, metric.name, metric.metricType, metric.help, value)
+		writeMetric(writer, metric.name, metric.metricType, metric.help, metric.read(r, snapshot))
 	}
 	r.renderHandshakeMetrics(writer)
 	r.renderHistograms(writer)
@@ -785,9 +758,17 @@ func (r *Relay) observeDeliveryWait(duration time.Duration) {
 	microseconds := duration.Microseconds()
 	r.deliveryWaitCount.Add(1)
 	r.deliveryWaitMicroseconds.Add(microseconds)
-	for i, bucket := range deliveryWaitBucketDefinitions {
-		if microseconds <= bucket.limit {
-			r.deliveryWaitBuckets[i].Add(1)
+	observeHistogramBucket(r.deliveryWaitBuckets[:], deliveryWaitBucketDefinitions[:], microseconds)
+}
+
+// observeHistogramBucket increments only the first fitting bucket; render-time
+// running sums restore the cumulative le counts Prometheus expects. This keeps
+// the per-frame cost at one atomic add instead of one per bucket.
+func observeHistogramBucket(buckets []atomic.Int64, definitions []histogramBucketDefinition, value int64) {
+	for i := range definitions {
+		if value <= definitions[i].limit {
+			buckets[i].Add(1)
+			return
 		}
 	}
 }
@@ -1504,33 +1485,65 @@ func (c *transportTimeoutConn) Write(payload []byte) (int, error) {
 	return c.Conn.Write(payload)
 }
 
-const histogramBucketCount = 5
+// metricsSnapshot carries the per-scrape values that do not live in Relay
+// atomics: readiness, the session count taken under r.mu, and the runtime
+// memory classes backing the beam_* compatibility gauges.
+type metricsSnapshot struct {
+	ready          int64
+	draining       int64
+	activeSessions int64
+	heapAlloc      int64
+	heapInuse      int64
+	mcacheInuse    int64
+}
 
 type metricDefinition struct {
 	name       string
 	metricType string
 	help       string
 	capacity   bool
+	read       func(*Relay, metricsSnapshot) int64
 }
 
 var relayMetricDefinitions = [...]metricDefinition{
-	{"paseo_relay_active_websockets", "gauge", "Open WebSocket connections on this node.", true},
-	{"paseo_relay_active_sessions", "gauge", "Relay sessions owned by this node.", false},
-	{"paseo_relay_reroute_responses_total", "counter", "WebSocket upgrades rerouted to another owner.", false},
-	{"paseo_relay_connection_rejections_total", "counter", "WebSocket upgrades rejected at configured capacity or during memory pressure.", false},
-	{"paseo_relay_frames_forwarded_total", "counter", "WebSocket frames forwarded by this node.", false},
-	{"paseo_relay_bytes_forwarded_total", "counter", "WebSocket payload bytes forwarded by this node.", false},
-	{"paseo_relay_ingress_reserved_bytes", "gauge", "Weighted ingress bytes admitted on this node.", true},
-	{"paseo_relay_inflight_delivery_bytes", "gauge", "Payload bytes currently held by synchronous downstream delivery.", true},
-	{"paseo_relay_backpressured_sources", "gauge", "Source WebSockets currently waiting for downstream delivery.", true},
-	{"paseo_relay_slow_consumer_disconnects_total", "counter", "Destinations disconnected after exceeding a delivery deadline.", false},
-	{"paseo_relay_delivery_timeouts_total", "counter", "Synchronous downstream deliveries that exceeded their deadline.", false},
-	{"paseo_relay_memory_pressure_disconnects_total", "counter", "WebSockets closed by node memory-pressure recovery.", false},
-	{"paseo_relay_max_frame_bytes", "gauge", "Largest WebSocket frame payload observed since node start.", false},
-	{"paseo_relay_beam_total_memory_bytes", "gauge", "Total memory allocated by BEAM.", false},
-	{"paseo_relay_beam_process_memory_bytes", "gauge", "Memory allocated by BEAM processes.", false},
-	{"paseo_relay_beam_binary_memory_bytes", "gauge", "Memory allocated for BEAM binaries.", false},
-	{"paseo_relay_beam_ets_memory_bytes", "gauge", "Memory allocated for BEAM ETS tables.", false},
+	{"paseo_relay_ready", "gauge", "Whether this node admits new relay work.", false,
+		func(_ *Relay, s metricsSnapshot) int64 { return s.ready }},
+	{"paseo_relay_draining", "gauge", "Whether this node is draining.", false,
+		func(_ *Relay, s metricsSnapshot) int64 { return s.draining }},
+	{"paseo_relay_active_websockets", "gauge", "Open WebSocket connections on this node.", true,
+		func(r *Relay, _ metricsSnapshot) int64 { return r.activeWebSockets.Load() }},
+	{"paseo_relay_active_sessions", "gauge", "Relay sessions owned by this node.", false,
+		func(_ *Relay, s metricsSnapshot) int64 { return s.activeSessions }},
+	{"paseo_relay_reroute_responses_total", "counter", "WebSocket upgrades rerouted to another owner.", false,
+		func(r *Relay, _ metricsSnapshot) int64 { return r.rerouteResponses.Load() }},
+	{"paseo_relay_connection_rejections_total", "counter", "WebSocket upgrades rejected at configured capacity or during memory pressure.", false,
+		func(r *Relay, _ metricsSnapshot) int64 { return r.connectionRejections.Load() }},
+	{"paseo_relay_frames_forwarded_total", "counter", "WebSocket frames forwarded by this node.", false,
+		func(r *Relay, _ metricsSnapshot) int64 { return r.framesForwarded.Load() }},
+	{"paseo_relay_bytes_forwarded_total", "counter", "WebSocket payload bytes forwarded by this node.", false,
+		func(r *Relay, _ metricsSnapshot) int64 { return r.bytesForwarded.Load() }},
+	{"paseo_relay_ingress_reserved_bytes", "gauge", "Weighted ingress bytes admitted on this node.", true,
+		func(r *Relay, _ metricsSnapshot) int64 { return r.ingressReserved.Load() }},
+	{"paseo_relay_inflight_delivery_bytes", "gauge", "Payload bytes currently held by synchronous downstream delivery.", true,
+		func(r *Relay, _ metricsSnapshot) int64 { return r.inflightDelivery.Load() }},
+	{"paseo_relay_backpressured_sources", "gauge", "Source WebSockets currently waiting for downstream delivery.", true,
+		func(r *Relay, _ metricsSnapshot) int64 { return r.backpressuredSources.Load() }},
+	{"paseo_relay_slow_consumer_disconnects_total", "counter", "Destinations disconnected after exceeding a delivery deadline.", false,
+		func(r *Relay, _ metricsSnapshot) int64 { return r.slowConsumerDisconnects.Load() }},
+	{"paseo_relay_delivery_timeouts_total", "counter", "Synchronous downstream deliveries that exceeded their deadline.", false,
+		func(r *Relay, _ metricsSnapshot) int64 { return r.deliveryTimeouts.Load() }},
+	{"paseo_relay_memory_pressure_disconnects_total", "counter", "WebSockets closed by node memory-pressure recovery.", false,
+		func(r *Relay, _ metricsSnapshot) int64 { return r.memoryPressureDisconnects.Load() }},
+	{"paseo_relay_max_frame_bytes", "gauge", "Largest WebSocket frame payload observed since node start.", false,
+		func(r *Relay, _ metricsSnapshot) int64 { return r.maxFrameBytes.Load() }},
+	{"paseo_relay_beam_total_memory_bytes", "gauge", "Total memory allocated by BEAM.", false,
+		func(_ *Relay, s metricsSnapshot) int64 { return s.heapAlloc }},
+	{"paseo_relay_beam_process_memory_bytes", "gauge", "Memory allocated by BEAM processes.", false,
+		func(_ *Relay, s metricsSnapshot) int64 { return s.heapAlloc }},
+	{"paseo_relay_beam_binary_memory_bytes", "gauge", "Memory allocated for BEAM binaries.", false,
+		func(_ *Relay, s metricsSnapshot) int64 { return s.heapInuse }},
+	{"paseo_relay_beam_ets_memory_bytes", "gauge", "Memory allocated for BEAM ETS tables.", false,
+		func(_ *Relay, s metricsSnapshot) int64 { return s.mcacheInuse }},
 }
 
 type histogramBucketDefinition struct {
@@ -1554,8 +1567,8 @@ var frameSizeBucketDefinitions = [...]histogramBucketDefinition{
 	{MaximumMessagePayloadBytes, "33554418"},
 }
 
-func writeMetric(writer io.Writer, name, metricType, help string, value any) {
-	_, _ = fmt.Fprintf(writer, "# HELP %s %s\n# TYPE %s %s\n%s %v\n", name, help, name, metricType, name, value)
+func writeMetric(writer io.Writer, name, metricType, help string, value int64) {
+	_, _ = fmt.Fprintf(writer, "# HELP %s %s\n# TYPE %s %s\n%s %d\n", name, help, name, metricType, name, value)
 }
 
 func (r *Relay) renderHandshakeMetrics(writer io.Writer) {
@@ -1575,11 +1588,7 @@ func (r *Relay) renderHandshakeMetrics(writer io.Writer) {
 func (r *Relay) observeFrame(size int) {
 	r.frameCount.Add(1)
 	r.frameBytes.Add(int64(size))
-	for i, bucket := range frameSizeBucketDefinitions {
-		if int64(size) <= bucket.limit {
-			r.frameSizeBuckets[i].Add(1)
-		}
-	}
+	observeHistogramBucket(r.frameSizeBuckets[:], frameSizeBucketDefinitions[:], int64(size))
 	for {
 		current := r.maxFrameBytes.Load()
 		if int64(size) <= current || r.maxFrameBytes.CompareAndSwap(current, int64(size)) {
@@ -1589,23 +1598,29 @@ func (r *Relay) observeFrame(size int) {
 }
 
 func (r *Relay) renderHistograms(writer io.Writer) {
-	waitCount := r.deliveryWaitCount.Load()
-	_, _ = io.WriteString(writer, "# HELP paseo_relay_delivery_wait_seconds Time a source waits for synchronous downstream delivery.\n# TYPE paseo_relay_delivery_wait_seconds histogram\n")
-	for i, bucket := range deliveryWaitBucketDefinitions {
-		_, _ = fmt.Fprintf(writer, "paseo_relay_delivery_wait_seconds_bucket{le=\"%s\"} %d\n", bucket.label, r.deliveryWaitBuckets[i].Load())
+	renderHistogram(writer, "paseo_relay_delivery_wait_seconds",
+		"Time a source waits for synchronous downstream delivery.",
+		deliveryWaitBucketDefinitions[:], r.deliveryWaitBuckets[:],
+		r.deliveryWaitCount.Load(), formatPrometheusFloat(float64(r.deliveryWaitMicroseconds.Load())/1_000_000))
+	renderHistogram(writer, "paseo_relay_frame_size_bytes",
+		"WebSocket payload-size distribution.",
+		frameSizeBucketDefinitions[:], r.frameSizeBuckets[:],
+		r.frameCount.Load(), strconv.FormatInt(r.frameBytes.Load(), 10))
+}
+
+func renderHistogram(writer io.Writer, name, help string, definitions []histogramBucketDefinition, buckets []atomic.Int64, count int64, sum string) {
+	_, _ = fmt.Fprintf(writer, "# HELP %s %s\n# TYPE %s histogram\n", name, help, name)
+	cumulative := int64(0)
+	for i := range definitions {
+		cumulative += buckets[i].Load()
+		_, _ = fmt.Fprintf(writer, "%s_bucket{le=\"%s\"} %d\n", name, definitions[i].label, cumulative)
 	}
-	_, _ = fmt.Fprintf(writer, "paseo_relay_delivery_wait_seconds_bucket{le=\"+Inf\"} %d\npaseo_relay_delivery_wait_seconds_sum %s\npaseo_relay_delivery_wait_seconds_count %d\n", waitCount, formatPrometheusFloat(float64(r.deliveryWaitMicroseconds.Load())/1_000_000), waitCount)
-	frameCount := r.frameCount.Load()
-	_, _ = io.WriteString(writer, "# HELP paseo_relay_frame_size_bytes WebSocket payload-size distribution.\n# TYPE paseo_relay_frame_size_bytes histogram\n")
-	for i, bucket := range frameSizeBucketDefinitions {
-		_, _ = fmt.Fprintf(writer, "paseo_relay_frame_size_bytes_bucket{le=\"%s\"} %d\n", bucket.label, r.frameSizeBuckets[i].Load())
-	}
-	_, _ = fmt.Fprintf(writer, "paseo_relay_frame_size_bytes_bucket{le=\"+Inf\"} %d\npaseo_relay_frame_size_bytes_sum %d\npaseo_relay_frame_size_bytes_count %d\n", frameCount, r.frameBytes.Load(), frameCount)
+	_, _ = fmt.Fprintf(writer, "%s_bucket{le=\"+Inf\"} %d\n%s_sum %s\n%s_count %d\n", name, count, name, sum, name, count)
 }
 
 func formatPrometheusFloat(value float64) string {
 	formatted := strconv.FormatFloat(value, 'f', -1, 64)
-	if !strings.ContainsAny(formatted, ".eE") {
+	if !strings.Contains(formatted, ".") {
 		formatted += ".0"
 	}
 	return formatted

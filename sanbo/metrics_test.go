@@ -17,7 +17,7 @@ func TestMetricsHistogramsRenderCumulativeBuckets(t *testing.T) {
 
 	var metrics strings.Builder
 	relay.renderHistograms(&metrics)
-	for _, line := range []string{
+	requireMetricLines(t, metrics.String(),
 		"# HELP paseo_relay_delivery_wait_seconds Time a source waits for synchronous downstream delivery.\n",
 		"# TYPE paseo_relay_delivery_wait_seconds histogram\n",
 		"paseo_relay_delivery_wait_seconds_bucket{le=\"0.001\"} 1\n",
@@ -38,9 +38,5 @@ func TestMetricsHistogramsRenderCumulativeBuckets(t *testing.T) {
 		"paseo_relay_frame_size_bytes_bucket{le=\"+Inf\"} 3\n",
 		"paseo_relay_frame_size_bytes_sum 9504256\n",
 		"paseo_relay_frame_size_bytes_count 3\n",
-	} {
-		if !strings.Contains(metrics.String(), line) {
-			t.Errorf("histogram missing %q", line)
-		}
-	}
+	)
 }
