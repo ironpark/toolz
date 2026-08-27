@@ -1,10 +1,11 @@
 ---
+completed_at: "2026-08-27T20:37:43Z"
 depends_on:
 - "01-internal-claude#4"
 - "01-internal-claude#5"
 - "01-internal-claude#6"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: `go build ./...`, `go vet ./...`, `go test ./...` all pass from
 > NEXT: none
