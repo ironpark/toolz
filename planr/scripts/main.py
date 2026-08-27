@@ -22,6 +22,7 @@ Commands:
   codex [options]       run an isolated Codex evaluation
   codex analyze <dir>   re-analyze a previous Codex run
   codex clean           remove Codex run directories
+  codex variants        list each fixture's prompt/instructions variants
 
 The codex command needs the openai-codex SDK, so run it through uv:
   uv run --locked --project planr/scripts python planr/scripts/main.py codex --dry-run

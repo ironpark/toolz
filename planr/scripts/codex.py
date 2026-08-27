@@ -69,24 +69,28 @@ def load_sdk():
 
 DEFAULT_FIXTURE = "codex-harness"
 # `FIXTURE.*` files configure the evaluation and must never reach the agent's
-# workspace verbatim: FIXTURE.PROMPT.<lang>.md is only read, FIXTURE.TEST.sh is
-# run against the finished workspace from outside it, and
-# FIXTURE.AGENTS.<lang>.md is installed under the name the agent expects.
+# workspace verbatim: FIXTURE.PROMPT.<variant>.md is only read, FIXTURE.TEST.sh
+# is run against the finished workspace from outside it, and the chosen
+# instructions are installed under the name the agent expects.
 FIXTURE_PREFIX = "FIXTURE."
 FIXTURE_TEST_FILE = f"{FIXTURE_PREFIX}TEST.sh"
 INSTALLED_AGENTS_FILE = "AGENTS.md"
+# Repository instructions live above the fixtures because they are the same
+# document whatever the task is: a fixture that had to carry its own copy would
+# make every wording change a four-way edit, and would let the copies drift
+# apart until two fixtures were no longer measuring the same thing.  A fixture
+# may still ship `FIXTURE.AGENTS.<variant>.md` to override a variant for itself.
+AGENTS_DIR = FIXTURES_DIR / "agents"
 
 
 def discover_fixtures() -> dict[str, str]:
-    """Find fixtures that satisfy the Codex prompt/instructions contract."""
+    """Find fixtures that satisfy the Codex prompt contract."""
 
     fixtures: dict[str, str] = {}
     for path in sorted(FIXTURES_DIR.iterdir()):
-        if not path.is_dir():
+        if not path.is_dir() or path == AGENTS_DIR:
             continue
-        has_prompt = any(path.glob(f"{FIXTURE_PREFIX}PROMPT.*.md"))
-        has_instructions = any(path.glob(f"{FIXTURE_PREFIX}AGENTS.*.md"))
-        if not (has_prompt and has_instructions):
+        if not any(path.glob(f"{FIXTURE_PREFIX}PROMPT.*.md")):
             continue
         label = "codex" if path.name == DEFAULT_FIXTURE else path.name
         fixtures[path.name] = label
@@ -101,10 +105,12 @@ def discover_fixtures() -> dict[str, str]:
 FIXTURE_LABELS = discover_fixtures()
 RUN_LABEL = FIXTURE_LABELS[DEFAULT_FIXTURE]
 
-# Both the request and the instructions exist once per language, so a run never
-# mixes them: an English request paired with Korean guidance would measure the
-# mixture rather than either language.  planr's own `language` setting decides
-# which documents are generated; these decide which ones the agent reads.
+# The request and the instructions are chosen separately, so one fixture can be
+# run against several wordings of either -- that is what makes an A/B test
+# possible.  Each is named by a *variant*, and a variant named after a language
+# is the one a plain `--language` run picks, so the default pairing still never
+# mixes an English request with Korean guidance.  planr's own `language` setting
+# decides which documents are generated; these decide which ones the agent reads.
 SUPPORTED_LANGUAGES = ("en", "ko")
 DEFAULT_LANGUAGE = "en"
 PLANR_CONFIG_FILE = ".planr.yaml"
@@ -115,12 +121,69 @@ PLANR_CONFIG_FILE = ".planr.yaml"
 LANGUAGE_SETTING = re.compile(r"^language:\s*[\"']?([A-Za-z-]+)[\"']?\s*$", re.MULTILINE)
 
 
-def agents_file_for(language: str) -> str:
-    return f"{FIXTURE_PREFIX}AGENTS.{language}.md"
+def agents_file_for(variant: str) -> str:
+    """Name of a fixture-local instructions override."""
+
+    return f"{FIXTURE_PREFIX}AGENTS.{variant}.md"
 
 
-def prompt_file_for(language: str) -> str:
-    return f"{FIXTURE_PREFIX}PROMPT.{language}.md"
+def prompt_file_for(variant: str) -> str:
+    return f"{FIXTURE_PREFIX}PROMPT.{variant}.md"
+
+
+def variant_of(path: pathlib.Path, kind: str) -> str:
+    """Read the variant name out of a `FIXTURE.<kind>.<variant>.md` filename."""
+
+    return path.name[len(f"{FIXTURE_PREFIX}{kind}.") : -len(".md")]
+
+
+def prompt_variants(fixture_name: str = DEFAULT_FIXTURE) -> list[str]:
+    """Request wordings this fixture offers, by variant name."""
+
+    return sorted(
+        variant_of(path, "PROMPT") for path in fixture_dir(fixture_name).glob(f"{FIXTURE_PREFIX}PROMPT.*.md")
+    )
+
+
+def agents_variants(fixture_name: str = DEFAULT_FIXTURE) -> list[str]:
+    """Instruction sets available to this fixture: shared ones plus its own."""
+
+    variants = {path.name[: -len(".md")] for path in AGENTS_DIR.glob("*.md")}
+    variants.update(
+        variant_of(path, "AGENTS") for path in fixture_dir(fixture_name).glob(f"{FIXTURE_PREFIX}AGENTS.*.md")
+    )
+    return sorted(variants)
+
+
+def prompt_path(fixture_name: str, variant: str) -> pathlib.Path:
+    return fixture_dir(fixture_name) / prompt_file_for(variant)
+
+
+def agents_path(fixture_name: str, variant: str) -> pathlib.Path:
+    """Locate the instructions for a variant.
+
+    A fixture-local file wins over the shared one so a fixture can specialize a
+    variant without forking the whole document; everything else comes from the
+    shared library, which is why fixtures no longer carry a copy each.
+    """
+
+    local = fixture_dir(fixture_name) / agents_file_for(variant)
+    return local if local.is_file() else AGENTS_DIR / f"{variant}.md"
+
+
+def resolve_variant(kind: str, available: list[str], override: str | None, language: str) -> str:
+    """Pick a prompt or instructions variant for a run.
+
+    Without an explicit choice the run uses the variant named after its
+    language, which is what keeps a bare `--language ko` run entirely Korean.
+    """
+
+    variant = (override or language).strip()
+    if variant not in available:
+        raise HarnessError(
+            f"unknown {kind} variant {variant!r}; available: {', '.join(available) or 'none'}"
+        )
+    return variant
 
 
 DEFAULT_MODEL = "gpt-5.6-luna"
@@ -138,14 +201,14 @@ def positive_seconds(value: str) -> float:
     return parsed
 
 
-def load_initial_prompt(fixture: str = DEFAULT_FIXTURE, language: str = DEFAULT_LANGUAGE) -> str:
-    """Load the first user message from the fixture, in the run's language.
+def load_initial_prompt(fixture: str = DEFAULT_FIXTURE, variant: str = DEFAULT_LANGUAGE) -> str:
+    """Load the first user message from the fixture, in the run's variant.
 
     It stays out of the workspace on purpose: the agent has to work from the
     conversation, not from a task file it can re-read on disk.
     """
 
-    path = fixture_dir(fixture) / prompt_file_for(language)
+    path = prompt_path(fixture, variant)
     if not path.is_file():
         raise HarnessError(f"missing initial prompt: {path}")
     prompt = path.read_text(encoding="utf-8").strip()
@@ -718,40 +781,57 @@ def set_workspace_language(workspace: pathlib.Path, language: str) -> None:
 
 
 def install_fixture(
-    fixture: pathlib.Path, workspace: pathlib.Path, language: str = DEFAULT_LANGUAGE
+    fixture_name: str,
+    workspace: pathlib.Path,
+    language: str = DEFAULT_LANGUAGE,
+    agents_variant: str | None = None,
 ) -> None:
     """Copy the fixture into the agent's workspace.
 
     `FIXTURE.*` files are configuration for the evaluation, not repository
-    content, so they are skipped wholesale; the instructions for the run's
-    language are then written back under the name the agent is expected to
-    find, and planr's setting is pinned to match.
+    content, so they are skipped wholesale; the selected instructions -- shared
+    unless the fixture overrides them -- are then written under the name the
+    agent is expected to find, and planr's setting is pinned to match.
     """
 
     shutil.copytree(
-        fixture,
+        fixture_dir(fixture_name),
         workspace,
         dirs_exist_ok=True,
         ignore=shutil.ignore_patterns(f"{FIXTURE_PREFIX}*"),
     )
-    agents = fixture / agents_file_for(language)
+    agents = agents_path(fixture_name, agents_variant or language)
     if not agents.is_file():
-        raise HarnessError(f"missing fixture instructions: {agents}")
+        raise HarnessError(f"missing instructions: {agents}")
     shutil.copyfile(agents, workspace / INSTALLED_AGENTS_FILE)
     set_workspace_language(workspace, language)
 
 
 def prepare_workspace(
-    fixture_name: str = DEFAULT_FIXTURE, language: str = DEFAULT_LANGUAGE
+    fixture_name: str = DEFAULT_FIXTURE,
+    language: str = DEFAULT_LANGUAGE,
+    prompt_variant: str | None = None,
+    agents_variant: str | None = None,
 ) -> tuple[pathlib.Path, pathlib.Path]:
     config = load_harness_config()
-    fixture = fixture_dir(fixture_name)
-    required = fixture / agents_file_for(language)
+    agents_variant = agents_variant or language
+    required = agents_path(fixture_name, agents_variant)
     if not required.is_file():
-        raise HarnessError(f"missing fixture: {required}")
+        raise HarnessError(f"missing instructions: {required}")
     run_dir = make_run_dir(FIXTURE_LABELS.get(fixture_name, fixture_name))
     write_run_harness_config(run_dir, config)
-    write_metadata(run_dir, {"fixture": fixture_name, "language": language})
+    write_metadata(
+        run_dir,
+        {
+            "fixture": fixture_name,
+            "language": language,
+            # Recorded per run because they are the variables an A/B comparison
+            # turns on: two reports of the same fixture are only comparable
+            # once these lines are read.
+            "prompt_variant": prompt_variant or language,
+            "agents_variant": agents_variant,
+        },
+    )
     # Outside run_dir on purpose: the agent must not be able to read this run's
     # transcripts and reports by walking up from its own working directory.
     workspace = make_agent_workspace(
@@ -762,7 +842,7 @@ def prepare_workspace(
     tool_binary(config, workspace).parent.mkdir(parents=True, exist_ok=True)
     (workspace / ".harness").mkdir()
     (run_dir / STATE_DIR).mkdir()
-    install_fixture(fixture, workspace, language)
+    install_fixture(fixture_name, workspace, language, agents_variant)
     build_tool(config, tool_binary(config, workspace))
     # The agent's sandbox only grants writes inside the workspace, so Go's
     # user-level caches are unreachable: GOCACHE stops the first `go test`
@@ -789,12 +869,15 @@ def run_harness(args: argparse.Namespace) -> int:
     if not args.reasoning:
         raise HarnessError("--reasoning must not be empty")
     language = resolve_language(args.fixture, args.language)
-    initial_prompt = load_initial_prompt(args.fixture, language)
+    prompt_variant = resolve_variant("prompt", prompt_variants(args.fixture), args.prompt, language)
+    agents_variant = resolve_variant("agents", agents_variants(args.fixture), args.agents, language)
+    initial_prompt = load_initial_prompt(args.fixture, prompt_variant)
     progress(
         f"preparing isolated repository from fixture {args.fixture}"
-        f" in {language} (build configured tool, git init)"
+        f" in {language} (prompt {prompt_variant}, agents {agents_variant};"
+        " build configured tool, git init)"
     )
-    run_dir, workspace = prepare_workspace(args.fixture, language)
+    run_dir, workspace = prepare_workspace(args.fixture, language, prompt_variant, agents_variant)
     config = load_run_harness_config(run_dir)
     progress(f"run directory {run_dir.name}; workspace {workspace}")
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -858,6 +941,20 @@ def clean_runs() -> int:
     return 0
 
 
+def list_variants() -> int:
+    """Print the prompt/instructions variants each fixture can be run with.
+
+    An A/B test starts by knowing what there is to compare, and the answer is
+    spread over one shared directory and every fixture's overrides.
+    """
+
+    for fixture in sorted(FIXTURE_LABELS):
+        print(fixture)
+        print(f"  prompt: {', '.join(prompt_variants(fixture)) or 'none'}")
+        print(f"  agents: {', '.join(agents_variants(fixture)) or 'none'}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="main.py codex", description="run an isolated Codex planr evaluation"
@@ -874,6 +971,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("PLANR_HARNESS_LANGUAGE") or None,
         help="document language; overrides the fixture's own planr setting "
         f"(default: the fixture's setting, otherwise {DEFAULT_LANGUAGE})",
+    )
+    # Not `choices=`: which variants exist depends on --fixture, which argparse
+    # has not resolved yet. resolve_variant() validates and lists them instead.
+    parser.add_argument(
+        "--prompt",
+        default=os.environ.get("PLANR_HARNESS_PROMPT") or None,
+        help="request variant, i.e. which FIXTURE.PROMPT.<variant>.md the agent is sent "
+        "(default: the variant named after the run's language)",
+    )
+    parser.add_argument(
+        "--agents",
+        default=os.environ.get("PLANR_HARNESS_AGENTS") or None,
+        help="instructions variant installed as AGENTS.md, from fixtures/agents/ unless the "
+        "fixture overrides it (default: the variant named after the run's language)",
     )
     parser.add_argument(
         "--model",
@@ -911,6 +1022,10 @@ def main(argv: list[str]) -> int:
         if len(argv) != 1:
             raise HarnessError("clean accepts no options")
         return clean_runs()
+    if argv and argv[0] == "variants":
+        if len(argv) != 1:
+            raise HarnessError("variants accepts no options")
+        return list_variants()
     if argv and argv[0] == "analyze":
         if len(argv) != 2:
             raise HarnessError("analyze requires exactly one run directory")

@@ -933,6 +933,10 @@ def markdown_report(
         # Document language changes what the agent reads and writes, so runs
         # are only comparable to each other when this line matches.
         f"- Document language: `{metadata.get('language', 'unknown')}`",
+        # The two variables an A/B run changes: the request the agent was sent
+        # and the AGENTS.md it worked under.
+        f"- Prompt variant: `{metadata.get('prompt_variant', 'unknown')}`",
+        f"- Instructions variant: `{metadata.get('agents_variant', 'unknown')}`",
         f"- Final `go test ./...`: `{data.get('final_test_exit') or 'not recorded'}`",
         f"- Final Git worktree (tracked files): **{worktree_state(data)}**",
         "",

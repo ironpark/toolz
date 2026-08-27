@@ -15,6 +15,10 @@ from codex import (
     INSTALLED_AGENTS_FILE,
     SUPPORTED_LANGUAGES,
     agents_file_for,
+    agents_path,
+    agents_variants,
+    prompt_variants,
+    resolve_variant,
     fixture_language,
     resolve_language,
     set_workspace_language,
@@ -141,11 +145,13 @@ ALL_FIXTURES = sorted(FIXTURE_LABELS)
 class InstallFixtureTest(unittest.TestCase):
     """The agent must see repository content, never the evaluation's own files."""
 
-    def workspace_for(self, fixture: str, language: str = DEFAULT_LANGUAGE) -> pathlib.Path:
+    def workspace_for(
+        self, fixture: str, language: str = DEFAULT_LANGUAGE, agents_variant: str | None = None
+    ) -> pathlib.Path:
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         workspace = pathlib.Path(directory.name) / "repo"
-        install_fixture(fixture_dir(fixture), workspace, language)
+        install_fixture(fixture, workspace, language, agents_variant)
         return workspace
 
     def test_no_fixture_prefixed_file_reaches_the_workspace(self) -> None:
@@ -170,7 +176,7 @@ class InstallFixtureTest(unittest.TestCase):
                     self.assertTrue(target.is_file(), f"{INSTALLED_AGENTS_FILE} missing")
                     self.assertEqual(
                         target.read_text(encoding="utf-8"),
-                        (fixture_dir(fixture) / agents_file_for(language)).read_text(encoding="utf-8"),
+                        agents_path(fixture, language).read_text(encoding="utf-8"),
                     )
 
     def test_every_non_fixture_file_is_copied(self) -> None:
@@ -186,6 +192,16 @@ class InstallFixtureTest(unittest.TestCase):
                 self.assertTrue(expected, f"{fixture} has no repository content")
                 for relative in expected:
                     self.assertTrue((workspace / relative).is_file(), f"{relative} missing")
+
+    def test_instructions_variant_is_independent_of_the_language(self) -> None:
+        # An A/B run pins the documents to one language while swapping only the
+        # instructions, so the two choices must not be wired together.
+        workspace = self.workspace_for(DEFAULT_FIXTURE, "ko", agents_variant="en")
+        self.assertEqual(
+            (workspace / INSTALLED_AGENTS_FILE).read_text(encoding="utf-8"),
+            agents_path(DEFAULT_FIXTURE, "en").read_text(encoding="utf-8"),
+        )
+        self.assertEqual(fixture_language(workspace), "ko")
 
     def test_greenfield_fixture_ships_no_go_scaffolding(self) -> None:
         # Its whole point is that the agent sets the project up itself.
@@ -337,14 +353,14 @@ class InstalledInstructionsTest(unittest.TestCase):
         for fixture in ALL_FIXTURES:
             for language in SUPPORTED_LANGUAGES:
                 with self.subTest(fixture=fixture, language=language):
-                    path = fixture_dir(fixture) / agents_file_for(language)
+                    path = agents_path(fixture, language)
                     self.assertTrue(path.is_file(), f"{path} missing")
 
     def test_carries_the_planr_workflow(self) -> None:
         for fixture in ALL_FIXTURES:
             for language in SUPPORTED_LANGUAGES:
                 with self.subTest(fixture=fixture, language=language):
-                    agents = (fixture_dir(fixture) / agents_file_for(language)).read_text(encoding="utf-8")
+                    agents = agents_path(fixture, language).read_text(encoding="utf-8")
                     for policy in ("planr new", "planr apply", "planr edit", "planr overview", "phase done", "--force"):
                         self.assertIn(policy, agents)
 
@@ -360,7 +376,7 @@ class InstalledInstructionsTest(unittest.TestCase):
                     if path.is_file() and not path.name.startswith("FIXTURE.")
                 }
                 for language in SUPPORTED_LANGUAGES:
-                    agents = (source_dir / agents_file_for(language)).read_text(encoding="utf-8")
+                    agents = agents_path(fixture, language).read_text(encoding="utf-8")
                     for name in names - {".planr.yaml", "README.md", ".gitignore"}:
                         self.assertNotIn(name, agents, f"{name!r} only exists in this fixture")
                 self.assertTrue(names, "fixture has no repository content to check against")
@@ -368,6 +384,48 @@ class InstalledInstructionsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VariantSelectionTest(unittest.TestCase):
+    """Prompt and instructions are chosen independently, for A/B comparison."""
+
+    def test_every_fixture_offers_a_prompt_variant_per_language(self) -> None:
+        for fixture in ALL_FIXTURES:
+            with self.subTest(fixture=fixture):
+                self.assertLessEqual(set(SUPPORTED_LANGUAGES), set(prompt_variants(fixture)))
+
+    def test_instructions_come_from_the_shared_library(self) -> None:
+        # The point of moving them above the fixtures: no fixture carries its
+        # own copy, so every fixture sees the same set.
+        for fixture in ALL_FIXTURES:
+            with self.subTest(fixture=fixture):
+                self.assertEqual(agents_variants(fixture), agents_variants(DEFAULT_FIXTURE))
+                self.assertEqual([p.name for p in fixture_dir(fixture).glob("FIXTURE.AGENTS.*")], [])
+                for language in SUPPORTED_LANGUAGES:
+                    self.assertEqual(agents_path(fixture, language).parent.name, "agents")
+
+    def test_a_fixture_local_file_overrides_a_shared_variant(self) -> None:
+        # A fixture may specialize one variant without forking the document.
+        fixture = fixture_dir(DEFAULT_FIXTURE)
+        override = fixture / agents_file_for("ab-test")
+        override.write_text("local\n", encoding="utf-8")
+        self.addCleanup(override.unlink)
+        self.assertEqual(agents_path(DEFAULT_FIXTURE, "ab-test"), override)
+        self.assertIn("ab-test", agents_variants(DEFAULT_FIXTURE))
+
+    def test_variants_default_to_the_run_language(self) -> None:
+        for language in SUPPORTED_LANGUAGES:
+            with self.subTest(language=language):
+                self.assertEqual(resolve_variant("prompt", ["en", "ko"], None, language), language)
+                self.assertEqual(resolve_variant("prompt", ["en", "ko", "terse"], "terse", language), "terse")
+
+    def test_unknown_variant_is_rejected_with_the_available_ones(self) -> None:
+        with self.assertRaises(HarnessError) as caught:
+            resolve_variant("agents", ["en", "ko"], "strict", "en")
+        self.assertIn("en, ko", str(caught.exception))
+
+    def test_the_shared_library_is_not_a_fixture(self) -> None:
+        self.assertNotIn("agents", FIXTURE_LABELS)
 
 
 class ResolveLanguageTest(unittest.TestCase):
@@ -453,5 +511,5 @@ class SetWorkspaceLanguageTest(unittest.TestCase):
                     directory = tempfile.TemporaryDirectory()
                     self.addCleanup(directory.cleanup)
                     workspace = pathlib.Path(directory.name) / "repo"
-                    install_fixture(fixture_dir(fixture), workspace, language)
+                    install_fixture(fixture, workspace, language)
                     self.assertEqual(fixture_language(workspace), language)

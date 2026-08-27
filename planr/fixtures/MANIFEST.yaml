@@ -3,6 +3,17 @@
 # 각 픽스처는 서로 다른 실행기가 사용하며, 격리된 작업 디렉터리로 복사된 뒤
 # 그 안에서만 수정됩니다. 새 픽스처를 추가하면 이 파일에도 항목을 추가합니다.
 # 실행기의 기계 판독 설정(빌드·관찰·신호·완료 판정)은 HARNESS.json에 있습니다.
+#
+# 에이전트 지침(AGENTS.md)은 픽스처마다 복사하지 않고 agents/<변형>.md 하나만 둡니다.
+# 실행기는 --agents <변형>으로 그중 하나를, --prompt <변형>으로 픽스처의
+# FIXTURE.PROMPT.<변형>.md 중 하나를 골라 짝지어 실행하므로 요청 문구와 지침 문서를
+# 각각 A/B로 비교할 수 있습니다. 둘 다 기본값은 실행 언어와 같은 이름의 변형입니다.
+# 사용 가능한 변형은 `main.py codex variants`로 확인합니다.
+#
+# agents/<변형>.md: 워크스페이스에 AGENTS.md로 설치되는 공용 저장소 지침. 지금은
+#   언어별 변형 en·ko가 있고, 새 지침 실험은 여기에 변형을 추가하면 모든 픽스처가 쓸 수
+#   있습니다. 특정 픽스처만 다른 지침이 필요하면 그 픽스처에 FIXTURE.AGENTS.<변형>.md를
+#   두어 같은 이름의 공용 파일을 덮어씁니다.
 
 fixtures:
   - name: plan-scenario
@@ -26,8 +37,7 @@ fixtures:
       복사한 뒤 git init을 수행한다.
     contents:
       - .planr.yaml: 훅으로 planr 이벤트를 .harness/planr-events.log에 기록
-      - FIXTURE.PROMPT.<언어>.md: 실행 언어에 맞는 파일이 에이전트에게 보내는 요청. 워크스페이스로 복사하지 않는다
-      - FIXTURE.AGENTS.<언어>.md: 실행 언어에 맞는 파일이 AGENTS.md로 설치되는 저장소 지침
+      - FIXTURE.PROMPT.<변형>.md: 선택한 변형(기본값은 실행 언어)이 에이전트에게 보내는 요청. 워크스페이스로 복사하지 않는다
       - go.mod, main.go, main_test.go: 에이전트가 수정하는 샘플 Go 프로젝트
       - README.md: 샘플 프로젝트 설명
 
@@ -41,8 +51,7 @@ fixtures:
     contents:
       - .planr.yaml: 훅으로 planr 이벤트를 .harness/planr-events.log에 기록
       - .gitignore: .harness/, bin/, 빌드된 tasks 바이너리와 tasks.json 제외
-      - FIXTURE.PROMPT.<언어>.md: 실행 언어에 맞는 파일이 에이전트에게 보내는 요청. 워크스페이스로 복사하지 않는다
-      - FIXTURE.AGENTS.<언어>.md: 실행 언어에 맞는 파일이 AGENTS.md로 설치되는 저장소 지침
+      - FIXTURE.PROMPT.<변형>.md: 선택한 변형(기본값은 실행 언어)이 에이전트에게 보내는 요청. 워크스페이스로 복사하지 않는다
       - FIXTURE.TEST.sh: >-
           세션 종료 후 하네스가 워크스페이스 밖에서 실행하는 인수 검사.
           워크스페이스로 복사하지 않으므로 에이전트가 검사 내용을 보고 맞출 수 없다.
@@ -61,8 +70,7 @@ fixtures:
     contents:
       - .planr.yaml: 훅으로 planr 이벤트를 .harness/planr-events.log에 기록
       - .gitignore: .harness/, bin/, 빌드된 rx 바이너리 제외
-      - FIXTURE.PROMPT.<언어>.md: 실행 언어에 맞는 파일이 에이전트에게 보내는 요청. 워크스페이스로 복사하지 않는다
-      - FIXTURE.AGENTS.<언어>.md: 실행 언어에 맞는 파일이 AGENTS.md로 설치되는 저장소 지침
+      - FIXTURE.PROMPT.<변형>.md: 선택한 변형(기본값은 실행 언어)이 에이전트에게 보내는 요청. 워크스페이스로 복사하지 않는다
       - FIXTURE.TEST.sh: >-
           문법 16종·탐욕 매칭·플래그·종료 코드·잘못된 패턴 5종을 검사하고,
           `regexp` import 여부와 외부 의존성 유무도 함께 본다. 워크스페이스로
@@ -81,8 +89,7 @@ fixtures:
     contents:
       - .planr.yaml: 훅으로 planr 이벤트를 .harness/planr-events.log에 기록
       - .gitignore: .harness/, bin/, 빌드된 kv 바이너리와 *.log 제외
-      - FIXTURE.PROMPT.<언어>.md: 실행 언어에 맞는 파일이 에이전트에게 보내는 요청. 워크스페이스로 복사하지 않는다
-      - FIXTURE.AGENTS.<언어>.md: 실행 언어에 맞는 파일이 AGENTS.md로 설치되는 저장소 지침
+      - FIXTURE.PROMPT.<변형>.md: 선택한 변형(기본값은 실행 언어)이 에이전트에게 보내는 요청. 워크스페이스로 복사하지 않는다
       - FIXTURE.TEST.sh: >-
           기본 동작·종료 코드·영속성 외에 잘린 로그, 쓰레기 꼬리, compaction 전후 상태와 크기,
           200개 시드 위에서 30개씩 3회 병렬 쓰기를 검사한다. 병렬 검사는 경쟁 구간을 넓혀야

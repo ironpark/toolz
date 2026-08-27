@@ -754,34 +754,40 @@ uv run --with pytest --project planr/scripts python -m pytest planr/scripts -q
 
 | 픽스처 파일 | 워크스페이스 |
 | --- | --- |
-| `FIXTURE.PROMPT.<언어>.md` | **복사하지 않음.** 실행 언어에 해당하는 파일이 요청으로만 사용됩니다 |
-| `FIXTURE.AGENTS.<언어>.md` | 실행 언어에 해당하는 파일만 `AGENTS.md`로 설치됩니다 |
+| `FIXTURE.PROMPT.<변형>.md` | **복사하지 않음.** 고른 변형이 요청으로만 사용됩니다 |
+| `FIXTURE.AGENTS.<변형>.md` | 같은 이름의 공용 지침을 덮어쓰는 픽스처 전용 파일. 고른 변형만 `AGENTS.md`로 설치됩니다 |
 | 그 외 파일 | 그대로 복사됩니다 |
+
+지침 본문은 픽스처 안이 아니라 [`fixtures/agents/`](fixtures/agents/)에 있습니다.
+`agents/<변형>.md` 하나가 모든 픽스처에 설치되므로 같은 문서를 픽스처 수만큼 복사해
+둘 필요가 없고, 문구를 고칠 때 사본이 서로 어긋날 일도 없습니다.
 
 요청을 파일로 두지 않는 이유는, 디스크에서 다시 읽을 수 있는 과제 명세가 아니라 대화로
 받은 요청만으로 일하는 상황을 재현하기 위해서입니다.
 
 두 파일의 역할은 섞지 않습니다.
 
-- `FIXTURE.PROMPT.<언어>.md`는 **실제 사용자가 보낼 법한 요청**입니다. planr을 언급하지 않고,
+- `FIXTURE.PROMPT.<변형>.md`는 **실제 사용자가 보낼 법한 요청**입니다. planr을 언급하지 않고,
   대신 "물어보지 말고 끝까지 알아서 진행해 달라"는 지시를 담습니다. 이후 개입이 없으므로
-  완료 판단의 근거가 이 메시지뿐입니다.
-- `FIXTURE.AGENTS.<언어>.md`는 **저장소·과제와 무관한 planr 사용 지침**입니다. 명령
+  완료 판단의 근거가 이 메시지뿐입니다. 과제마다 다르므로 픽스처 안에 둡니다.
+- `agents/<변형>.md`는 **저장소·과제와 무관한 planr 사용 지침**입니다. 명령
   레퍼런스, 초안 규격, 작업 흐름, 규칙만 담고 있어 다른 저장소에 그대로 옮겨도 됩니다.
+  과제와 무관하므로 픽스처 위에 둡니다.
 
 요청 쪽에 워크플로를 다시 적으면 "에이전트가 AGENTS.md를 읽고 planr을 찾아 쓰는가"라는
 측정 자체가 무의미해집니다. 이 분리는 단위 테스트로 고정되어 있습니다.
 
 #### 실행 언어
 
-요청과 지침을 언어마다 하나씩 두고, 실행 언어에 맞는 파일만 사용합니다.
+요청과 지침에는 언어 이름을 가진 변형이 하나씩 있고, 아무것도 고르지 않으면 실행 언어와
+같은 이름의 변형이 선택됩니다.
 
 | 언어 | 요청 | 지침 |
 | --- | --- | --- |
-| `en` | `FIXTURE.PROMPT.en.md` | `FIXTURE.AGENTS.en.md` |
-| `ko` | `FIXTURE.PROMPT.ko.md` | `FIXTURE.AGENTS.ko.md` |
+| `en` | `FIXTURE.PROMPT.en.md` | `agents/en.md` |
+| `ko` | `FIXTURE.PROMPT.ko.md` | `agents/ko.md` |
 
-둘을 함께 고르는 이유는, 영어 요청에 한국어 지침이 붙으면 실행이 어느 한 언어가 아니라
+기본값으로 둘을 함께 고르는 이유는, 영어 요청에 한국어 지침이 붙으면 실행이 어느 한 언어가 아니라
 그 혼합을 측정하기 때문입니다. 언어는 다음 순서로 정해집니다.
 
 1. `--language en|ko` — 지정하면 이 값이 이깁니다. 픽스처를 고치지 않고 같은 과제를
@@ -802,6 +808,29 @@ planr-codex --fixture codex-greenfield --language en
 
 실행 언어는 `metadata.env`와 리포트의 `Document language`에 남습니다. 서로 다른 실행을
 비교할 때는 이 값이 같은지 먼저 확인해야 합니다.
+
+#### 요청·지침 변형 (A/B)
+
+문구를 바꿔 가며 비교하려면 요청과 지침을 각각 따로 고릅니다. 언어는 기본값을 정할 뿐이고,
+`--prompt`·`--agents`는 언어와 독립적으로 동작합니다.
+
+- `--prompt <변형>` — 픽스처의 `FIXTURE.PROMPT.<변형>.md` 중 하나를 요청으로 보냅니다.
+  (`PLANR_HARNESS_PROMPT`)
+- `--agents <변형>` — `fixtures/agents/<변형>.md`를 `AGENTS.md`로 설치합니다. 픽스처에
+  같은 이름의 `FIXTURE.AGENTS.<변형>.md`가 있으면 그 파일이 이깁니다. (`PLANR_HARNESS_AGENTS`)
+
+새 지침 문구를 시험하려면 `fixtures/agents/`에 `<이름>.md`를 추가하기만 하면 모든 픽스처가
+바로 그 변형을 쓸 수 있습니다. 요청 변형은 과제에 묶이므로 픽스처 안에 추가합니다.
+
+```sh
+planr-codex variants                                  # 픽스처별로 고를 수 있는 변형 목록
+planr-codex --agents en --language ko                 # 문서는 ko, 지침만 en
+planr-codex --fixture codex-regex --agents strict     # 같은 과제를 다른 지침으로
+```
+
+고른 변형은 `metadata.env`와 리포트의 `Prompt variant`·`Instructions variant`에 남습니다.
+A/B 비교는 나머지 조건(픽스처·모델·reasoning·언어)을 고정하고 한 쪽만 바꾼 뒤 이 줄로
+어느 실행이 어느 조합이었는지 확인하는 방식입니다.
 
 구현은 [`codex.py`](scripts/codex.py)에 있고, `openai-codex` 공식 Python SDK의
 `AsyncCodex`를 사용합니다. 따라서 별도의 `codex exec` 셸 호출 없이 원본 SDK 알림을 모두
