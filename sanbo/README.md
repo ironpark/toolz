@@ -49,6 +49,11 @@ go build -o sanbo .
 | `GET /metrics` | Prometheus 텍스트 메트릭 | 연결·세션·전달·용량·handshake·histogram 전체 surface |
 | `GET /ws` | paseo-relay 호환 WebSocket 업그레이드 | v1/v2 routing, ownership 및 opaque reroute 구현 |
 
+`/metrics`는 참조 구현과 같은 HELP/TYPE 메타데이터와 누적 histogram bucket을
+노출합니다. Capacity 상태를 읽을 수 없을 때는 `active_websockets`,
+`ingress_reserved_bytes`, `inflight_delivery_bytes`, `backpressured_sources` 네
+게이지를 응답에서 생략합니다.
+
 헬스 체크 예시:
 
 ```sh
