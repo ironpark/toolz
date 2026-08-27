@@ -71,7 +71,10 @@ type Relay struct {
 	// sampler ticks and are only touched from the sampling path.
 	shedBatch      int
 	shedHeapBefore uint64
-	ownership      ownershipCoordinator
+	// shedGCAt is when this pressure episode last forced a collection; it is
+	// zero between episodes so the first batch of a crossing always collects.
+	shedGCAt  time.Time
+	ownership ownershipCoordinator
 }
 
 type relayPeer struct {
@@ -1112,6 +1115,9 @@ const (
 	// initialShedBatch keeps the first shed of a crossing small; the sampler
 	// grows it only while shedding fails to reclaim anything.
 	initialShedBatch = 8
+	// shedGCInterval is the shortest gap between the forced collections that
+	// let a pressure episode observe its own relief.
+	shedGCInterval = time.Second
 	// controlSyncDelay is how long a client route may wait for its data socket
 	// before the relay re-sends sync, and controlCloseDelay how long after that
 	// re-send the control socket has to produce one.
@@ -1168,6 +1174,7 @@ func (r *Relay) sampleMemoryPressure(inUse uint64) {
 		if inUse <= memoryRecoveryThreshold(r.Config.MemoryWatermarkBytes) {
 			r.memoryPressure.Store(false)
 			r.shedBatch = 0
+			r.shedGCAt = time.Time{}
 			return
 		}
 		r.shedNextBatch(inUse, inUse >= r.shedHeapBefore)
@@ -1208,29 +1215,45 @@ func memoryRecoveryThreshold(watermark int) uint64 {
 	return uint64(watermark - MaximumMessagePayloadBytes)
 }
 
-// shedCandidatesLocked orders the sockets shedding may close: sources that
+// attachedPeersLocked snapshots every socket attached to this node. Callers
+// hold r.mu; the ordering work shedding does with the result is deliberately
+// left outside the lock.
+func (r *Relay) attachedPeersLocked() []*relayPeer {
+	var peers []*relayPeer
+	for _, session := range r.sessions {
+		peers = append(peers, sessionPeers(session)...)
+	}
+	return peers
+}
+
+// shedCandidates picks up to batch sockets to close, ordered by sources that
 // have been blocked on a delivery longest first, then the most recently
 // attached sockets. Blocking longest means holding memory longest, and among
 // the rest the newest arrival is the one whose loss costs the least
 // established work. Peers already shed stay attached until their read loop
 // unwinds, so they are skipped to keep a batch a batch of distinct sockets.
-// Callers hold r.mu.
-func (r *Relay) shedCandidatesLocked() []*relayPeer {
+func shedCandidates(peers []*relayPeer, batch int) []*relayPeer {
 	var blocked, active []*relayPeer
-	for _, session := range r.sessions {
-		for _, peer := range sessionPeers(session) {
-			switch {
-			case peer.shed.Load():
-			case peer.blockSeq.Load() != 0:
-				blocked = append(blocked, peer)
-			default:
-				active = append(active, peer)
-			}
+	for _, peer := range peers {
+		switch {
+		case peer.shed.Load():
+		case peer.blockSeq.Load() != 0:
+			blocked = append(blocked, peer)
+		default:
+			active = append(active, peer)
 		}
 	}
 	sort.Slice(blocked, func(i, j int) bool { return blocked[i].blockSeq.Load() < blocked[j].blockSeq.Load() })
+	if len(blocked) >= batch {
+		return blocked[:batch]
+	}
+	// Only the sockets the batch can still reach need ordering at all.
 	sort.Slice(active, func(i, j int) bool { return active[i].attachSeq.Load() > active[j].attachSeq.Load() })
-	return append(blocked, active...)
+	candidates := append(blocked, active...)
+	if len(candidates) > batch {
+		candidates = candidates[:batch]
+	}
+	return candidates
 }
 
 // shedForMemoryPressure drops every buffered frame and closes up to batch
@@ -1238,10 +1261,13 @@ func (r *Relay) shedCandidatesLocked() []*relayPeer {
 // sample can observe the relief.
 func (r *Relay) shedForMemoryPressure(batch int) {
 	r.mu.Lock()
-	peers := r.shedCandidatesLocked()
-	if len(peers) > batch {
-		peers = peers[:batch]
-	}
+	attached := r.attachedPeersLocked()
+	r.mu.Unlock()
+	// Ordering a batch walks and sorts every socket on the node, which is too
+	// much work to hold the global lock for four times a second.
+	peers := shedCandidates(attached, batch)
+
+	r.mu.Lock()
 	for _, peer := range peers {
 		peer.shed.Store(true)
 	}
@@ -1258,8 +1284,14 @@ func (r *Relay) shedForMemoryPressure(batch int) {
 		closeAsync(peer.conn, websocket.StatusTryAgainLater, "Relay memory pressure")
 	}
 	r.memoryPressureDisconnects.Add(int64(len(peers)))
-	// Without this the shed memory stays uncollected and pressure never clears.
-	runtime.GC()
+	// Without a collection the shed memory stays uncollected and pressure never
+	// clears, because the pressure reading only falls once the runtime frees
+	// memory. It is rate-limited rather than run on every batch so a long
+	// episode does not stop the world four times a second.
+	if now := time.Now(); r.shedGCAt.IsZero() || now.Sub(r.shedGCAt) >= shedGCInterval {
+		r.shedGCAt = now
+		runtime.GC()
+	}
 }
 
 // watchOwnership starts the cluster reconciler and returns a function that

@@ -250,8 +250,9 @@ func TestShedPicksLongestBlockedSourceBeforeNewestActiveSocket(t *testing.T) {
 		data:    map[string]*relayPeer{},
 		buffer:  map[string][]relayMessage{},
 	}
-	got := relay.shedCandidatesLocked()
+	attached := relay.attachedPeersLocked()
 	relay.mu.Unlock()
+	got := shedCandidates(attached, 4)
 
 	want := []*relayPeer{oldBlocked, newBlocked, newActive, oldActive}
 	for i := range want {
@@ -272,8 +273,9 @@ func TestShedSkipsSocketsAlreadyChosen(t *testing.T) {
 		data:    map[string]*relayPeer{},
 		buffer:  map[string][]relayMessage{},
 	}
-	got := relay.shedCandidatesLocked()
+	attached := relay.attachedPeersLocked()
 	relay.mu.Unlock()
+	got := shedCandidates(attached, 4)
 
 	if len(got) != 1 || got[0] != next {
 		t.Fatalf("shed candidates = %v, want only the socket not already shed", got)
