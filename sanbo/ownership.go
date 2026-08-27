@@ -124,16 +124,15 @@ type clusterOwner struct {
 // claims atomic across independent OS processes, while heartbeat leases make
 // membership and ownership recover after an ungraceful process exit.
 type fileOwnershipCoordinator struct {
-	dir        string
-	memberID   string
-	target     string
-	memberFile string
-	stop       chan struct{}
-	done       chan struct{}
-	closed     atomic.Bool
-	liveCount  atomic.Int64
-	lockMu     sync.Mutex
-	lockFile   *os.File
+	dir       string
+	memberID  string
+	target    string
+	stop      chan struct{}
+	done      chan struct{}
+	closed    atomic.Bool
+	liveCount atomic.Int64
+	lockMu    sync.Mutex
+	lockFile  *os.File
 }
 
 func newOwnershipCoordinator(config Config) (ownershipCoordinator, error) {
@@ -159,13 +158,12 @@ func newOwnershipCoordinator(config Config) (ownershipCoordinator, error) {
 	}
 	memberID := config.NodeName + ":" + hex.EncodeToString(token)
 	coordinator := &fileOwnershipCoordinator{
-		dir:        dir,
-		memberID:   memberID,
-		target:     config.OwnershipTarget,
-		memberFile: filepath.Join(dir, "members", digestName(memberID)+".json"),
-		stop:       make(chan struct{}),
-		done:       make(chan struct{}),
-		lockFile:   lockFile,
+		dir:      dir,
+		memberID: memberID,
+		target:   config.OwnershipTarget,
+		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
+		lockFile: lockFile,
 	}
 	if err := coordinator.heartbeat(); err != nil {
 		lockFile.Close()
@@ -199,10 +197,10 @@ func (coordinator *fileOwnershipCoordinator) heartbeatLoop() {
 func (coordinator *fileOwnershipCoordinator) heartbeat() error {
 	return coordinator.withLock(func() error {
 		member := clusterMember{ID: coordinator.memberID, Heartbeat: time.Now().UnixNano()}
-		if err := writeJSONFile(coordinator.memberFile, member); err != nil {
+		if err := writeJSONFile(coordinator.memberFile(coordinator.memberID), member); err != nil {
 			return err
 		}
-		_, err := coordinator.liveMembersLocked(time.Now())
+		_, err := coordinator.sweepMembersLocked(time.Now())
 		return err
 	})
 }
@@ -211,19 +209,9 @@ func (coordinator *fileOwnershipCoordinator) lookup(serverID string) (ownershipR
 	var result ownershipRecord
 	var found bool
 	err := coordinator.withLock(func() error {
-		live, err := coordinator.liveMembersLocked(time.Now())
-		if err != nil {
-			return err
-		}
-		owner, ok, err := coordinator.readOwnerLocked(serverID)
+		owner, ok, err := coordinator.liveOwnerLocked(serverID)
 		if err != nil || !ok {
 			return err
-		}
-		if _, alive := live[owner.MemberID]; !alive {
-			if err := os.Remove(coordinator.ownerFile(serverID)); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-			return nil
 		}
 		result = ownershipRecord{ownerID: owner.MemberID, target: owner.Target}
 		found = true
@@ -236,22 +224,13 @@ func (coordinator *fileOwnershipCoordinator) claim(serverID string, _ *Relay) (o
 	var result ownershipRecord
 	var acquired bool
 	err := coordinator.withLock(func() error {
-		live, err := coordinator.liveMembersLocked(time.Now())
-		if err != nil {
-			return err
-		}
-		owner, ok, err := coordinator.readOwnerLocked(serverID)
+		owner, ok, err := coordinator.liveOwnerLocked(serverID)
 		if err != nil {
 			return err
 		}
 		if ok {
-			if _, alive := live[owner.MemberID]; alive {
-				result = ownershipRecord{ownerID: owner.MemberID, target: owner.Target}
-				return nil
-			}
-			if err := os.Remove(coordinator.ownerFile(serverID)); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
+			result = ownershipRecord{ownerID: owner.MemberID, target: owner.Target}
+			return nil
 		}
 		owner = clusterOwner{ServerID: serverID, MemberID: coordinator.memberID, Target: coordinator.target}
 		if err := writeJSONFile(coordinator.ownerFile(serverID), owner); err != nil {
@@ -289,24 +268,9 @@ func (coordinator *fileOwnershipCoordinator) members() (int, error) {
 func (coordinator *fileOwnershipCoordinator) ownedServers() (map[string]bool, error) {
 	owned := make(map[string]bool)
 	err := coordinator.withLock(func() error {
-		entries, err := os.ReadDir(filepath.Join(coordinator.dir, "owners"))
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			var owner clusterOwner
-			path := filepath.Join(coordinator.dir, "owners", entry.Name())
-			if err := readJSONFile(path, &owner); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					continue
-				}
-				return err
-			}
-			if owner.MemberID == coordinator.memberID {
-				owned[owner.ServerID] = true
-			}
-		}
-		return nil
+		return coordinator.eachOwnedLocked(func(_ string, owner clusterOwner) {
+			owned[owner.ServerID] = true
+		})
 	})
 	return owned, err
 }
@@ -319,26 +283,21 @@ func (coordinator *fileOwnershipCoordinator) close() error {
 	<-coordinator.done
 	defer coordinator.lockFile.Close()
 	return coordinator.withLock(func() error {
-		if err := os.Remove(coordinator.memberFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := os.Remove(coordinator.memberFile(coordinator.memberID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		entries, err := os.ReadDir(filepath.Join(coordinator.dir, "owners"))
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			path := filepath.Join(coordinator.dir, "owners", entry.Name())
-			var owner clusterOwner
-			if readJSONFile(path, &owner) == nil && owner.MemberID == coordinator.memberID {
-				_ = os.Remove(path)
-			}
-		}
-		return nil
+		return coordinator.eachOwnedLocked(func(path string, _ clusterOwner) {
+			_ = os.Remove(path)
+		})
 	})
 }
 
 func (coordinator *fileOwnershipCoordinator) ownerFile(serverID string) string {
 	return filepath.Join(coordinator.dir, "owners", digestName(serverID)+".json")
+}
+
+func (coordinator *fileOwnershipCoordinator) memberFile(memberID string) string {
+	return filepath.Join(coordinator.dir, "members", digestName(memberID)+".json")
 }
 
 func (coordinator *fileOwnershipCoordinator) readOwnerLocked(serverID string) (clusterOwner, bool, error) {
@@ -356,12 +315,72 @@ func (coordinator *fileOwnershipCoordinator) readOwnerLocked(serverID string) (c
 	return owner, true, nil
 }
 
-func (coordinator *fileOwnershipCoordinator) liveMembersLocked(now time.Time) (map[string]clusterMember, error) {
+// eachOwnedLocked visits every owner record held by this member.
+func (coordinator *fileOwnershipCoordinator) eachOwnedLocked(visit func(path string, owner clusterOwner)) error {
+	entries, err := os.ReadDir(filepath.Join(coordinator.dir, "owners"))
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		path := filepath.Join(coordinator.dir, "owners", entry.Name())
+		var owner clusterOwner
+		if err := readJSONFile(path, &owner); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		if owner.MemberID == coordinator.memberID {
+			visit(path, owner)
+		}
+	}
+	return nil
+}
+
+// liveOwnerLocked returns the current owner of serverID, evicting the record
+// first if the owning member's lease has expired. This is the single place the
+// lease-expiry rule is applied.
+func (coordinator *fileOwnershipCoordinator) liveOwnerLocked(serverID string) (clusterOwner, bool, error) {
+	owner, ok, err := coordinator.readOwnerLocked(serverID)
+	if err != nil || !ok {
+		return clusterOwner{}, false, err
+	}
+	alive, err := coordinator.memberAliveLocked(owner.MemberID, time.Now())
+	if err != nil {
+		return clusterOwner{}, false, err
+	}
+	if alive {
+		return owner, true, nil
+	}
+	if err := os.Remove(coordinator.ownerFile(serverID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return clusterOwner{}, false, err
+	}
+	return clusterOwner{}, false, nil
+}
+
+// memberAliveLocked reads the one member file it needs. The heartbeat sweep is
+// what garbage-collects expired members, so admission does not pay for a full
+// directory scan per connection.
+func (coordinator *fileOwnershipCoordinator) memberAliveLocked(memberID string, now time.Time) (bool, error) {
+	var member clusterMember
+	err := readJSONFile(coordinator.memberFile(memberID), &member)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return member.ID == memberID && now.Sub(time.Unix(0, member.Heartbeat)) <= clusterLeaseDuration, nil
+}
+
+// sweepMembersLocked reads every member file, drops expired ones, and publishes
+// the resulting count for lock-free readiness checks.
+func (coordinator *fileOwnershipCoordinator) sweepMembersLocked(now time.Time) (int, error) {
 	entries, err := os.ReadDir(filepath.Join(coordinator.dir, "members"))
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	live := make(map[string]clusterMember, len(entries))
+	live := 0
 	for _, entry := range entries {
 		path := filepath.Join(coordinator.dir, "members", entry.Name())
 		var member clusterMember
@@ -369,15 +388,15 @@ func (coordinator *fileOwnershipCoordinator) liveMembersLocked(now time.Time) (m
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return nil, err
+			return 0, err
 		}
 		if member.ID == "" || now.Sub(time.Unix(0, member.Heartbeat)) > clusterLeaseDuration {
 			_ = os.Remove(path)
 			continue
 		}
-		live[member.ID] = member
+		live++
 	}
-	coordinator.liveCount.Store(int64(len(live)))
+	coordinator.liveCount.Store(int64(live))
 	return live, nil
 }
 

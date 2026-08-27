@@ -274,7 +274,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 	defer r.activeWebSockets.Add(-1)
 
 	readLimit := int64(MaximumFrameWireBytes)
-	if connection.Version == 2 && connection.Role == RoleServer && connection.ConnectionID == "" {
+	if connection.isControl() {
 		readLimit = MaximumControlPayloadBytes + 1
 	}
 	conn.SetReadLimit(readLimit)
@@ -292,7 +292,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 			s.v1Client = peer
 		}
 		r.mu.Unlock()
-	} else if connection.Role == RoleServer && connection.ConnectionID == "" {
+	} else if connection.isControl() {
 		s.control = peer
 		r.mu.Unlock()
 		r.send(peer, websocket.MessageText, []byte(`{"type":"sync","connectionIds":[]}`))
@@ -342,7 +342,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 			return
 		}
 		payloadLimit := MaximumMessagePayloadBytes
-		if connection.Version == 2 && connection.Role == RoleServer && connection.ConnectionID == "" {
+		if connection.isControl() {
 			payloadLimit = MaximumControlPayloadBytes
 		}
 		if len(payload) > payloadLimit {
@@ -354,7 +354,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 			_ = conn.Close(websocket.StatusPolicyViolation, "Invalid handshake key")
 			return
 		}
-		if connection.Version == 2 && connection.Role == RoleServer && connection.ConnectionID == "" && typ == websocket.MessageText {
+		if connection.isControl() && typ == websocket.MessageText {
 			var ping struct {
 				Type string `json:"type"`
 			}
@@ -434,43 +434,14 @@ func (r *Relay) forward(p *relayPeer, typ websocket.MessageType, b []byte) error
 	return err
 }
 
-// validHandshake reports whether a text frame is an acceptable hello. Frames
-// that are not handshakes pass through untouched.
-func validHandshake(b []byte) bool {
-	var x struct {
-		Type string `json:"type"`
-		Key  string `json:"key"`
-	}
-	if err := json.Unmarshal(b, &x); err != nil {
-		return !bytes.Contains(b, []byte(`"type":"e2ee_hello"`))
-	}
-	if x.Type != "hello" && x.Type != "e2ee_hello" {
-		return true
-	}
-	raw, err := base64.StdEncoding.Strict().DecodeString(x.Key)
-	if err != nil || len(raw) != 32 || raw[31]&0x80 != 0 {
-		return false
-	}
-	pub, err := ecdh.X25519().NewPublicKey(raw)
-	if err != nil {
-		return false
-	}
-	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
-	if err != nil {
-		return false
-	}
-	// Rejects low-order points, which yield an all-zero shared secret.
-	_, err = priv.ECDH(pub)
-	return err == nil
+type handshakeFrame struct {
+	Type string          `json:"type"`
+	Key  json.RawMessage `json:"key"`
 }
 
-func handshakeType(b []byte) (int, bool) {
-	var frame struct {
-		Type string `json:"type"`
-	}
-	if json.Unmarshal(b, &frame) != nil {
-		return 0, false
-	}
+// handshakeKind classifies a decoded frame, reporting false when the frame is
+// not a handshake at all.
+func handshakeKind(frame handshakeFrame) (int, bool) {
 	switch frame.Type {
 	case "hello":
 		return 0, true
@@ -481,13 +452,73 @@ func handshakeType(b []byte) (int, bool) {
 	}
 }
 
+// probeKey is only used to reject low-order points, so its value is irrelevant
+// and one key per process gives the same answer as one per handshake.
+var probeKey = sync.OnceValues(func() (*ecdh.PrivateKey, error) {
+	return ecdh.X25519().GenerateKey(rand.Reader)
+})
+
+// acceptableKey reports whether a hello carries a usable X25519 public key.
+// The second result is false when key is not a JSON string at all, which leaves
+// the frame unclassifiable and sends callers to the byte-level fallback.
+func acceptableKey(raw json.RawMessage) (bool, bool) {
+	key := ""
+	if raw != nil && json.Unmarshal(raw, &key) != nil {
+		return false, false
+	}
+	decoded, err := base64.StdEncoding.Strict().DecodeString(key)
+	if err != nil || len(decoded) != 32 || decoded[31]&0x80 != 0 {
+		return false, true
+	}
+	pub, err := ecdh.X25519().NewPublicKey(decoded)
+	if err != nil {
+		return false, true
+	}
+	priv, err := probeKey()
+	if err != nil {
+		return false, true
+	}
+	// Rejects low-order points, which yield an all-zero shared secret.
+	_, err = priv.ECDH(pub)
+	return err == nil, true
+}
+
+// acceptedHandshake decides an already-decoded hello, falling back to a byte
+// scan for frames whose key field is not a string.
+func acceptedHandshake(b []byte, frame handshakeFrame) bool {
+	accepted, classified := acceptableKey(frame.Key)
+	if !classified {
+		return !bytes.Contains(b, []byte(`"type":"e2ee_hello"`))
+	}
+	return accepted
+}
+
+// validHandshake reports whether a text frame is an acceptable hello. Frames
+// that are not handshakes pass through untouched.
+func validHandshake(b []byte) bool {
+	var frame handshakeFrame
+	if json.Unmarshal(b, &frame) != nil {
+		return !bytes.Contains(b, []byte(`"type":"e2ee_hello"`))
+	}
+	if _, handshake := handshakeKind(frame); !handshake {
+		return true
+	}
+	return acceptedHandshake(b, frame)
+}
+
+// validateHandshake decodes the frame once and records the outcome. Every
+// client frame reaches it, so a second parse would be paid per frame.
 func (r *Relay) validateHandshake(version int, b []byte) bool {
-	kind, handshake := handshakeType(b)
+	var frame handshakeFrame
+	if json.Unmarshal(b, &frame) != nil {
+		return true
+	}
+	kind, handshake := handshakeKind(frame)
 	if !handshake {
 		return true
 	}
 	outcome := 0
-	accepted := validHandshake(b)
+	accepted := acceptedHandshake(b, frame)
 	if !accepted {
 		outcome = 1
 	}
@@ -535,18 +566,10 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 }
 
 func (r *Relay) reserveIngress(bytes int64) bool {
-	if bytes < 0 || bytes > int64(r.Config.IngressBudgetBytes) {
+	if bytes < 0 {
 		return false
 	}
-	for {
-		current := r.ingressReserved.Load()
-		if current+bytes > int64(r.Config.IngressBudgetBytes) {
-			return false
-		}
-		if r.ingressReserved.CompareAndSwap(current, current+bytes) {
-			return true
-		}
-	}
+	return reserveCounter(&r.ingressReserved, bytes, int64(r.Config.IngressBudgetBytes))
 }
 
 func (r *Relay) expireDataRoute(serverID, connectionID string, source *relayPeer) {
@@ -704,13 +727,18 @@ func sessionPeers(session *relaySession) []*relayPeer {
 }
 
 func (r *Relay) reserveWebSocket() bool {
-	limit := int64(r.Config.Acceptors * r.Config.ConnectionsPerAcceptor)
+	return reserveCounter(&r.activeWebSockets, 1, int64(r.Config.Acceptors*r.Config.ConnectionsPerAcceptor))
+}
+
+// reserveCounter adds amount to counter unless that would exceed limit. A
+// non-positive limit means unbounded.
+func reserveCounter(counter *atomic.Int64, amount, limit int64) bool {
 	for {
-		current := r.activeWebSockets.Load()
-		if limit > 0 && current >= limit {
+		current := counter.Load()
+		if limit > 0 && current+amount > limit {
 			return false
 		}
-		if r.activeWebSockets.CompareAndSwap(current, current+1) {
+		if counter.CompareAndSwap(current, current+amount) {
 			return true
 		}
 	}

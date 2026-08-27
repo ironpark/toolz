@@ -25,6 +25,12 @@ type Connection struct {
 	ConnectionID string
 }
 
+// isControl reports whether the connection is a v2 server control socket, which
+// carries the session roster rather than client traffic.
+func (c Connection) isControl() bool {
+	return c.Version == 2 && c.Role == RoleServer && c.ConnectionID == ""
+}
+
 // ParseConnectionQuery validates the public Paseo relay query parameters.
 func ParseConnectionQuery(query map[string]string) (Connection, error) {
 	role, ok := query["role"]
