@@ -95,12 +95,12 @@ agent:
 workspace:
   source: ./fixture
 prompts:
-  - id: build
+  - name: build
     text: make it build
     when: sh("true") != 0
-  - id: fix
+  - name: fix
     text: now fix the tests
-    depends_on: [build]
+    after: [build]
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +116,7 @@ prompts:
 	}
 }
 
-func TestPromptIDsAndDependenciesAreValidatedAtLoadTime(t *testing.T) {
+func TestPromptNamesAndDependenciesAreValidatedAtLoadTime(t *testing.T) {
 	base := `name: sample
 agent:
   type: codex
@@ -125,10 +125,10 @@ workspace:
 prompts:
 `
 	for name, prompts := range map[string]string{
-		"duplicate id":      "  - id: a\n    text: one\n  - id: a\n    text: two\n",
-		"forward reference": "  - text: one\n    depends_on: [later]\n  - id: later\n    text: two\n",
-		"self reference":    "  - id: self\n    text: one\n    depends_on: [self]\n",
-		"unknown id":        "  - id: a\n    text: one\n  - text: two\n    depends_on: [missing]\n",
+		"duplicate name":    "  - name: a\n    text: one\n  - name: a\n    text: two\n",
+		"forward reference": "  - text: one\n    after: [later]\n  - name: later\n    text: two\n",
+		"self reference":    "  - name: self\n    text: one\n    after: [self]\n",
+		"unknown name":      "  - name: a\n    text: one\n  - text: two\n    after: [missing]\n",
 	} {
 		if _, err := LoadConfig(writeConfig(t, base+prompts)); err == nil {
 			t.Errorf("%s: expected an error", name)

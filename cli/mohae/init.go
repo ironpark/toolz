@@ -140,13 +140,13 @@ prompts:
   # expressions over the conversation so far (turn, previous, responses,
   # elapsed_seconds, timed_out) and the workspace the agent
   # worked in (exists, read, sh).
-  # id names a prompt so a later one can depend_on it; a dependent prompt is
-  # skipped when the prompt it depends on was never sent.
-  - id: fix-build
+  # name labels a prompt so a later one can come after it; a dependent prompt
+  # is skipped when the prompt it comes after was never sent.
+  - name: fix-build
     text: The build is broken. Fix it before you stop.
     when: sh("go build ./...") != 0
   - text: Add a regression test for the build fix.
-    depends_on: [fix-build]
+    after: [fix-build]
 
 verify:
   # Runs outside the workspace once the agent stops, and is never copied in, so
