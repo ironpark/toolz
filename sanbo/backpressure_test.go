@@ -36,10 +36,6 @@ func TestBackpressureWaitsForDaemonDataWithoutUnboundedClientBuffering(t *testin
 	}
 }
 
-func TestBackpressureShedsAliveButStalledOwnerAtDeliveryDeadline(t *testing.T) {
-	requireClose(t, backpressureScenario(t, "stalled-owner-deadline"), websocket.StatusTryAgainLater, "Delivery unavailable")
-}
-
 func TestBackpressurePassiveDestinationStallsSourceTCP(t *testing.T) {
 	r := backpressureScenario(t, "passive-destination")
 	if !r.SourceBlocked || r.IngressReservedBytes <= 0 {

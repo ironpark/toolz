@@ -60,9 +60,8 @@ type Relay struct {
 	// reference there is no drain HTTP endpoint.
 	draining atomic.Bool
 	// seq issues the monotonic ordering keys peers are shed by.
-	seq     atomic.Int64
-	stalled map[string]bool
-	moved   map[string]bool
+	seq   atomic.Int64
+	moved map[string]bool
 	// controlSyncDelay and controlCloseDelay are the two control-watchdog
 	// stages. They are unexported and set by NewRelay so no environment can
 	// reach them; in-package tests shorten them.
@@ -165,7 +164,6 @@ func NewRelay(config Config) *Relay {
 	relay := &Relay{
 		Config:            config,
 		sessions:          make(map[string]*relaySession),
-		stalled:           make(map[string]bool),
 		moved:             make(map[string]bool),
 		controlSyncDelay:  controlSyncDelay,
 		controlCloseDelay: controlCloseDelay,
@@ -503,13 +501,6 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 				Type string `json:"type"`
 			}
 			if json.Unmarshal(payload, &ping) == nil && ping.Type == "ping" {
-				r.mu.Lock()
-				stalled := r.stalled[connection.ServerID]
-				r.mu.Unlock()
-				if stalled {
-					_ = conn.Close(websocket.StatusTryAgainLater, "Delivery unavailable")
-					return
-				}
 				_ = r.forward(peer, websocket.MessageText, []byte(`{"type":"pong","ts":`+strconv.FormatInt(time.Now().UnixMilli(), 10)+`}`))
 				continue
 			}
@@ -734,28 +725,27 @@ var probeKey = sync.OnceValues(func() (*ecdh.PrivateKey, error) {
 })
 
 // acceptableKey reports whether a hello carries a usable X25519 public key.
-// The second result is false when key is not a JSON string at all, which leaves
-// the frame unclassifiable and sends callers to the byte-level fallback.
-func acceptableKey(raw json.RawMessage) (bool, bool) {
+// A key that is missing or not a JSON string is invalid, as in the reference.
+func acceptableKey(raw json.RawMessage) bool {
 	key := ""
 	if raw != nil && json.Unmarshal(raw, &key) != nil {
-		return false, false
+		return false
 	}
 	decoded, err := base64.StdEncoding.Strict().DecodeString(key)
 	if err != nil || len(decoded) != 32 || !canonicalCoordinate(decoded) {
-		return false, true
+		return false
 	}
 	pub, err := ecdh.X25519().NewPublicKey(decoded)
 	if err != nil {
-		return false, true
+		return false
 	}
 	priv, err := probeKey()
 	if err != nil {
-		return false, true
+		return false
 	}
 	// Rejects low-order points, which yield an all-zero shared secret.
 	_, err = priv.ECDH(pub)
-	return err == nil, true
+	return err == nil
 }
 
 // fieldOrder is 2^255 - 19 little-endian, the exclusive upper bound of a
@@ -779,29 +769,6 @@ func canonicalCoordinate(decoded []byte) bool {
 	return false
 }
 
-// acceptedHandshake decides an already-decoded hello, falling back to a byte
-// scan for frames whose key field is not a string.
-func acceptedHandshake(b []byte, frame handshakeFrame) bool {
-	accepted, classified := acceptableKey(frame.Key)
-	if !classified {
-		return !bytes.Contains(b, []byte(`"type":"e2ee_hello"`))
-	}
-	return accepted
-}
-
-// validHandshake reports whether a text frame is an acceptable hello. Frames
-// that are not handshakes pass through untouched.
-func validHandshake(b []byte) bool {
-	var frame handshakeFrame
-	if json.Unmarshal(b, &frame) != nil {
-		return !bytes.Contains(b, []byte(`"type":"e2ee_hello"`))
-	}
-	if _, handshake := handshakeKind(frame); !handshake {
-		return true
-	}
-	return acceptedHandshake(b, frame)
-}
-
 // validateHandshake decodes the frame once and records the outcome. Every
 // client frame reaches it, so frames that cannot decode to a JSON object —
 // anything not starting with '{' — are passed through without paying for a
@@ -820,7 +787,7 @@ func (r *Relay) validateHandshake(version int, b []byte) bool {
 		return true
 	}
 	outcome := 0
-	accepted := acceptedHandshake(b, frame)
+	accepted := acceptableKey(frame.Key)
 	if !accepted {
 		outcome = 1
 	}
@@ -1048,7 +1015,6 @@ func detachClientLocked(s *relaySession, connectionID string, p *relayPeer) (rem
 func (r *Relay) reclaimSessionLocked(serverID string, s *relaySession) {
 	if s.v1 == nil && s.v1Client == nil && s.control == nil && len(s.clients) == 0 && len(s.data) == 0 && len(s.buffer) == 0 {
 		delete(r.sessions, serverID)
-		delete(r.stalled, serverID)
 		delete(r.moved, serverID)
 		_ = r.ownership.release(serverID, r)
 	}

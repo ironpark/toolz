@@ -61,7 +61,16 @@ func TestHandshakeRejectsMalformedOrWrongSizedKeyEncoding(t *testing.T) {
 			assertHandshakeRejected(t, websocket.MessageText, payload)
 		})
 	}
-	assertHandshakeRejected(t, websocket.MessageText, []byte(`{"type":"e2ee_hello"}`))
+	missingOrNonString := [][]byte{
+		[]byte(`{"type":"e2ee_hello"}`),
+		[]byte(`{"type":"hello","key":5}`),
+		[]byte(`{"type":"hello"}`),
+	}
+	for i, payload := range missingOrNonString {
+		t.Run(fmt.Sprintf("missing-or-non-string-%d", i), func(t *testing.T) {
+			assertHandshakeRejected(t, websocket.MessageText, payload)
+		})
+	}
 }
 
 func TestHandshakeRejectsNonCanonicalKeyEncoding(t *testing.T) {

@@ -122,10 +122,11 @@ func FuzzValidHandshake(f *testing.F) {
 	f.Add([]byte("\xff\xff\xff\xff"))
 	f.Add([]byte(`[]`))
 
+	r := NewRelay(DefaultConfig())
 	f.Fuzz(func(t *testing.T, payload []byte) {
-		accepted := validHandshake(payload)
-		if accepted != validHandshake(payload) {
-			t.Fatal("validHandshake is not deterministic")
+		accepted := r.validateHandshake(1, payload)
+		if accepted != r.validateHandshake(1, payload) {
+			t.Fatal("validateHandshake is not deterministic")
 		}
 
 		var frame struct {
@@ -158,13 +159,14 @@ func FuzzValidHandshakeKey(f *testing.F) {
 	f.Add(true, allOnes)
 	f.Add(true, []byte(nil))
 
+	r := NewRelay(DefaultConfig())
 	f.Fuzz(func(t *testing.T, e2ee bool, key []byte) {
 		kind := "hello"
 		if e2ee {
 			kind = "e2ee_hello"
 		}
 		payload := []byte(fmt.Sprintf(`{"type":%q,"key":%q,"capabilities":{}}`, kind, base64.StdEncoding.EncodeToString(key)))
-		accepted := validHandshake(payload)
+		accepted := r.validateHandshake(1, payload)
 
 		want := len(key) == 32 && canonicalCoordinate(key)
 		if want {

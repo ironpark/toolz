@@ -57,21 +57,6 @@ func TestRelayV2ControlAnswersLegacyJSONPingWithJSONPong(t *testing.T) {
 	}
 }
 
-func TestRelayV2ControlFailsClosedWhenOwnerStallsDuringPing(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
-	server := httptestServerForRelay(t, relay)
-	serverID := "v2-stalled-owner"
-	control := dialRelay(t, server, serverID, RoleServer, 2, "")
-	assertControlMessage(t, control, map[string]any{"type": "sync"})
-	resume, ok := relay.testStallOwner(serverID)
-	if !ok {
-		t.Fatal("owner was not found")
-	}
-	defer resume()
-	writeRelayMessage(t, control, websocket.MessageText, []byte(`{"type":"ping"}`))
-	assertRelayClose(t, control, websocket.StatusTryAgainLater, "Delivery unavailable")
-}
-
 func TestRelayV2ResetsUnresponsiveControlAfterNudgingDataAttachment(t *testing.T) {
 	server := newControlWatchdogTestServer(t, DefaultConfig(), 20*time.Millisecond, 20*time.Millisecond)
 	serverID := "v2-control-watchdog"

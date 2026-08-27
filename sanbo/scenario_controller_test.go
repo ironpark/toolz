@@ -271,24 +271,6 @@ func (r *Relay) runBackpressureScenario(name string) (relayScenarioResult, error
 		}
 		result.Forwarded = append(result.Forwarded, payload)
 
-	case "stalled-owner-deadline":
-		control, err := h.dial(id, RoleServer, 2, "")
-		if err != nil {
-			return result, err
-		}
-		if _, _, err = scenarioRead(control); err != nil {
-			return result, err
-		}
-		r.mu.Lock()
-		r.stalled[id] = true
-		r.mu.Unlock()
-		if err = scenarioWrite(control, websocket.MessageText, []byte(`{"type":"ping"}`)); err != nil {
-			return result, err
-		}
-		if err = closeFrom(control); err != nil {
-			return result, err
-		}
-
 	case "passive-destination":
 		daemon, client, err := v1Pair(id)
 		if err != nil {
@@ -1113,14 +1095,6 @@ func (r *Relay) runLoadScenario(name string) (relayScenarioResult, error) {
 	}
 	h.close()
 	return result, nil
-}
-
-func (r *Relay) testStallOwner(id string) (func(), bool) {
-	r.mu.Lock()
-	r.stalled[id] = true
-	s := r.sessions[id]
-	r.mu.Unlock()
-	return func() { r.mu.Lock(); delete(r.stalled, id); r.mu.Unlock() }, s != nil
 }
 
 func (r *Relay) testKillOwner(id string) bool {
