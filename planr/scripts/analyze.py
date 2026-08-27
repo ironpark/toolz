@@ -16,11 +16,14 @@ from common import (
     SESSION_EXIT,
     SESSION_LOG,
     SESSION_PROMPT,
-    PLANS_DIR,
     STATE_DIR,
     HarnessError,
+    artifact_directory,
+    effective_harness_config,
+    load_run_harness_config,
     one_line,
     read_metadata as load_metadata,
+    tool_name,
 )
 
 
@@ -31,24 +34,6 @@ TOKEN_FIELDS = (
     "reasoning_output_tokens",
     "total_tokens",
 )
-
-PLANR_ACTIONS = {
-    "new",
-    "edit",
-    "apply",
-    "status",
-    "show",
-    "overview",
-    "notes",
-    "config",
-    "doctor",
-    "archive",
-    "completion",
-    "schema",
-    "phase",
-}
-PHASE_ACTIONS = {"set", "update", "start", "done", "reset", "rm"}
-
 
 @dataclasses.dataclass
 class CommandExecution:
@@ -271,15 +256,28 @@ def command_words(command: str) -> list[str]:
         return command.split()
 
 
-# Cached: the same command strings are re-scanned by planr_commands,
-# make_observations and markdown_report, and parsing is regex/shlex heavy.
-@functools.lru_cache(maxsize=None)
-def planr_actions(command: str) -> list[str]:
+def planr_actions(command: str, config: dict[str, Any] | None = None) -> list[str]:
+    """Return configured tool actions found in one shell command.
+
+    The shell-wrapper recursion is deliberately fixed here: it describes how
+    Codex reports commands, not how the tool under test is named. Everything
+    about the executable and its subcommand groups comes from the config.
+    """
+
+    config = effective_harness_config(config)
+    observe = config["observe"]
+    executable = tool_name(config)
+    known_actions = set(observe["actions"])
+    groups = observe["groups"]
+    groups_by_command = {
+        group["command"]: (name, set(group["actions"]))
+        for name, group in groups.items()
+    }
     words = command_words(command)
     actions: list[str] = []
     for index, word in enumerate(words):
-        if pathlib.PurePosixPath(word).name == "planr":
-            # `command -v planr` is a discoverability check, not an
+        if pathlib.PurePosixPath(word).name == executable:
+            # `command -v <tool>` is a discoverability check, not an
             # invocation of the tool.
             if index > 0 and words[index - 1] in {"-v", "which", "type"}:
                 continue
@@ -289,32 +287,37 @@ def planr_actions(command: str) -> list[str]:
             action = words[index + 1]
             if action.startswith("-"):
                 actions.append("help")
-            elif action in PLANR_ACTIONS:
-                if action == "phase" and index + 2 < len(words):
+            elif action in groups_by_command:
+                group_name, group_actions = groups_by_command[action]
+                if index + 2 < len(words):
                     phase_action = words[index + 2]
                     actions.append(
-                        f"phase {phase_action}"
-                        if phase_action in PHASE_ACTIONS
-                        else "phase help"
+                        f"{group_name} {phase_action}"
+                        if phase_action in group_actions
+                        else f"{group_name} help"
                     )
                 else:
                     actions.append(action)
+            elif action in known_actions:
+                actions.append(action)
             # A shell operator or another command's argument immediately
-            # after the word `planr` is not a planr subcommand.
+            # after the executable is not a tool subcommand.
             elif action in {"&&", "||", ";", "|"}:
                 actions.append("help")
             else:
                 continue
             continue
-        # Codex command events normally wrap the actual shell command as
-        # `/bin/zsh -lc 'planr ...'`. Inspect the -c argument recursively so
-        # the report sees the same planr calls the agent saw.
+        # Codex command events normally wrap the actual shell command as a
+        # shell `-c` argument. Inspect it recursively so the report sees the
+        # same tool calls the agent saw.
         if word.lstrip("-") in {"c", "lc", "ic", "ilc", "cl"} and index + 1 < len(words):
-            actions.extend(planr_actions(words[index + 1]))
+            actions.extend(planr_actions(words[index + 1], config))
     if actions:
         return unique_strings(actions)
     # Keep a fallback for command renderings that are not shell-parseable.
-    pattern = re.compile(r"(?:^|[;&|]\s*)(?:\./|[^\s/]+/)?planr(?:\s+([a-z-]+))?")
+    pattern = re.compile(
+        rf"(?:^|[;&|]\s*)(?:\./|[^\s/]+/)?{re.escape(executable)}(?:\s+([a-z-]+))?"
+    )
     for match in pattern.finditer(command):
         prefix = command[: match.start()]
         if re.search(r"(?:command|which|type)\s+-?v\s*$", prefix):
@@ -322,19 +325,20 @@ def planr_actions(command: str) -> list[str]:
         action = match.group(1) or "help"
         if action.startswith("--"):
             action = "help"
-        elif action not in PLANR_ACTIONS:
+        elif action not in known_actions and action not in groups_by_command:
             continue
-        if action == "phase":
-            phase_match = re.match(r"\s*phase\s+([a-z-]+)", command[match.end() :])
-            if phase_match and phase_match.group(1) in PHASE_ACTIONS:
-                action = f"phase {phase_match.group(1)}"
+        if action in groups_by_command:
+            group_name, group_actions = groups_by_command[action]
+            phase_match = re.match(r"\s+([a-z-]+)", command[match.end() :])
+            if phase_match and phase_match.group(1) in group_actions:
+                action = f"{group_name} {phase_match.group(1)}"
             else:
-                action = "phase help"
+                action = f"{group_name} help"
         actions.append(action)
     return unique_strings(actions)
 
 
-def planr_commands(session: SessionStats) -> list[str]:
+def planr_commands(session: SessionStats, config: dict[str, Any] | None = None) -> list[str]:
     """The planr invocations the agent actually made, counted once each.
 
     ``session.commands`` holds both the `/bin/zsh -lc '...'` wrapper and the
@@ -342,41 +346,80 @@ def planr_commands(session: SessionStats) -> list[str]:
     call twice. The per-item executions carry one entry per real invocation.
     """
 
+    config = effective_harness_config(config)
     if session.executions:
         commands = [item.command for item in session.executions.values() if item.command]
     else:
         commands = session.commands
-    return [command for command in commands if planr_actions(command)]
+    return [command for command in commands if planr_actions(command, config)]
 
 
-def parse_overview_statuses(value: str) -> list[dict[str, Any]]:
-    pattern = re.compile(
-        r"^\s{2}(.+?):\s+(done|in-progress|planned|conditional|unknown)\s+"
-        r"\((\d+)/(\d+) phases(?: done)?\)"
-    )
+def parse_overview_statuses(
+    value: str, config: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """Normalize the configured JSON completion payload for the report."""
+
+    config = effective_harness_config(config)
+    completion = config["completion"]
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, dict):
+        return []
+    plans = payload.get(completion["plans_key"])
+    if not isinstance(plans, list):
+        return []
+    fields = completion["fields"]
+    display_name = completion["display_name"]
     result: list[dict[str, Any]] = []
-    for line in value.splitlines():
-        match = pattern.match(line)
-        if not match:
+    for plan in plans:
+        if not isinstance(plan, dict):
             continue
+        name = plan.get(fields["name"])
+        display_value = plan.get(fields[display_name["field"]])
+        status = plan.get(fields["status"])
+        done = plan.get(fields["done"])
+        total = plan.get(fields["total"])
+        if not isinstance(name, str) or not isinstance(display_value, str) or not isinstance(status, str):
+            continue
+        if not isinstance(done, int) or isinstance(done, bool):
+            continue
+        if not isinstance(total, int) or isinstance(total, bool):
+            continue
+        rendered_name = (
+            pathlib.PurePosixPath(display_value).name
+            if display_name["basename"]
+            else display_value
+        )
         result.append(
             {
-                "name": match.group(1),
-                "status": match.group(2),
-                "done": int(match.group(3)),
-                "total": int(match.group(4)),
+                "name": rendered_name,
+                "status": status,
+                "done": done,
+                "total": total,
             }
         )
     return result
 
 
-def planr_event_lines(run_dir: pathlib.Path) -> list[str]:
+def completion_is_complete(statuses: list[dict[str, Any]], config: dict[str, Any]) -> bool:
+    complete_when = config["completion"]["complete_when"]
+    return bool(statuses) and all(
+        item.get(complete_when["field"]) == complete_when["equals"] for item in statuses
+    )
+
+
+def planr_event_lines(
+    run_dir: pathlib.Path, config: dict[str, Any] | None = None
+) -> list[str]:
+    config = effective_harness_config(config)
     # The workspace lives outside run_dir so the agent cannot see the run's
     # artifacts; metadata.env records where it was put.
     workspace = read_metadata(run_dir).get("workspace", "")
     if not workspace:
         return []
-    path = pathlib.Path(workspace) / ".harness" / "planr-events.log"
+    path = pathlib.Path(workspace) / config["signals"]["event_log"]
     if not path.exists():
         return []
     return [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line]
@@ -424,10 +467,16 @@ def excerpt_text(value: str, limit: int = 8000) -> str:
     return value if len(value) <= limit else value[:limit] + "\n[…truncated…]"
 
 
-def build_transcript(run_dir: pathlib.Path, session: SessionStats) -> str:
+def build_transcript(
+    run_dir: pathlib.Path,
+    session: SessionStats,
+    config: dict[str, Any] | None = None,
+) -> str:
+    config = effective_harness_config(config)
+    executable = tool_name(config)
     metadata = read_metadata(run_dir)
     lines = [
-        "# Codex planr harness transcript",
+        f"# Codex {executable} harness transcript",
         "",
         f"- Model: `{metadata.get('model', 'unknown')}`",
         f"- Reasoning effort: `{metadata.get('reasoning', 'unknown')}`",
@@ -468,23 +517,20 @@ def build_transcript(run_dir: pathlib.Path, session: SessionStats) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-# planr logs through the standard library logger, so its errors carry a
-# `2026/08/27 01:17:12 ` prefix; the rest catches the common shell and Go
-# failure shapes. `--- FAIL:` names the failing test, which is what a reader
-# needs -- the bare `FAIL` summary lines `go test` ends with say nothing, so
-# they are deliberately not matched.
+# The fixed patterns catch common shell and Go failure shapes. The configured
+# patterns add errors whose format belongs to the tool under evaluation.
+# `--- FAIL:` names the failing test, which is what a reader needs -- the bare
+# `FAIL` summary lines `go test` ends with say nothing, so they are deliberately
+# not matched.
 ERROR_LINE = re.compile(
     # `\s*` on the file:line form because `go test` indents its failure detail.
-    r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} |^(fatal|error|panic)\b|^\s*--- FAIL:|^\s*\S+:\d+: |\berror\b",
+    r"^(fatal|error|panic)\b|^\s*--- FAIL:|^\s*\S+:\d+: |\berror\b",
     re.IGNORECASE,
 )
 
-# A `planr phase done --force` invocation bypasses source verification, which
-# the observations call out; matched per command line, so compiled once here.
-FORCED_PHASE_DONE = re.compile(r"\bplanr\b.*\bphase\s+done\b.*--force", re.IGNORECASE)
-
-
-def error_excerpt(output: str, limit: int = 3) -> str:
+def error_excerpt(
+    output: str, limit: int = 3, config: dict[str, Any] | None = None
+) -> str:
     """The lines of a failed command's output that explain the failure.
 
     Agents chain steps with `;`, so the tail of the output is often the
@@ -494,12 +540,23 @@ def error_excerpt(output: str, limit: int = 3) -> str:
     nothing matches.
     """
 
+    config = effective_harness_config(config)
+    configured_patterns = [
+        re.compile(item["pattern"], re.IGNORECASE)
+        for item in config["signals"]["error_patterns"]
+    ]
     lines = [line.rstrip() for line in output.splitlines() if line.strip()]
-    errors = [line for line in lines if ERROR_LINE.search(line)]
+    errors = [
+        line
+        for line in lines
+        if ERROR_LINE.search(line) or any(pattern.search(line) for pattern in configured_patterns)
+    ]
     return "\n".join(errors[:limit] if errors else lines[-limit:])
 
 
-def failed_executions(session: SessionStats) -> list[dict[str, Any]]:
+def failed_executions(
+    session: SessionStats, config: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
     """Commands that ended non-zero, numbered as in the transcript.
 
     A failed command is the clearest evidence that the tool or its
@@ -507,6 +564,7 @@ def failed_executions(session: SessionStats) -> list[dict[str, Any]]:
     leaving it buried in the transcript.
     """
 
+    config = effective_harness_config(config)
     failures: list[dict[str, Any]] = []
     for number, execution in enumerate(session.executions.values(), start=1):
         if execution.exit_code in (None, 0):
@@ -516,8 +574,8 @@ def failed_executions(session: SessionStats) -> list[dict[str, Any]]:
                 "index": number,
                 "command": execution.command,
                 "exit_code": execution.exit_code,
-                "planr_actions": planr_actions(execution.command) if execution.command else [],
-                "error": error_excerpt(execution.output),
+                "planr_actions": planr_actions(execution.command, config) if execution.command else [],
+                "error": error_excerpt(execution.output, config=config),
             }
         )
     return failures
@@ -560,42 +618,50 @@ def make_observations(
     final_test_exit: str,
     failures: list[dict[str, Any]] | None = None,
     checks: list[dict[str, str]] | None = None,
+    config: dict[str, Any] | None = None,
 ) -> dict[str, list[str]]:
+    config = effective_harness_config(config)
+    executable = tool_name(config)
     actions = collections.Counter(
-        action for command in commands for action in planr_actions(command)
+        action for command in commands for action in planr_actions(command, config)
     )
     workflow: list[str] = []
     documentation: list[str] = []
     efficiency: list[str] = []
 
     if not commands:
-        workflow.append("대화에서 `planr` 명령 호출이 관찰되지 않았습니다. 도구가 PATH에 없거나 AGENTS.md의 사용 지침이 실행 흐름에서 충분히 드러나지 않았을 수 있습니다.")
-        documentation.append("AGENTS.md의 planr 사용 지침이 관찰된 도구 호출로 이어지지 않았습니다. 지침의 위치·표현·필수성 또는 CLI 발견성을 개선할 수 있습니다.")
+        no_commands = config["observe"]["no_commands"]
+        workflow.append(no_commands["workflow"].format(tool=executable))
+        documentation.append(no_commands["documentation"].format(tool=executable))
     else:
-        for action, hint in (
-            ("new", "초안 생성"),
-            ("add", "등록"),
-            ("status", "상세 상태 확인"),
-            ("overview", "요약 상태 확인"),
-        ):
-            if not any(key == action or key.startswith(action + " ") for key in actions):
-                documentation.append(f"`planr {action}` ({hint}) 호출이 없습니다. 해당 단계의 설명이나 명령 발견성이 약한지 확인하세요.")
-        if not any(key.startswith("phase start") for key in actions):
-            documentation.append("phase 시작 명령이 관찰되지 않았습니다. phase 라이프사이클 안내가 충분히 구체적인지 확인하세요.")
-        if not any(key.startswith("phase done") for key in actions):
-            workflow.append("phase 완료 명령이 관찰되지 않았습니다. 계획을 실제 완료 상태로 연결하지 못했을 가능성이 있습니다.")
+        for expectation in config["observe"]["expectations"]:
+            expected_action = expectation["action"]
+            if any(
+                key == expected_action or key.startswith(expected_action + " ")
+                for key in actions
+            ):
+                continue
+            message = expectation["message"].format(
+                tool=executable,
+                action=expected_action,
+                hint=expectation["hint"],
+            )
+            if expectation["category"] == "workflow":
+                workflow.append(message)
+            else:
+                documentation.append(message)
 
     outputs = session.outputs
-    if any(
-        "cannot mark phase done while source changes are uncommitted" in output.lower()
-        or "cannot check uncommitted source changes" in output.lower()
-        for output in outputs
-    ):
-        documentation.append("`phase done`의 소스 커밋 전제에서 오류/경고가 발생했습니다. 커밋 순서와 `--force` 사용 경계가 실제 작업 흐름에 맞는지 검토하세요.")
-    if any(
-        FORCED_PHASE_DONE.search(command) for command in commands
-    ):
-        workflow.append("phase 완료 과정에서 `--force`가 언급되었습니다. 소스 검증을 우회하지 않고 완료할 수 있었는지 확인하세요.")
+    for warning in config["signals"]["warnings"]:
+        values = outputs if warning["source"] == "output" else commands
+        pattern = re.compile(warning["pattern"], re.IGNORECASE)
+        if not any(pattern.search(value) for value in values):
+            continue
+        message = warning["message"].format(tool=executable)
+        if warning["category"] == "workflow":
+            workflow.append(message)
+        else:
+            documentation.append(message)
 
     workspace = read_metadata(run_dir).get("workspace", "")
     if workspace:
@@ -604,14 +670,19 @@ def make_observations(
             documentation.append("격리 저장소 밖의 절대 경로를 참조한 명령이 관찰되었습니다. AGENTS.md의 격리 경계를 더 강하게 하거나 허용 범위를 명시하세요.")
 
     if not statuses:
-        workflow.append("최종 overview에서 plan 상태를 읽지 못했습니다. 계획을 만들지 못했거나 출력 형식이 분석기와 맞지 않습니다.")
-    elif all(item["status"] == "done" for item in statuses):
-        workflow.append("최종 overview의 모든 plan이 done입니다.")
+        workflow.append(config["completion"]["messages"]["no_status"])
+    elif completion_is_complete(statuses, config):
+        workflow.append(config["completion"]["messages"]["all_complete"])
     else:
-        pending = ", ".join(f"{item['name']}={item['status']}" for item in statuses if item["status"] != "done")
-        workflow.append(f"완료되지 않은 plan이 남아 있습니다: {pending}.")
+        complete_when = config["completion"]["complete_when"]
+        pending = ", ".join(
+            f"{item['name']}={item['status']}"
+            for item in statuses
+            if item.get(complete_when["field"]) != complete_when["equals"]
+        )
+        workflow.append(config["completion"]["messages"]["incomplete"].format(pending=pending))
 
-    # A failed planr call is a documentation/UX signal; a failed shell command
+    # A failed tool call is a documentation/UX signal; a failed shell command
     # around it is a workflow signal. Both matter, but they point at different
     # fixes, so they are reported separately.
     for failure in failures or []:
@@ -619,7 +690,7 @@ def make_observations(
         # The first error line is the root cause; later ones are its fallout.
         first_error = one_line(failure["error"].splitlines()[0], limit=160) if failure["error"] else "출력 없음"
         if failure["planr_actions"]:
-            actions = ", ".join(f"`planr {action}`" for action in failure["planr_actions"])
+            actions = ", ".join(f"`{executable} {action}`" for action in failure["planr_actions"])
             documentation.append(
                 f"{location}에서 {actions} 호출이 실패했습니다 — “{first_error}”."
                 " 명령 형식이나 오류 메시지가 다음 행동을 바로 알려 주는지 확인하세요."
@@ -660,15 +731,21 @@ def make_observations(
     return {"workflow": workflow, "documentation": documentation, "efficiency": efficiency}
 
 
-def result_data(run_dir: pathlib.Path, session: SessionStats) -> dict[str, Any]:
+def result_data(
+    run_dir: pathlib.Path,
+    session: SessionStats,
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    config = load_run_harness_config(run_dir) if config is None else config
     metadata = read_metadata(run_dir)
-    commands = planr_commands(session)
-    statuses = parse_overview_statuses(read_text(run_dir / STATE_DIR / "final-overview.txt"))
+    commands = planr_commands(session, config)
+    overview_file = run_dir / config["completion"]["state_file"]
+    statuses = parse_overview_statuses(read_text(overview_file), config)
     final_test_exit = read_text(run_dir / STATE_DIR / "final-go-test.exit")
-    failures = failed_executions(session)
+    failures = failed_executions(session, config)
     checks = parse_fixture_checks(read_text(run_dir / STATE_DIR / "final-fixture-test.txt"))
     observations = make_observations(
-        run_dir, session, commands, statuses, final_test_exit, failures, checks
+        run_dir, session, commands, statuses, final_test_exit, failures, checks, config
     )
     result = {
         "metadata": metadata,
@@ -690,27 +767,30 @@ def result_data(run_dir: pathlib.Path, session: SessionStats) -> dict[str, Any]:
         },
         "planr_commands": commands,
         "failed_commands": failures,
-        "planr_events": planr_event_lines(run_dir),
+        "planr_events": planr_event_lines(run_dir, config),
         "overview": statuses,
         "final_test_exit": final_test_exit,
         "fixture_test_exit": read_text(run_dir / STATE_DIR / "final-fixture-test.exit"),
         "fixture_checks": checks,
-        "plan_documents": plan_documents(run_dir),
+        "plan_documents": plan_documents(run_dir, config),
         "final_git_status": read_text(run_dir / STATE_DIR / "final-git-status.txt"),
         # None (not "") when the capture is absent, so a run recorded before
         # this state file existed is not mistaken for a clean worktree.
         "final_git_status_tracked": optional_text(run_dir / STATE_DIR / "final-git-status-tracked.txt"),
         "final_git_log": read_text(run_dir / STATE_DIR / "final-git-log.txt"),
         "observations": observations,
-        "overview_file": f"{STATE_DIR}/final-overview.txt",
+        "overview_file": config["completion"]["state_file"],
     }
     return result
 
 
-def plan_documents(run_dir: pathlib.Path) -> list[str]:
+def plan_documents(
+    run_dir: pathlib.Path, config: dict[str, Any] | None = None
+) -> list[str]:
     """The plan documents copied out of the workspace, newest layout first."""
 
-    plans = run_dir / PLANS_DIR
+    config = effective_harness_config(config)
+    plans = run_dir / artifact_directory(config)
     if not plans.is_dir():
         return []
     return sorted(str(path.relative_to(plans)) for path in plans.rglob("*") if path.is_file())
@@ -825,17 +905,22 @@ def token_breakdown_rows(tokens: dict[str, int]) -> list[str]:
     return rows
 
 
-def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
+def markdown_report(
+    data: dict[str, Any], run_dir: pathlib.Path, config: dict[str, Any] | None = None
+) -> str:
+    config = effective_harness_config(config)
+    executable = tool_name(config)
     metadata = data.get("metadata", {})
     session = data.get("session", {})
     statuses = data.get("overview", [])
     observations = data.get("observations", {})
     total = session.get("total_tokens", 0)
     output = session.get("output_tokens", 0)
-    done = bool(statuses) and all(item.get("status") == "done" for item in statuses)
+    done = completion_is_complete(statuses, config)
+    complete_when = config["completion"]["complete_when"]
 
     lines = [
-        "# Codex planr harness report",
+        f"# Codex {executable} harness report",
         "",
         "## 실행 요약",
         "",
@@ -843,7 +928,7 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
         f"- Model: `{metadata.get('model', 'unknown')}`",
         f"- Reasoning effort: `{metadata.get('reasoning', 'unknown')}`",
         f"- Session exit: `{session.get('exit_code', 'unknown')}`",
-        f"- Plan completion: **{'done' if done else 'incomplete/unknown'}**",
+        f"- Plan completion: **{complete_when['equals'] if done else 'incomplete/unknown'}**",
         f"- Fixture: `{metadata.get('fixture', 'unknown')}`",
         # Document language changes what the agent reads and writes, so runs
         # are only comparable to each other when this line matches.
@@ -887,30 +972,31 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
         action_counts = collections.Counter(
             action
             for command in data["planr_commands"]
-            for action in planr_actions(command)
+            for action in planr_actions(command, config)
         )
-        lines.append("관찰된 planr 단계: " + ", ".join(f"`{key}`×{value}" for key, value in action_counts.items()) + ".")
+        lines.append(f"관찰된 {executable} 단계: " + ", ".join(f"`{key}`×{value}" for key, value in action_counts.items()) + ".")
         lines.append("")
-        lines.append("전체 planr 명령:")
+        lines.append(f"전체 {executable} 명령:")
         lines.extend(f"- `{command}`" for command in data["planr_commands"])
     else:
-        lines.append("관찰된 `planr` 명령이 없습니다.")
+        lines.append(f"관찰된 `{executable}` 명령이 없습니다.")
 
     item_counts = collections.Counter[str](session.get("item_types", {}))
     if item_counts:
         lines.extend(["", "Codex 도구 이벤트: " + ", ".join(f"`{key}`×{value}" for key, value in item_counts.items()) + "."])
     if data.get("planr_events"):
         event_counts = collections.Counter(line.split("|", 1)[0] for line in data["planr_events"])
-        lines.extend(["", "planr hook 이벤트: " + ", ".join(f"`{key}`×{value}" for key, value in event_counts.items()) + "."])
+        lines.extend(["", f"{executable} hook 이벤트: " + ", ".join(f"`{key}`×{value}" for key, value in event_counts.items()) + "."])
 
     documents = data.get("plan_documents") or []
-    lines.extend(["", "## planr 산출 문서", ""])
+    lines.extend(["", f"## {executable} 산출 문서", ""])
     if documents:
-        lines.append(f"에이전트가 만든 계획 문서 {len(documents)}개를 `{PLANS_DIR}/`에 보관했습니다.")
+        artifact_dir = artifact_directory(config)
+        lines.append(f"에이전트가 만든 계획 문서 {len(documents)}개를 `{artifact_dir}/`에 보관했습니다.")
         lines.append("")
-        lines.extend(f"- `{PLANS_DIR}/{name}`" for name in documents)
+        lines.extend(f"- `{artifact_dir}/{name}`" for name in documents)
     else:
-        lines.append("보관된 계획 문서가 없습니다. 에이전트가 plan을 등록하지 않았을 수 있습니다.")
+        lines.append(f"보관된 계획 문서가 없습니다. 에이전트가 {executable} plan을 등록하지 않았을 수 있습니다.")
 
     checks = data.get("fixture_checks") or []
     if checks or data.get("fixture_test_exit"):
@@ -921,18 +1007,18 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
     executed = session.get("commands_executed") or 0
     lines.extend(["", "## 실패한 명령", ""])
     if failures:
-        # planr failures are evidence about the tool under evaluation; the rest
+        # Tool failures are evidence about the tool under evaluation; the rest
         # are the agent's own shell mistakes. Keeping them in one list makes the
-        # planr signal easy to miss, so each group gets its own heading.
-        planr_failures = [failure for failure in failures if failure["planr_actions"]]
+        # tool signal easy to miss, so each group gets its own heading.
+        tool_failures = [failure for failure in failures if failure["planr_actions"]]
         other_failures = [failure for failure in failures if not failure["planr_actions"]]
         summary = f"{len(failures)}건 실패"
         if executed:
             summary += f" / 전체 {executed}건"
-        summary += f" (`planr` {len(planr_failures)}건, 기타 {len(other_failures)}건)"
+        summary += f" (`{executable}` {len(tool_failures)}건, 기타 {len(other_failures)}건)"
         lines.extend([summary + ".", ""])
         for heading, group, empty in (
-            ("### `planr` 명령 실패", planr_failures, "없음."),
+            (f"### `{executable}` 명령 실패", tool_failures, "없음."),
             ("### 기타 명령 실패", other_failures, "없음."),
         ):
             lines.extend([heading, ""])
@@ -940,7 +1026,7 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
                 lines.extend([empty, ""])
                 continue
             for failure in group:
-                label = ", ".join(f"planr {action}" for action in failure["planr_actions"]) or "shell"
+                label = ", ".join(f"{executable} {action}" for action in failure["planr_actions"]) or "shell"
                 lines.extend(
                     [
                         f"- **실행 #{failure['index']} · exit {failure['exit_code']} · {label}**",
@@ -984,7 +1070,7 @@ def markdown_report(data: dict[str, Any], run_dir: pathlib.Path) -> str:
             "- `session.jsonl`: Codex 원본 JSONL 이벤트",
             "- `session.prompt.md`: 에이전트에게 전달한 요청",
             "- `state/`: 종료 시점의 overview/status/Git 상태와 종료 검증",
-            f"- `{PLANS_DIR}/`: 에이전트가 만든 planr 계획 문서 사본 (워크스페이스는 clean으로 사라짐)",
+            f"- `{artifact_directory(config)}/`: 에이전트가 만든 {executable} 계획 문서 사본 (워크스페이스는 clean으로 사라짐)",
             "- `metrics.json`: 후속 실행과 비교할 수 있는 구조화 통계",
         ]
     )
@@ -995,15 +1081,17 @@ def analyze(run_dir: pathlib.Path, output: pathlib.Path | None = None) -> int:
     run_dir = run_dir.resolve()
     if not run_dir.is_dir():
         raise HarnessError(f"run directory not found: {run_dir}")
+    config = load_run_harness_config(run_dir)
     session = read_session(run_dir)
-    data = result_data(run_dir, session)
+    data = result_data(run_dir, session, config)
     if output is None:
         output = run_dir / "REPORT.md"
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(markdown_report(data, run_dir), encoding="utf-8")
-    (run_dir / "transcript.md").write_text(build_transcript(run_dir, session), encoding="utf-8")
+    output.write_text(markdown_report(data, run_dir, config), encoding="utf-8")
+    (run_dir / "transcript.md").write_text(
+        build_transcript(run_dir, session, config), encoding="utf-8"
+    )
     (run_dir / "metrics.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(output)
     return 0
-

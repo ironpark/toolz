@@ -31,18 +31,25 @@ from common import (
     SESSION_EXIT,
     SESSION_LOG,
     SESSION_PROMPT,
-    PLANS_DIR,
     STATE_DIR,
     HarnessError,
-    build_planr,
+    FIXTURES_DIR,
+    artifact_directory,
+    build_tool,
+    effective_harness_config,
     fixture_dir,
     init_git_repository,
+    load_harness_config,
+    load_run_harness_config,
     make_agent_workspace,
     one_line,
     make_run_dir,
     remove_runs,
     require_command,
     run_command,
+    tool_binary,
+    tool_name,
+    write_run_harness_config,
     write_metadata,
 )
 
@@ -61,16 +68,6 @@ def load_sdk():
 
 
 DEFAULT_FIXTURE = "codex-harness"
-# Run directories are labelled per fixture so runs of different scenarios stay
-# distinguishable in `run/` and can be cleaned independently. The default
-# fixture keeps the original `codex` label so existing run directories and the
-# paths in earlier reports remain valid.
-FIXTURE_LABELS = {
-    "codex-harness": "codex",
-    "codex-greenfield": "codex-greenfield",
-    "codex-regex": "codex-regex",
-}
-RUN_LABEL = FIXTURE_LABELS[DEFAULT_FIXTURE]
 # `FIXTURE.*` files configure the evaluation and must never reach the agent's
 # workspace verbatim: FIXTURE.PROMPT.<lang>.md is only read, FIXTURE.TEST.sh is
 # run against the finished workspace from outside it, and
@@ -78,6 +75,31 @@ RUN_LABEL = FIXTURE_LABELS[DEFAULT_FIXTURE]
 FIXTURE_PREFIX = "FIXTURE."
 FIXTURE_TEST_FILE = f"{FIXTURE_PREFIX}TEST.sh"
 INSTALLED_AGENTS_FILE = "AGENTS.md"
+
+
+def discover_fixtures() -> dict[str, str]:
+    """Find fixtures that satisfy the Codex prompt/instructions contract."""
+
+    fixtures: dict[str, str] = {}
+    for path in sorted(FIXTURES_DIR.iterdir()):
+        if not path.is_dir():
+            continue
+        has_prompt = any(path.glob(f"{FIXTURE_PREFIX}PROMPT.*.md"))
+        has_instructions = any(path.glob(f"{FIXTURE_PREFIX}AGENTS.*.md"))
+        if not (has_prompt and has_instructions):
+            continue
+        label = "codex" if path.name == DEFAULT_FIXTURE else path.name
+        fixtures[path.name] = label
+    return fixtures
+
+
+# Run directories are labelled per fixture so runs of different scenarios stay
+# distinguishable in `run/` and can be cleaned independently. The default
+# fixture keeps the original `codex` label so existing run directories and the
+# paths in earlier reports remain valid. Adding a fixture only requires its
+# contract files in fixtures/.
+FIXTURE_LABELS = discover_fixtures()
+RUN_LABEL = FIXTURE_LABELS[DEFAULT_FIXTURE]
 
 # Both the request and the instructions exist once per language, so a run never
 # mixes them: an English request paired with Korean guidance would measure the
@@ -321,12 +343,14 @@ def write_run_metadata(
     )
 
 
-def is_plan_draft(path: pathlib.Path) -> bool:
-    """Whether a Markdown file is a draft produced by `planr new`.
+def is_plan_draft(path: pathlib.Path, config: dict[str, Any] | None = None) -> bool:
+    """Whether a Markdown file is a draft produced by the configured tool.
 
-    Matches planr's own rule: a `plan_name` key in the document frontmatter.
+    The frontmatter marker is part of the completion configuration because it
+    is the only reliable signature for a draft before it is applied.
     """
 
+    config = effective_harness_config(config)
     if path.suffix.lower() != ".md":
         return False
     try:
@@ -336,29 +360,37 @@ def is_plan_draft(path: pathlib.Path) -> bool:
     if not head.startswith("---\n"):
         return False
     front, _, _ = head[4:].partition("\n---\n")
-    return any(line.startswith("plan_name:") and line[10:].strip() for line in front.splitlines())
+    marker = config["completion"]["artifacts"]["draft_frontmatter_key"] + ":"
+    return any(line.startswith(marker) and line[len(marker) :].strip() for line in front.splitlines())
 
 
-def copy_plan_artifacts(workspace: pathlib.Path, run_dir: pathlib.Path) -> list[str]:
+def copy_plan_artifacts(
+    workspace: pathlib.Path,
+    run_dir: pathlib.Path,
+    config: dict[str, Any] | None = None,
+) -> list[str]:
     """Copy the plan documents the agent produced into the run directory.
 
     The workspace is a temporary directory that `clean` deletes, so without
     this the actual plans -- the thing the evaluation is about -- are gone as
     soon as the run is tidied up, leaving only the one-line summaries in
-    state/final-overview.txt.
+    state/final-overview.json.
 
-    Plan directories are found by their on-disk signature (a child directory
-    holding PLAN.md) rather than by reading plans_dirs out of .planr.yaml, so
-    this keeps working whatever a fixture names them.
+    Plan directories are found by their configured on-disk signature rather
+    than by reading the tool's own repository configuration, so this keeps
+    working whatever a fixture names them.
     """
 
-    destination = run_dir / PLANS_DIR
+    config = effective_harness_config(config)
+    destination = run_dir / artifact_directory(config)
+    marker = config["completion"]["artifacts"]["document_marker"]
+    binary_root = pathlib.PurePath(config["tool"]["binary"]).parts[0]
     copied: list[str] = []
     for entry in sorted(workspace.iterdir()):
-        if entry.name in {".git", ".harness", "bin"}:
+        if entry.name in {".git", ".harness", binary_root}:
             continue
         if entry.is_dir():
-            if not any(child.joinpath("PLAN.md").is_file() for child in entry.iterdir() if child.is_dir()):
+            if not any(child.joinpath(marker).is_file() for child in entry.iterdir() if child.is_dir()):
                 continue
             shutil.copytree(entry, destination / entry.name, dirs_exist_ok=True)
             copied.extend(
@@ -366,7 +398,7 @@ def copy_plan_artifacts(workspace: pathlib.Path, run_dir: pathlib.Path) -> list[
                 for path in sorted((destination / entry.name).rglob("*"))
                 if path.is_file()
             )
-        elif entry.is_file() and is_plan_draft(entry):
+        elif entry.is_file() and is_plan_draft(entry, config):
             destination.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(entry, destination / entry.name)
             copied.append(entry.name)
@@ -388,7 +420,7 @@ def run_fixture_test(fixture_name: str, workspace: pathlib.Path, run_dir: pathli
     if not script.is_file():
         return None
     state_dir = run_dir / STATE_DIR
-    scratch = pathlib.Path(tempfile.mkdtemp(prefix="planr-fixture-test-"))
+    scratch = pathlib.Path(tempfile.mkdtemp(prefix="harness-fixture-test-"))
     env = os.environ.copy()
     env["PLANR_EVAL_WORKSPACE"] = str(workspace)
     try:
@@ -401,7 +433,10 @@ def run_fixture_test(fixture_name: str, workspace: pathlib.Path, run_dir: pathli
 
 
 def final_state(
-    workspace: pathlib.Path, run_dir: pathlib.Path, fixture_name: str = DEFAULT_FIXTURE
+    workspace: pathlib.Path,
+    run_dir: pathlib.Path,
+    fixture_name: str = DEFAULT_FIXTURE,
+    config: dict[str, Any] | None = None,
 ) -> tuple[int, int | None]:
     """Record how the workspace ended up, and whether it passes verification.
 
@@ -409,14 +444,22 @@ def final_state(
     code (None when the fixture has no script).
     """
 
+    config = effective_harness_config(config)
     state_dir = run_dir / STATE_DIR
-    planr = str(workspace / "bin" / "planr")
+    executable = str(tool_binary(config, workspace))
     test = run_command(["go", "test", "./..."], cwd=workspace)
     write_output(state_dir / "final-go-test.txt", test)
     state_dir.joinpath("final-go-test.exit").write_text(f"{test.returncode}\n", encoding="utf-8")
+    completion = config["completion"]
+    for name, args, relative_output in (
+        ("overview", completion["command"], completion["state_file"]),
+        ("status", completion["status_command"], completion["status_file"]),
+    ):
+        output = run_command([executable, *args], cwd=workspace)
+        output_path = run_dir / relative_output
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        write_output(output_path, output)
     for name, args in {
-        "overview": [planr, "overview"],
-        "status": [planr, "status"],
         "git-status": ["git", "status", "--short"],
         # planr deliberately leaves its own draft and plan files untracked, so
         # judging the run by the full status would call every successful run
@@ -425,8 +468,8 @@ def final_state(
         "git-log": ["git", "log", "--oneline", "--decorate", "-20"],
     }.items():
         write_output(state_dir / f"final-{name}.txt", run_command(args, cwd=workspace))
-    plans = copy_plan_artifacts(workspace, run_dir)
-    progress(f"captured {len(plans)} planr document(s) into {PLANS_DIR}/")
+    plans = copy_plan_artifacts(workspace, run_dir, config)
+    progress(f"captured {len(plans)} {tool_name(config)} document(s) into {artifact_directory(config)}/")
     return test.returncode, run_fixture_test(fixture_name, workspace, run_dir)
 
 
@@ -571,6 +614,7 @@ async def run_sdk_session(
     run_dir: pathlib.Path,
     prompt: str,
     *,
+    config: dict[str, Any],
     model: str,
     reasoning: str,
     timeout: float,
@@ -578,7 +622,7 @@ async def run_sdk_session(
     from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 
     sdk_env = os.environ.copy()
-    sdk_path = str(workspace / "bin")
+    sdk_path = str(tool_binary(config, workspace).parent)
     sdk_env["PATH"] = sdk_path + os.pathsep + sdk_env.get("PATH", "")
     config = CodexConfig(
         cwd=str(workspace),
@@ -700,20 +744,26 @@ def install_fixture(
 def prepare_workspace(
     fixture_name: str = DEFAULT_FIXTURE, language: str = DEFAULT_LANGUAGE
 ) -> tuple[pathlib.Path, pathlib.Path]:
+    config = load_harness_config()
     fixture = fixture_dir(fixture_name)
     required = fixture / agents_file_for(language)
     if not required.is_file():
         raise HarnessError(f"missing fixture: {required}")
     run_dir = make_run_dir(FIXTURE_LABELS.get(fixture_name, fixture_name))
+    write_run_harness_config(run_dir, config)
     write_metadata(run_dir, {"fixture": fixture_name, "language": language})
     # Outside run_dir on purpose: the agent must not be able to read this run's
     # transcripts and reports by walking up from its own working directory.
-    workspace = make_agent_workspace(run_dir, FIXTURE_LABELS.get(fixture_name, fixture_name))
-    (workspace / "bin").mkdir()
+    workspace = make_agent_workspace(
+        run_dir,
+        FIXTURE_LABELS.get(fixture_name, fixture_name),
+        prefix=tool_name(config),
+    )
+    tool_binary(config, workspace).parent.mkdir(parents=True, exist_ok=True)
     (workspace / ".harness").mkdir()
     (run_dir / STATE_DIR).mkdir()
     install_fixture(fixture, workspace, language)
-    build_planr(workspace / "bin" / "planr")
+    build_tool(config, tool_binary(config, workspace))
     # The agent's sandbox only grants writes inside the workspace, so Go's
     # user-level caches are unreachable: GOCACHE stops the first `go test`
     # before it compiles anything, and GOMODCACHE makes every later `go`
@@ -721,10 +771,10 @@ def prepare_workspace(
     # Point both at gitignored directories in the workspace. The fixtures are
     # standard-library only, so an empty cache costs the agent nothing.
     #
-    # Set after build_planr on purpose: the harness itself is not sandboxed, so
-    # building planr belongs in the user's shared caches. Doing it earlier
-    # copied planr's own dependencies into every run's workspace -- ~360MB of
-    # throwaway cache per run.
+    # Set after the configured build on purpose: the harness itself is not
+    # sandboxed, so building the tool belongs in the user's shared caches.
+    # Doing it earlier copied the tool's dependencies into every run's
+    # workspace -- ~360MB of throwaway cache per run.
     for variable, directory in (("GOCACHE", "go-cache"), ("GOMODCACHE", "go-mod-cache")):
         os.environ[variable] = str(workspace / ".harness" / directory)
     init_git_repository(workspace)
@@ -742,9 +792,10 @@ def run_harness(args: argparse.Namespace) -> int:
     initial_prompt = load_initial_prompt(args.fixture, language)
     progress(
         f"preparing isolated repository from fixture {args.fixture}"
-        f" in {language} (build planr, git init)"
+        f" in {language} (build configured tool, git init)"
     )
     run_dir, workspace = prepare_workspace(args.fixture, language)
+    config = load_run_harness_config(run_dir)
     progress(f"run directory {run_dir.name}; workspace {workspace}")
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     write_run_metadata(
@@ -769,6 +820,7 @@ def run_harness(args: argparse.Namespace) -> int:
                 workspace,
                 run_dir,
                 initial_prompt,
+                config=config,
                 model=args.model,
                 reasoning=args.reasoning,
                 timeout=args.timeout,
@@ -778,7 +830,7 @@ def run_harness(args: argparse.Namespace) -> int:
     overall_exit = 1 if session_exit != 0 else 0
 
     progress("running final verification (go test, fixture checks) and capturing end state")
-    test_exit, fixture_exit = final_state(workspace, run_dir, args.fixture)
+    test_exit, fixture_exit = final_state(workspace, run_dir, args.fixture, config)
     if test_exit != 0 or fixture_exit not in (None, 0):
         overall_exit = 1
     write_metadata(

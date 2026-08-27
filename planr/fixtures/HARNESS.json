@@ -1,0 +1,140 @@
+{
+  "tool": {
+    "name": "planr",
+    "binary": "bin/planr",
+    "build": {
+      "directory": "..",
+      "command": ["go", "build", "-o", "{destination}", "."]
+    }
+  },
+  "observe": {
+    "actions": [
+      "new",
+      "edit",
+      "apply",
+      "status",
+      "show",
+      "overview",
+      "notes",
+      "config",
+      "doctor",
+      "archive",
+      "completion",
+      "schema",
+      "phase"
+    ],
+    "groups": {
+      "phase": {
+        "command": "phase",
+        "actions": ["set", "update", "start", "done", "reset", "rm"]
+      }
+    },
+    "expectations": [
+      {
+        "action": "new",
+        "hint": "초안 생성",
+        "category": "documentation",
+        "message": "`{tool} {action}` ({hint}) 호출이 없습니다. 해당 단계의 설명이나 명령 발견성이 약한지 확인하세요."
+      },
+      {
+        "action": "add",
+        "hint": "등록",
+        "category": "documentation",
+        "message": "`{tool} {action}` ({hint}) 호출이 없습니다. 해당 단계의 설명이나 명령 발견성이 약한지 확인하세요."
+      },
+      {
+        "action": "status",
+        "hint": "상세 상태 확인",
+        "category": "documentation",
+        "message": "`{tool} {action}` ({hint}) 호출이 없습니다. 해당 단계의 설명이나 명령 발견성이 약한지 확인하세요."
+      },
+      {
+        "action": "overview",
+        "hint": "요약 상태 확인",
+        "category": "documentation",
+        "message": "`{tool} {action}` ({hint}) 호출이 없습니다. 해당 단계의 설명이나 명령 발견성이 약한지 확인하세요."
+      },
+      {
+        "action": "phase start",
+        "hint": "",
+        "category": "documentation",
+        "message": "phase 시작 명령이 관찰되지 않았습니다. phase 라이프사이클 안내가 충분히 구체적인지 확인하세요."
+      },
+      {
+        "action": "phase done",
+        "hint": "",
+        "category": "workflow",
+        "message": "phase 완료 명령이 관찰되지 않았습니다. 계획을 실제 완료 상태로 연결하지 못했을 가능성이 있습니다."
+      }
+    ],
+    "no_commands": {
+      "workflow": "대화에서 `{tool}` 명령 호출이 관찰되지 않았습니다. 도구가 PATH에 없거나 AGENTS.md의 사용 지침이 실행 흐름에서 충분히 드러나지 않았을 수 있습니다.",
+      "documentation": "AGENTS.md의 {tool} 사용 지침이 관찰된 도구 호출로 이어지지 않았습니다. 지침의 위치·표현·필수성 또는 CLI 발견성을 개선할 수 있습니다."
+    }
+  },
+  "signals": {
+    "event_log": ".harness/planr-events.log",
+    "error_patterns": [
+      {
+        "name": "standard-library-logger",
+        "pattern": "^\\d{4}/\\d{2}/\\d{2} \\d{2}:\\d{2}:\\d{2} "
+      }
+    ],
+    "warnings": [
+      {
+        "name": "uncommitted-source-changes",
+        "source": "output",
+        "pattern": "cannot mark phase done while source changes are uncommitted",
+        "category": "documentation",
+        "message": "`phase done`의 소스 커밋 전제에서 오류/경고가 발생했습니다. 커밋 순서와 `--force` 사용 경계가 실제 작업 흐름에 맞는지 검토하세요."
+      },
+      {
+        "name": "uncommitted-source-check",
+        "source": "output",
+        "pattern": "cannot check uncommitted source changes",
+        "category": "documentation",
+        "message": "`phase done`의 소스 커밋 전제에서 오류/경고가 발생했습니다. 커밋 순서와 `--force` 사용 경계가 실제 작업 흐름에 맞는지 검토하세요."
+      },
+      {
+        "name": "forced-phase-done",
+        "source": "command",
+        "pattern": "\\bplanr\\b.*\\bphase\\s+done\\b.*--force",
+        "category": "workflow",
+        "message": "phase 완료 과정에서 `--force`가 언급되었습니다. 소스 검증을 우회하지 않고 완료할 수 있었는지 확인하세요."
+      }
+    ]
+  },
+  "completion": {
+    "command": ["overview", "--json"],
+    "state_file": "state/final-overview.json",
+    "status_command": ["status"],
+    "status_file": "state/final-status.txt",
+    "format": "json",
+    "plans_key": "plans",
+    "fields": {
+      "name": "name",
+      "directory": "directory",
+      "status": "status",
+      "done": "done_phases",
+      "total": "total_phases"
+    },
+    "display_name": {
+      "field": "directory",
+      "basename": true
+    },
+    "complete_when": {
+      "field": "status",
+      "equals": "done"
+    },
+    "messages": {
+      "no_status": "최종 overview에서 plan 상태를 읽지 못했습니다. 계획을 만들지 못했거나 출력 형식이 분석기와 맞지 않습니다.",
+      "all_complete": "최종 overview의 모든 plan이 done입니다.",
+      "incomplete": "완료되지 않은 plan이 남아 있습니다: {pending}."
+    },
+    "artifacts": {
+      "directory": "plans",
+      "document_marker": "PLAN.md",
+      "draft_frontmatter_key": "plan_name"
+    }
+  }
+}

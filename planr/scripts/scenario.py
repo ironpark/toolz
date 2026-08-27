@@ -23,12 +23,14 @@ import shutil
 
 from common import (
     HarnessError,
-    build_planr,
+    build_tool,
     fixture_dir,
     init_git_repository,
+    load_harness_config,
     make_run_dir,
     remove_runs,
     run_command,
+    write_run_harness_config,
 )
 
 
@@ -103,11 +105,13 @@ def complete_phases(workspace: pathlib.Path, plan: str, count: int) -> None:
 
 
 def prepare_workspace() -> pathlib.Path:
+    config = load_harness_config()
     workspace = make_run_dir(RUN_LABEL)
     shutil.copytree(fixture_dir(FIXTURE_NAME), workspace, dirs_exist_ok=True)
+    write_run_harness_config(workspace, config)
     # bin/ is listed in the fixture's `ignore`, so the binary under test never
     # counts as an uncommitted source change during `phase done`.
-    build_planr(workspace / "bin" / "planr")
+    build_tool(config, workspace / "bin" / "planr")
     init_git_repository(workspace, message="scenario baseline")
     return workspace
 

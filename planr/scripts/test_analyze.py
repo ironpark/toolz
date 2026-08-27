@@ -4,23 +4,67 @@ import json
 import pathlib
 import tempfile
 import unittest
+from copy import deepcopy
 
 from analyze import (
+    SessionStats,
+    analyze,
+    completion_is_complete,
     find_paths_outside,
     build_transcript,
     error_excerpt,
     failed_executions,
     fixture_check_rows,
+    make_observations,
     markdown_report,
+    parse_overview_statuses,
     parse_fixture_checks,
     planr_commands,
+    planr_event_lines,
+    planr_actions,
     read_session,
+    result_data,
     token_breakdown_rows,
     token_shares,
     worktree_state,
 )
 
-from common import SESSION_LOG
+from common import (
+    HarnessError,
+    SESSION_LOG,
+    load_harness_config,
+    write_metadata,
+    write_run_harness_config,
+)
+
+
+def custom_config() -> dict:
+    config = deepcopy(load_harness_config())
+    config["tool"]["name"] = "widget"
+    config["observe"]["actions"] = ["inspect", "summary", "flow"]
+    config["observe"]["groups"] = {"flow": {"command": "flow", "actions": ["begin", "finish"]}}
+    config["signals"]["event_log"] = "signals/events.log"
+    config["signals"]["error_patterns"] = [{"name": "widget-log", "pattern": r"^WIDGET:"}]
+    config["signals"]["warnings"] = [
+        {
+            "name": "forced-flow",
+            "source": "command",
+            "pattern": r"\bwidget\b.*\bflow\s+finish\b.*--force",
+            "category": "workflow",
+            "message": "configured force warning",
+        }
+    ]
+    config["completion"]["plans_key"] = "items"
+    config["completion"]["fields"] = {
+        "name": "label",
+        "directory": "path",
+        "status": "state",
+        "done": "finished",
+        "total": "count",
+    }
+    config["completion"]["display_name"] = {"field": "directory", "basename": True}
+    config["completion"]["state_file"] = "state/end.json"
+    return config
 
 
 def command_event(item_id: str, command: str, output: str, exit_code: int, status: str) -> dict:
@@ -99,6 +143,69 @@ class PlanrCommandCountTest(SessionReadingTest):
             [command_event("a", "/bin/zsh -lc 'planr overview'", "plans-active/", 0, "completed")]
         )
         self.assertEqual(len(planr_commands(read_session(self.run_dir))), 1)
+
+
+class ConfiguredObservationTest(unittest.TestCase):
+    def test_executable_and_group_actions_come_from_config(self) -> None:
+        config = custom_config()
+        self.assertEqual(planr_actions("widget inspect", config), ["inspect"])
+        self.assertEqual(planr_actions("/bin/zsh -lc 'widget flow finish'", config), ["flow finish"])
+        self.assertEqual(planr_actions("planr inspect", config), [])
+
+    def test_event_log_path_comes_from_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = pathlib.Path(directory)
+            workspace = run_dir / "workspace"
+            (workspace / "signals").mkdir(parents=True)
+            (workspace / "signals" / "events.log").write_text("start|demo\n", encoding="utf-8")
+            write_metadata(run_dir, {"workspace": str(workspace)})
+            self.assertEqual(planr_event_lines(run_dir, custom_config()), ["start|demo"])
+
+    def test_warning_and_error_patterns_come_from_config(self) -> None:
+        config = custom_config()
+        session = SessionStats(outputs=["ordinary", "WIDGET: failed"])
+        with tempfile.TemporaryDirectory() as directory:
+            observations = make_observations(
+                pathlib.Path(directory),
+                session,
+                ["widget flow finish --force"],
+                [],
+                "",
+                config=config,
+            )
+        self.assertIn("configured force warning", observations["workflow"])
+        self.assertEqual(error_excerpt("WIDGET: root\nordinary", config=config), "WIDGET: root")
+
+
+class CompletionConfigTest(unittest.TestCase):
+    def test_json_payload_is_normalized_and_text_is_not_parsed(self) -> None:
+        config = custom_config()
+        value = json.dumps(
+            {"items": [{"label": "demo", "path": "active/00-demo", "state": "done", "finished": 2, "count": 2}]}
+        )
+        statuses = parse_overview_statuses(value, config)
+        self.assertEqual(statuses, [{"name": "00-demo", "status": "done", "done": 2, "total": 2}])
+        self.assertTrue(completion_is_complete(statuses, config))
+        self.assertEqual(parse_overview_statuses("  demo: done (2/2 phases)", config), [])
+
+    def test_analyzer_uses_the_run_config_state_file(self) -> None:
+        config = custom_config()
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = pathlib.Path(directory)
+            (run_dir / "state").mkdir()
+            (run_dir / "state" / "end.json").write_text(
+                json.dumps({"items": [{"label": "demo", "path": "active/00-demo", "state": "done", "finished": 1, "count": 1}]}),
+                encoding="utf-8",
+            )
+            write_run_harness_config(run_dir, config)
+            data = result_data(run_dir, SessionStats())
+            self.assertEqual(data["overview"][0]["name"], "00-demo")
+
+    def test_analyze_requires_the_run_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = pathlib.Path(directory)
+            with self.assertRaisesRegex(HarnessError, r"harness config .*harness\.json: file not found"):
+                analyze(run_dir)
 
 
 class FailedCommandTest(SessionReadingTest):

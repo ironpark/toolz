@@ -5,6 +5,8 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from copy import deepcopy
+from unittest import mock
 
 from codex import (
     DEFAULT_FIXTURE,
@@ -23,13 +25,14 @@ from codex import (
     copy_plan_artifacts,
     describe_item,
     elapsed,
+    final_state,
     format_usage,
     final_response_from_items,
     install_fixture,
     load_initial_prompt,
     token_usage_summary,
 )
-from common import PLANS_DIR, HarnessError, fixture_dir
+from common import PLANS_DIR, HarnessError, fixture_dir, load_harness_config
 
 
 class HarnessHelpersTest(unittest.TestCase):
@@ -239,6 +242,35 @@ class CopyPlanArtifactsTest(unittest.TestCase):
         (self.workspace / "demo.md").unlink()
         shutil.rmtree(self.workspace / "plans-active")
         self.assertEqual(copy_plan_artifacts(self.workspace, self.run_dir), [])
+
+
+class FinalStateConfigTest(unittest.TestCase):
+    def test_completion_commands_and_paths_come_from_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            workspace = root / "workspace"
+            run_dir = root / "run"
+            workspace.mkdir()
+            (run_dir / "state").mkdir(parents=True)
+            config = deepcopy(load_harness_config())
+            config["tool"]["name"] = "widget"
+            config["tool"]["binary"] = "bin/widget"
+            config["completion"]["command"] = ["inspect", "--json"]
+            config["completion"]["state_file"] = "state/end.json"
+            config["completion"]["status_command"] = ["summary"]
+
+            def completed(args: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+                return subprocess.CompletedProcess(args, 0, "{}\n")
+
+            with mock.patch("codex.run_command", side_effect=completed) as run, mock.patch(
+                "codex.copy_plan_artifacts", return_value=[]
+            ), mock.patch("codex.run_fixture_test", return_value=None):
+                self.assertEqual(final_state(workspace, run_dir, "fixture", config), (0, None))
+
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertEqual(commands[1], [str(workspace / "bin" / "widget"), "inspect", "--json"])
+            self.assertEqual(commands[2], [str(workspace / "bin" / "widget"), "summary"])
+            self.assertTrue((run_dir / "state" / "end.json").is_file())
 
 
 class FixtureTestScriptTest(unittest.TestCase):
