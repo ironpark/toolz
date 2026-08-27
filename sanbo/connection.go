@@ -80,3 +80,37 @@ func ParseConnectionQuery(query map[string]string) (Connection, error) {
 		ConnectionID: connectionID,
 	}, nil
 }
+
+// peerKind is the session topology a socket belongs to. Attach, routing and
+// teardown each dispatch on it, so the classification lives in one place
+// rather than being re-derived from Connection fields at every site.
+type peerKind int
+
+const (
+	// peerV1Server and peerV1Client are the two single-socket v1 roles.
+	peerV1Server peerKind = iota
+	peerV1Client
+	// peerControl is the v2 server socket carrying the session roster.
+	peerControl
+	// peerV2Client is a client on a v2 route; a route fans out to all of them.
+	peerV2Client
+	// peerV2Data is the daemon-side socket serving one v2 route.
+	peerV2Data
+)
+
+// kind classifies the connection into its session topology.
+func (c Connection) kind() peerKind {
+	if c.Version == 1 {
+		if c.Role == RoleServer {
+			return peerV1Server
+		}
+		return peerV1Client
+	}
+	if c.isControl() {
+		return peerControl
+	}
+	if c.Role == RoleClient {
+		return peerV2Client
+	}
+	return peerV2Data
+}

@@ -421,7 +421,8 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		s = &relaySession{clients: map[string][]*relayPeer{}, data: map[string]*relayPeer{}, buffer: map[string][]relayMessage{}, bufferBytes: map[string]int64{}, bufferTimers: map[string]*time.Timer{}}
 		r.sessions[connection.ServerID] = s
 	}
-	if connection.Version == 1 {
+	switch connection.kind() {
+	case peerV1Server, peerV1Client:
 		// One socket per role per session: attaching replaces whatever held the
 		// role before.
 		var replaced *relayPeer
@@ -432,7 +433,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		}
 		r.mu.Unlock()
 		closeReplaced(replaced)
-	} else if connection.isControl() {
+	case peerControl:
 		replaced := s.control
 		s.control = peer
 		ids := clientRouteIDsLocked(s)
@@ -440,7 +441,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		r.mu.Unlock()
 		closeReplaced(replaced)
 		r.sendSync(peer, ids)
-	} else if connection.Role == RoleClient {
+	case peerV2Client:
 		if r.moved[connection.ServerID] {
 			r.mu.Unlock()
 			_ = conn.Close(websocket.StatusServiceRestart, "Session expired")
@@ -455,7 +456,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		if control != nil {
 			_ = r.sendControl(control, []byte(`{"type":"connected","connectionId":"`+connection.ConnectionID+`"}`))
 		}
-	} else {
+	case peerV2Data:
 		replaced := s.data[connection.ConnectionID]
 		s.data[connection.ConnectionID] = peer
 		buffered := s.buffer[connection.ConnectionID]
@@ -845,7 +846,8 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 	s := r.sessions[c.ServerID]
 	var destinations []*relayPeer
 	buffered := false
-	if c.Version == 1 {
+	switch c.kind() {
+	case peerV1Server, peerV1Client:
 		peer := s.v1
 		if c.Role != RoleClient {
 			peer = s.v1Client
@@ -853,7 +855,7 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 		if peer != nil {
 			destinations = []*relayPeer{peer}
 		}
-	} else if c.Role == RoleClient {
+	case peerV2Client:
 		if d := s.data[c.ConnectionID]; d != nil {
 			destinations = []*relayPeer{d}
 		} else {
@@ -867,10 +869,12 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 				})
 			}
 		}
-	} else if c.ConnectionID != "" {
+	case peerV2Data:
 		// Route slices are appended to or replaced wholesale, never mutated in
 		// place, so the map value can be shared with the fan-out without copying.
 		destinations = s.clients[c.ConnectionID]
+	case peerControl:
+		// A control frame that is not a ping has nowhere to go.
 	}
 	r.mu.Unlock()
 	// One surviving destination is enough: forward closes a slow destination
@@ -947,18 +951,20 @@ func (r *Relay) removePeer(c Connection, p *relayPeer) {
 		r.mu.Unlock()
 		return
 	}
-	switch c.Version {
-	case 1:
+	switch c.kind() {
+	case peerV1Server:
 		if s.v1 == p {
 			s.v1 = nil
 		}
+	case peerV1Client:
 		if s.v1Client == p {
 			s.v1Client = nil
 		}
-	case 2:
+	case peerControl:
 		if s.control == p {
 			s.control = nil
 		}
+	case peerV2Client:
 		// Only the last client of a route tears the route down; the others just
 		// leave the fan-out set.
 		if remaining, attached := detachClientLocked(s, c.ConnectionID, p); attached && remaining == 0 {
@@ -976,6 +982,7 @@ func (r *Relay) removePeer(c Connection, p *relayPeer) {
 			}
 			return
 		}
+	case peerV2Data:
 		// A route without its data socket cannot be served, so the clients on it
 		// are told the daemon side is gone rather than left waiting.
 		if s.data[c.ConnectionID] == p {
