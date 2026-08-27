@@ -318,7 +318,7 @@ func isTurnMethod(method string) bool {
 		MethodItemStarted, MethodItemCompleted, MethodAgentMessageDelta,
 		MethodPlanDelta, MethodReasoningSummaryTextDelta,
 		MethodReasoningSummaryPartAdded, MethodReasoningTextDelta,
-		MethodCommandExecutionOutputDlta, MethodTokenUsageUpdated:
+		MethodCommandExecutionOutputDelta, MethodTokenUsageUpdated:
 		return true
 	default:
 		return false
@@ -379,7 +379,7 @@ func buildEvent(note queuedNotification) (Event, bool) {
 			event.Kind = EventReasoningDelta
 			event.ReasoningSummary = note.method != MethodReasoningTextDelta
 		}
-	case MethodCommandExecutionOutputDlta:
+	case MethodCommandExecutionOutputDelta:
 		var payload CommandOutputDeltaParams
 		if err := json.Unmarshal(note.params, &payload); err != nil {
 			return event, false

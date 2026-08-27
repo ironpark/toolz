@@ -834,12 +834,12 @@ const (
 	MethodItemStarted   = "item/started"
 	MethodItemCompleted = "item/completed"
 
-	MethodAgentMessageDelta          = "item/agentMessage/delta"
-	MethodPlanDelta                  = "item/plan/delta"
-	MethodReasoningSummaryTextDelta  = "item/reasoning/summaryTextDelta"
-	MethodReasoningSummaryPartAdded  = "item/reasoning/summaryPartAdded"
-	MethodReasoningTextDelta         = "item/reasoning/textDelta"
-	MethodCommandExecutionOutputDlta = "item/commandExecution/outputDelta"
+	MethodAgentMessageDelta           = "item/agentMessage/delta"
+	MethodPlanDelta                   = "item/plan/delta"
+	MethodReasoningSummaryTextDelta   = "item/reasoning/summaryTextDelta"
+	MethodReasoningSummaryPartAdded   = "item/reasoning/summaryPartAdded"
+	MethodReasoningTextDelta          = "item/reasoning/textDelta"
+	MethodCommandExecutionOutputDelta = "item/commandExecution/outputDelta"
 
 	MethodServerRequestResolved = "serverRequest/resolved"
 	MethodAccountUpdated        = "account/updated"

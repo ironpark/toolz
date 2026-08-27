@@ -39,6 +39,15 @@ func (p *fakePeer) sendRaw(line string) {
 	}
 }
 
+// drain consumes and discards everything the client writes. It never fails
+// the test, so it is safe to leave running past the end of one.
+func (p *fakePeer) drain() {
+	go func() {
+		for p.in.Scan() {
+		}
+	}()
+}
+
 // recv reads the next message the client sent.
 func (p *fakePeer) recv() *wireMessage {
 	p.t.Helper()

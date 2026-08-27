@@ -55,6 +55,8 @@ type transportConfig struct {
 	// onServerRequest handles server-initiated requests. When nil, every
 	// server request is answered with a method-not-found error.
 	onServerRequest serverRequestFunc
+	// maxLine bounds one JSONL message; it defaults to maxLineBytes.
+	maxLine int
 }
 
 // transport implements JSON-RPC 2.0 framing over a newline-delimited JSON
@@ -226,8 +228,13 @@ func (t *transport) write(v any) error {
 func (t *transport) readLoop() {
 	defer t.reader.Done()
 
+	limit := t.cfg.maxLine
+	if limit <= 0 {
+		limit = maxLineBytes
+	}
+	start := min(64*1024, limit)
 	scanner := bufio.NewScanner(t.cfg.in)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+	scanner.Buffer(make([]byte, 0, start), limit)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -246,7 +253,7 @@ func (t *transport) readLoop() {
 		err = io.EOF
 	}
 	if errors.Is(err, bufio.ErrTooLong) {
-		err = fmt.Errorf("codex: app-server message exceeds %d bytes", maxLineBytes)
+		err = fmt.Errorf("codex: app-server message exceeds %d bytes: %w", limit, bufio.ErrTooLong)
 	}
 	t.fatal(fmt.Errorf("codex: app-server stream ended: %w", err))
 }
@@ -331,6 +338,10 @@ func (t *transport) fatal(err error) {
 
 		for _, ch := range pending {
 			close(ch)
+		}
+		// Closing the input unblocks a peer that is still writing to us.
+		if closer, ok := t.cfg.in.(io.Closer); ok {
+			_ = closer.Close()
 		}
 		t.cancel()
 		close(t.done)

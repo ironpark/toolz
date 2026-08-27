@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T20:37:23Z"
 depends_on:
 - "00-internal-codex#2"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: All auth methods have wire-shape + decode tests; AwaitLogin ignores
 > NEXT: none

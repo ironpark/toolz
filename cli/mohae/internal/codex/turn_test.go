@@ -99,7 +99,7 @@ func TestTurnStreamEndToEnd(t *testing.T) {
 		"itemId": "item_1", "delta": "lo"})
 	server.notify(MethodReasoningSummaryTextDelta, map[string]any{"threadId": "thr_1", "turnId": "turn_1",
 		"itemId": "item_2", "delta": "thinking", "summaryIndex": 1})
-	server.notify(MethodCommandExecutionOutputDlta, map[string]any{"threadId": "thr_1", "turnId": "turn_1",
+	server.notify(MethodCommandExecutionOutputDelta, map[string]any{"threadId": "thr_1", "turnId": "turn_1",
 		"itemId": "item_3", "stream": "stdout", "delta": "ok\n"})
 	server.notify(MethodTurnPlan, map[string]any{"threadId": "thr_1", "turnId": "turn_1",
 		"explanation": "why", "plan": []any{map[string]any{"step": "a", "status": "completed"}}})

@@ -3,7 +3,7 @@ depends_on:
 - "00-internal-codex#5"
 - "00-internal-codex#6"
 perf_phase: false
-status: planned
+status: in-progress
 ---
 > DONE-WHEN: `go test -race ./internal/codex/...` passes; malformed-input and
 > NEXT: none

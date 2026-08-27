@@ -13,7 +13,7 @@ registered_at: "2026-08-27T20:07:33Z"
 - [x] [Phase 03: Thread management](phases/03-thread-management.md)
 - [x] [Phase 04: Turn execution and event streaming](phases/04-turn-streaming.md)
 - [x] [Phase 05: Approvals and server-initiated requests](phases/05-approvals.md)
-- [ ] [Phase 06: Auth surface](phases/06-auth-surface.md)
+- [x] [Phase 06: Auth surface](phases/06-auth-surface.md)
 - [ ] [Phase 07: Fake-server hardening, docs, and package test sweep](phases/07-hardening-and-docs.md)
 
 # Shared Verification

@@ -103,6 +103,16 @@ func (s *fakeServer) send(v any) {
 	}
 }
 
+// sendLine writes a raw line to the client, bypassing JSON encoding.
+func (s *fakeServer) sendLine(line string) {
+	s.t.Helper()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if _, err := s.toClient.Write([]byte(line + "\n")); err != nil {
+		s.t.Errorf("fake server write: %v", err)
+	}
+}
+
 // tryNext returns the next client message, reporting false on timeout or a
 // closed stream. It is safe to call from a helper goroutine.
 func (s *fakeServer) tryNext() (*wireMessage, bool) {
