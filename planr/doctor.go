@@ -84,6 +84,8 @@ func doctorCommand(_ context.Context, cmd *cli.Command) error {
 		fmt.Printf("PASS git repository: %s\n", location.baseRoot)
 	}
 
+	fmt.Printf("INFO agent: %s\n", currentAgentDescription())
+
 	settings := defaultConfig()
 	if location.path == "" {
 		fmt.Println("INFO config: .planr.yaml not found; using defaults")

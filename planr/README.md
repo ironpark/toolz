@@ -301,6 +301,19 @@ hooks:
 | `PLANR_PLAN` | plan 디렉터리 이름 |
 | `PLANR_PHASE` | phase 번호 (`new`, `add`, `plan_done`처럼 plan 단위 이벤트에서는 비어 있음) |
 | `PLANR_STATUS` | 변경된 상태 |
+| `PLANR_AGENT` | 감지된 AI 코딩 에이전트 이름 (`claude-code`, `codex` 등). 사람이 셸에서 직접 실행하면 비어 있음 |
+| `PLANR_AGENT_SESSION` | 에이전트 세션/스레드 ID (알 수 없으면 비어 있음) |
+| `PLANR_AGENT_LEVEL` | `direct`(에이전트의 명령 실행 도구가 직접 띄움) 또는 `ambient`(에이전트 환경이긴 하나 상속되었을 수 있음) |
+
+에이전트 변수를 쓰면 훅이 자동 실행과 사람 실행을 구분할 수 있습니다.
+
+```sh
+# 사람이 직접 완료한 phase에서만 알림을 보낸다
+[ -n "$PLANR_AGENT" ] || notify-team "$PLANR_PLAN $PLANR_PHASE done"
+```
+
+감지 결과는 `planr config`와 `planr doctor`의 `agent:` 줄에서 확인할 수 있으며, 어떤
+환경 변수로 감지했는지(`signal=`)까지 함께 보여 줍니다.
 
 > 이전 단일 이벤트 맵 형식은 사용하지 않고 이 규칙 형식만 사용합니다.
 

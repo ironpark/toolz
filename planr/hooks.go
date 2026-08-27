@@ -123,6 +123,9 @@ func runHook(repoRoot, command, label, event, planDirectory string, phaseID int,
 		"PLANR_PHASE="+phaseEnvironmentValue(phaseID),
 		"PLANR_STATUS="+status,
 	)
+	// The agent variables describe the process planr itself runs in rather than
+	// the event, so they come from the shared detection in agent.go.
+	hook.Env = append(hook.Env, agentEnvironment()...)
 	output, err := hook.CombinedOutput()
 	if err != nil {
 		message := strings.TrimSpace(string(output))

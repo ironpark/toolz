@@ -8,6 +8,7 @@ import (
 	"time"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/ironpark/toolz/planr/agentenv"
 )
 
 func TestLoadConfigHooks(t *testing.T) {
@@ -216,32 +217,59 @@ func TestIsIgnoredPath(t *testing.T) {
 	}
 }
 
-func TestRunHookEnvironment(t *testing.T) {
+// runHookCapture runs one hook command in a scratch repository and returns
+// whatever it wrote to hook.out, so each hook environment test is only its
+// command and its expectation.
+func runHookCapture(t *testing.T, event, command string, phaseID int, status string) string {
+	t.Helper()
 	root := t.TempDir()
-	command := `printf '%s:%s:%s:%s' "$PLANR_EVENT" "$PLANR_PLAN" "$PLANR_PHASE" "$PLANR_STATUS" > hook.out`
-	if err := runHook(root, command, "after done hook #1", hookEventDone, "00-checkout-v2", 2, "done", defaultHookTimeout); err != nil {
+	if err := runHook(root, command, "after "+event+" hook #1", event, "00-checkout-v2", phaseID, status, defaultHookTimeout); err != nil {
 		t.Fatalf("runHook() unexpected error: %v", err)
 	}
 	output, err := os.ReadFile(filepath.Join(root, "hook.out"))
 	if err != nil {
 		t.Fatalf("read hook output: %v", err)
 	}
-	if got, want := string(output), "done:00-checkout-v2:2:done"; got != want {
+	return string(output)
+}
+
+func TestRunHookEnvironment(t *testing.T) {
+	command := `printf '%s:%s:%s:%s' "$PLANR_EVENT" "$PLANR_PLAN" "$PLANR_PHASE" "$PLANR_STATUS" > hook.out`
+	if got, want := runHookCapture(t, hookEventDone, command, 2, "done"), "done:00-checkout-v2:2:done"; got != want {
+		t.Fatalf("hook output = %q, want %q", got, want)
+	}
+}
+
+func TestDescribeAgent(t *testing.T) {
+	detected := agentenv.Detection{
+		Agent:     agentenv.AgentClaudeCode,
+		SessionID: "session-7",
+		Signal:    "CLAUDE_CODE_CHILD_SESSION",
+		Level:     agentenv.DetectionDirect,
+	}
+	want := "claude-code (signal=CLAUDE_CODE_CHILD_SESSION, level=direct, session=session-7)"
+	if got := describeAgent(detected); got != want {
+		t.Errorf("describeAgent() = %q, want %q", got, want)
+	}
+	if got := describeAgent(agentenv.Detection{}); !strings.HasPrefix(got, "none") {
+		t.Errorf("describeAgent(zero) = %q, want a none result", got)
+	}
+}
+
+func TestRunHookExportsAgentEnvironment(t *testing.T) {
+	// CLAUDE_CODE_CHILD_SESSION is the first marker Detect checks, so it wins
+	// over whatever agent environment the test itself is running under.
+	t.Setenv("CLAUDE_CODE_CHILD_SESSION", "1")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-7")
+	command := `printf '%s:%s:%s' "$PLANR_AGENT" "$PLANR_AGENT_SESSION" "$PLANR_AGENT_LEVEL" > hook.out`
+	if got, want := runHookCapture(t, hookEventDone, command, 2, "done"), "claude-code:session-7:direct"; got != want {
 		t.Fatalf("hook output = %q, want %q", got, want)
 	}
 }
 
 func TestRunHookPlanEventHasEmptyPhase(t *testing.T) {
-	root := t.TempDir()
 	command := `printf '<%s>' "$PLANR_PHASE" > hook.out`
-	if err := runHook(root, command, "after add hook #1", hookEventAdd, "00-checkout-v2", -1, "registered", defaultHookTimeout); err != nil {
-		t.Fatalf("runHook() unexpected error: %v", err)
-	}
-	output, err := os.ReadFile(filepath.Join(root, "hook.out"))
-	if err != nil {
-		t.Fatalf("read hook output: %v", err)
-	}
-	if got, want := string(output), "<>"; got != want {
+	if got, want := runHookCapture(t, hookEventAdd, command, -1, "registered"), "<>"; got != want {
 		t.Fatalf("hook output = %q, want %q", got, want)
 	}
 }

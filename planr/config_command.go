@@ -28,6 +28,7 @@ func configCommand(_ context.Context, cmd *cli.Command) error {
 		fmt.Printf("config_file: %s\n", settings.configPath)
 	}
 	fmt.Printf("repository_root: %s\n", root)
+	fmt.Printf("agent: %s\n", currentAgentDescription())
 	fmt.Printf("language: %s\n", settings.Language)
 	printStringValues("plans_dirs", settings.PlansDirs)
 	printStringValues("ignore", settings.Ignore)
