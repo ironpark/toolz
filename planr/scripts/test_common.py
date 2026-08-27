@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import tempfile
@@ -44,6 +45,27 @@ class HarnessConfigTest(unittest.TestCase):
         self.assertEqual(set(config), {"tool", "observe", "signals", "completion"})
         self.assertEqual(config["tool"]["name"], "planr")
         self.assertEqual(config["completion"]["command"], ["overview", "--json"])
+
+    # The harness kept advising that `planr add` was never called for a while
+    # after that command was replaced by `apply`: the expectation outlived the
+    # command, and the report read as a finding about the agent instead of a
+    # stale config. Expectations must name an action the observer watches.
+    def test_expectation_for_an_unobserved_action_is_rejected(self) -> None:
+        config = load_harness_config()
+        config["observe"]["expectations"][0]["action"] = "no-such-command"
+        path = self.directory / "harness.json"
+        path.write_text(json.dumps(config), encoding="utf-8")
+        with self.assertRaises(HarnessError) as caught:
+            load_harness_config(path)
+        self.assertIn("no-such-command", str(caught.exception))
+        self.assertIn("observe.actions", str(caught.exception))
+
+    def test_grouped_expectation_resolves_through_observe_groups(self) -> None:
+        config = load_harness_config()
+        config["observe"]["expectations"][0]["action"] = "phase reset"
+        path = self.directory / "grouped.json"
+        path.write_text(json.dumps(config), encoding="utf-8")
+        self.assertEqual(load_harness_config(path)["tool"]["name"], "planr")
 
     def test_resolved_config_round_trips_through_a_run_directory(self) -> None:
         config = load_harness_config()

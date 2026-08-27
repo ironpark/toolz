@@ -43,6 +43,23 @@ def custom_config() -> dict:
     config["tool"]["name"] = "widget"
     config["observe"]["actions"] = ["inspect", "summary", "flow"]
     config["observe"]["groups"] = {"flow": {"command": "flow", "actions": ["begin", "finish"]}}
+    # Expectations name actions the observer watches, so a fixture that renames
+    # the actions has to rename these too -- the same consistency the config
+    # validator enforces.
+    config["observe"]["expectations"] = [
+        {
+            "action": "inspect",
+            "hint": "확인",
+            "category": "documentation",
+            "message": "`{tool} {action}` ({hint}) 호출이 없습니다.",
+        },
+        {
+            "action": "flow finish",
+            "hint": "",
+            "category": "workflow",
+            "message": "flow 완료 명령이 관찰되지 않았습니다.",
+        },
+    ]
     config["signals"]["event_log"] = "signals/events.log"
     config["signals"]["error_patterns"] = [{"name": "widget-log", "pattern": r"^WIDGET:"}]
     config["signals"]["warnings"] = [

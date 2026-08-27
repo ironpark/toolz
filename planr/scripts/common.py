@@ -155,6 +155,22 @@ def validate_harness_config(value: Any, path: pathlib.Path) -> dict[str, Any]:
         if action in expectation_actions:
             raise _config_error(path, f"{label}.action {action!r} is duplicated")
         expectation_actions.add(action)
+        # An expectation names an action the analyzer counts, so it must be one
+        # the observer actually watches. Without this check a command that is
+        # renamed or removed keeps producing "it was never called" advice about
+        # a command that no longer exists, and the report reads as a finding
+        # about the agent rather than a stale configuration.
+        head, _, tail = action.partition(" ")
+        known = head in actions if not tail else any(
+            group.get("command") == head and tail in group.get("actions", [])
+            for group in groups.values()
+            if isinstance(group, dict)
+        )
+        if not known:
+            raise _config_error(
+                path,
+                f"{label}.action {action!r} is not in observe.actions or observe.groups",
+            )
         _string(_required(expectation, "hint", path, label), path, f"{label}.hint", nonempty=False)
         category = _string(
             _required(expectation, "category", path, label), path, f"{label}.category"

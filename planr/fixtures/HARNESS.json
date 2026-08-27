@@ -37,7 +37,7 @@
         "message": "`{tool} {action}` ({hint}) 호출이 없습니다. 해당 단계의 설명이나 명령 발견성이 약한지 확인하세요."
       },
       {
-        "action": "add",
+        "action": "apply",
         "hint": "등록",
         "category": "documentation",
         "message": "`{tool} {action}` ({hint}) 호출이 없습니다. 해당 단계의 설명이나 명령 발견성이 약한지 확인하세요."
