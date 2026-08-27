@@ -298,15 +298,12 @@ func (r *Relay) handleMetrics(writer http.ResponseWriter, _ *http.Request) {
 	r.mu.Unlock()
 	// runtime/metrics rather than runtime.ReadMemStats: scrapes arrive while the
 	// relay carries live traffic and ReadMemStats stops the world.
-	samples := []metrics.Sample{
-		{Name: "/memory/classes/heap/objects:bytes"},
-		{Name: "/memory/classes/heap/unused:bytes"},
-		{Name: "/memory/classes/metadata/mcache/inuse:bytes"},
-	}
-	metrics.Read(samples)
-	heapAlloc := samples[0].Value.Uint64()
-	heapInuse := heapAlloc + samples[1].Value.Uint64()
-	mcacheInuse := samples[2].Value.Uint64()
+	read := readMemoryMetrics(
+		"/memory/classes/heap/objects:bytes",
+		"/memory/classes/heap/unused:bytes",
+		"/memory/classes/metadata/mcache/inuse:bytes",
+	)
+	heapAlloc, heapInuse, mcacheInuse := read[0], read[0]+read[1], read[2]
 	_, _ = fmt.Fprintf(writer, metricsGaugeFormat,
 		ready, draining, r.activeWebSockets.Load(), activeSessions,
 		r.rerouteResponses.Load(), r.connectionRejections.Load(),
@@ -488,7 +485,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		// Message admission runs before the handshake check, as in the
 		// reference: a node under memory pressure, or a socket already picked
 		// by shedding, stops accepting inbound work entirely.
-		if r.admitsMessage(connection, typ, peer) != nil {
+		if !r.admitsMessage(connection, typ, peer) {
 			_ = conn.Close(websocket.StatusTryAgainLater, "Relay ingress capacity")
 			return
 		}
@@ -583,8 +580,24 @@ func (r *Relay) armControlWatchdogLocked(s *relaySession, control *relayPeer) {
 	})
 }
 
+// deliveryContext bounds one write by PASEO_RELAY_DELIVERY_TIMEOUT_MS.
+func (r *Relay) deliveryContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), time.Duration(r.Config.DeliveryTimeoutMS)*time.Millisecond)
+}
+
+// dropSlowConsumer retires a destination that could not keep up. timedOut
+// distinguishes a missed write deadline, which also counts as a delivery
+// timeout, from a queue bound reached before any write was attempted.
+func (r *Relay) dropSlowConsumer(p *relayPeer, timedOut bool) {
+	if timedOut {
+		r.deliveryTimeouts.Add(1)
+	}
+	r.slowConsumerDisconnects.Add(1)
+	closeAsync(p.conn, websocket.StatusTryAgainLater, "Slow consumer")
+}
+
 func (r *Relay) send(p *relayPeer, typ websocket.MessageType, b []byte) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(r.Config.DeliveryTimeoutMS)*time.Millisecond)
+	ctx, cancel := r.deliveryContext()
 	defer cancel()
 	select {
 	case p.writeSlot <- struct{}{}:
@@ -625,8 +638,7 @@ func (r *Relay) sendControl(p *relayPeer, b []byte) error {
 	}
 	queued := int64(len(b))
 	if !reserveCounter(&p.controlQueued, queued, int64(r.Config.ControlQueueBytes)) {
-		r.slowConsumerDisconnects.Add(1)
-		closeAsync(p.conn, websocket.StatusTryAgainLater, "Slow consumer")
+		r.dropSlowConsumer(p, false)
 		return errControlQueue
 	}
 	defer p.controlQueued.Add(-queued)
@@ -635,14 +647,12 @@ func (r *Relay) sendControl(p *relayPeer, b []byte) error {
 	}
 	defer p.releaseHeap(queued)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(r.Config.DeliveryTimeoutMS)*time.Millisecond)
+	ctx, cancel := r.deliveryContext()
 	defer cancel()
 	select {
 	case p.writeSlot <- struct{}{}:
 	case <-ctx.Done():
-		r.deliveryTimeouts.Add(1)
-		r.slowConsumerDisconnects.Add(1)
-		closeAsync(p.conn, websocket.StatusTryAgainLater, "Slow consumer")
+		r.dropSlowConsumer(p, true)
 		return context.DeadlineExceeded
 	}
 	defer func() { <-p.writeSlot }()
@@ -653,12 +663,10 @@ func (r *Relay) sendControl(p *relayPeer, b []byte) error {
 // slot. A write that misses its deadline is the same slow consumer the queue
 // bound catches earlier.
 func (r *Relay) writeControl(p *relayPeer, b []byte) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(r.Config.DeliveryTimeoutMS)*time.Millisecond)
+	ctx, cancel := r.deliveryContext()
 	defer cancel()
 	if err := p.conn.Write(ctx, websocket.MessageText, b); err != nil {
-		r.deliveryTimeouts.Add(1)
-		r.slowConsumerDisconnects.Add(1)
-		closeAsync(p.conn, websocket.StatusTryAgainLater, "Slow consumer")
+		r.dropSlowConsumer(p, true)
 		return err
 	}
 	return nil
@@ -678,10 +686,8 @@ func (r *Relay) forward(p *relayPeer, typ websocket.MessageType, b []byte) error
 		r.bytesForwarded.Add(int64(len(b)))
 		return nil
 	}
-	r.deliveryTimeouts.Add(1)
-	r.slowConsumerDisconnects.Add(1)
 	r.capacityEpoch.Add(1)
-	closeAsync(p.conn, websocket.StatusTryAgainLater, "Slow consumer")
+	r.dropSlowConsumer(p, true)
 	return err
 }
 
@@ -795,32 +801,20 @@ func (r *Relay) validateHandshake(version int, b []byte) bool {
 	return accepted
 }
 
-// admitsMessage is the inbound admission gate. It reports the reason a frame
-// cannot be accepted, or nil when it can. Memory pressure and a socket already
-// picked by shedding both close the door; the reference discards a control
-// socket's binary frames before admission, so those are never charged.
-func (r *Relay) admitsMessage(c Connection, typ websocket.MessageType, source *relayPeer) error {
+// admitsMessage is the inbound admission gate. Memory pressure and a socket
+// already picked by shedding both close the door; the reference discards a
+// control socket's binary frames before admission, so those are never charged.
+func (r *Relay) admitsMessage(c Connection, typ websocket.MessageType, source *relayPeer) bool {
 	if c.isControl() && typ != websocket.MessageText {
-		return nil
+		return true
 	}
 	if r.memoryPressure.Load() {
-		return errMemoryPressure
+		return false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if source.shed {
-		return errShedding
-	}
-	return nil
+	return !source.shed
 }
-
-var (
-	// errMemoryPressure reports admission or delivery refused while the node is
-	// over its memory watermark.
-	errMemoryPressure = errors.New("relay memory pressure")
-	// errShedding reports a socket already chosen by memory-pressure shedding.
-	errShedding = errors.New("socket shedding")
-)
 
 func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType, b []byte) {
 	weighted := int64(len(b) * r.Config.IngressWeight)
@@ -830,7 +824,7 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 	}
 	// Pressure that arrives between admission and delivery stops the message
 	// here instead, which the reference reports with its own close reason.
-	if r.admitsMessage(c, typ, source) != nil {
+	if !r.admitsMessage(c, typ, source) {
 		r.releaseInFlight(weighted)
 		_ = source.conn.Close(websocket.StatusTryAgainLater, "Relay memory pressure")
 		return
@@ -949,13 +943,15 @@ func (r *Relay) removePeer(c Connection, p *relayPeer) {
 		r.mu.Unlock()
 		return
 	}
-	if c.Version == 1 && s.v1 == p {
-		s.v1 = nil
-	}
-	if c.Version == 1 && s.v1Client == p {
-		s.v1Client = nil
-	}
-	if c.Version == 2 {
+	switch c.Version {
+	case 1:
+		if s.v1 == p {
+			s.v1 = nil
+		}
+		if s.v1Client == p {
+			s.v1Client = nil
+		}
+	case 2:
 		if s.control == p {
 			s.control = nil
 		}
@@ -1031,11 +1027,10 @@ func (r *Relay) readyForAdmission() bool {
 	return err == nil && members >= r.Config.MinimumClusterSize && !r.capacityUnavailable.Load() && !r.memoryPressure.Load()
 }
 
-// watchCapacity reconciles the ingress ledger against live state. The interval
-// is PASEO_RELAY_CAPACITY_MUTATION_TIMEOUT_MS: the longest an inconsistency may
-// persist before admission is closed and the ledger corrected.
-func (r *Relay) watchCapacity() func() {
-	interval := time.Duration(r.Config.CapacityMutationTimeoutMS) * time.Millisecond
+// startTicker runs tick on interval until the returned stop is called, which
+// waits for the goroutine to exit so a stopped watcher never races a test's
+// next assertion. A non-positive interval disables the ticker entirely.
+func startTicker(interval time.Duration, tick func()) func() {
 	if interval <= 0 {
 		return func() {}
 	}
@@ -1047,13 +1042,21 @@ func (r *Relay) watchCapacity() func() {
 		for {
 			select {
 			case <-ticker.C:
-				r.reconcileCapacity()
+				tick()
 			case <-stop:
 				return
 			}
 		}
 	}()
 	return func() { close(stop); <-done }
+}
+
+// watchCapacity reconciles the ingress ledger against live state. The interval
+// is PASEO_RELAY_CAPACITY_MUTATION_TIMEOUT_MS: the longest an inconsistency may
+// persist before admission is closed and the ledger corrected.
+func (r *Relay) watchCapacity() func() {
+	interval := time.Duration(r.Config.CapacityMutationTimeoutMS) * time.Millisecond
+	return startTicker(interval, r.reconcileCapacity)
 }
 
 // reconcileCapacity releases ingress reservations that no live route or buffer
@@ -1093,16 +1096,28 @@ const (
 	controlCloseDelay = 5 * time.Second
 )
 
+// readMemoryMetrics reads the named runtime/metrics uint64 samples in order.
+// runtime/metrics rather than runtime.ReadMemStats because both callers run
+// while the relay carries live traffic and ReadMemStats stops the world.
+func readMemoryMetrics(names ...string) []uint64 {
+	samples := make([]metrics.Sample, len(names))
+	for i, name := range names {
+		samples[i].Name = name
+	}
+	metrics.Read(samples)
+	values := make([]uint64, len(samples))
+	for i, sample := range samples {
+		values[i] = sample.Value.Uint64()
+	}
+	return values
+}
+
 // heapInUse reports the memory the Go runtime currently holds from the OS. It
 // reads runtime/metrics rather than runtime.ReadMemStats because the sampler
 // runs continuously and ReadMemStats stops the world.
 func heapInUse() uint64 {
-	samples := []metrics.Sample{
-		{Name: "/memory/classes/total:bytes"},
-		{Name: "/memory/classes/heap/released:bytes"},
-	}
-	metrics.Read(samples)
-	total, released := samples[0].Value.Uint64(), samples[1].Value.Uint64()
+	read := readMemoryMetrics("/memory/classes/total:bytes", "/memory/classes/heap/released:bytes")
+	total, released := read[0], read[1]
 	if released > total {
 		return 0
 	}
@@ -1115,21 +1130,7 @@ func (r *Relay) watchMemoryPressure() func() {
 	if r.Config.MemoryWatermarkBytes <= 0 {
 		return func() {}
 	}
-	stop, done := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(memoryPressureInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				r.sampleMemoryPressure(heapInUse())
-			case <-stop:
-				return
-			}
-		}
-	}()
-	return func() { close(stop); <-done }
+	return startTicker(memoryPressureInterval, func() { r.sampleMemoryPressure(heapInUse()) })
 }
 
 // sampleMemoryPressure applies one reading. Crossing the watermark closes
@@ -1245,21 +1246,7 @@ func (r *Relay) watchOwnership() func() {
 	if r.ownership.identity() == "" {
 		return func() {}
 	}
-	stop, done := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(clusterHeartbeatInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				r.closeLostSessions()
-			case <-stop:
-				return
-			}
-		}
-	}()
-	return func() { close(stop); <-done }
+	return startTicker(clusterHeartbeatInterval, r.closeLostSessions)
 }
 
 func (r *Relay) closeLostSessions() {
@@ -1332,14 +1319,16 @@ func reserveCounter(counter *atomic.Int64, amount, limit int64) bool {
 // writeText writes an exact plain-text body, without http.Error's trailing
 // newline, so 503 diagnostics match the reference byte for byte.
 func writeText(writer http.ResponseWriter, status int, body string) {
-	writer.Header().Set("content-type", "text/plain; charset=utf-8")
 	writer.Header().Set("x-content-type-options", "nosniff")
-	writer.WriteHeader(status)
-	_, _ = io.WriteString(writer, body)
+	writeBody(writer, status, "text/plain; charset=utf-8", body)
 }
 
 func writeJSON(writer http.ResponseWriter, status int, body string) {
-	writer.Header().Set("content-type", "application/json")
+	writeBody(writer, status, "application/json", body)
+}
+
+func writeBody(writer http.ResponseWriter, status int, contentType, body string) {
+	writer.Header().Set("content-type", contentType)
 	writer.WriteHeader(status)
 	_, _ = io.WriteString(writer, body)
 }

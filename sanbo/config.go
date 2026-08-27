@@ -219,13 +219,8 @@ func boolean(environment map[string]string, key string, fallback bool) (bool, er
 
 // disabledOrInteger is integer with zero accepted as "disabled".
 func disabledOrInteger(environment map[string]string, key string, fallback, minimum, maximum int) (int, error) {
-	value, ok := environment[key]
-	if !ok {
-		return fallback, nil
+	if environment[key] == "0" {
+		return 0, nil
 	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil || (parsed != 0 && (parsed < minimum || parsed > maximum)) {
-		return 0, fmt.Errorf("%s must be an integer between %d and %d", key, minimum, maximum)
-	}
-	return parsed, nil
+	return integer(environment, key, fallback, minimum, maximum)
 }

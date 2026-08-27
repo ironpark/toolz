@@ -120,8 +120,7 @@ type fileOwnershipCoordinator struct {
 	dir       string
 	memberID  string
 	target    string
-	stop      chan struct{}
-	done      chan struct{}
+	stopBeat  func()
 	closed    atomic.Bool
 	liveCount atomic.Int64
 	lockMu    sync.Mutex
@@ -155,15 +154,13 @@ func newOwnershipCoordinator(config Config) (ownershipCoordinator, error) {
 		dir:      dir,
 		memberID: memberID,
 		target:   config.OwnershipTarget,
-		stop:     make(chan struct{}),
-		done:     make(chan struct{}),
 		lockFile: lockFile,
 	}
 	if err := coordinator.heartbeat(); err != nil {
 		lockFile.Close()
 		return nil, err
 	}
-	go coordinator.heartbeatLoop()
+	coordinator.stopBeat = startTicker(clusterHeartbeatInterval, func() { _ = coordinator.heartbeat() })
 	return coordinator, nil
 }
 
@@ -173,20 +170,6 @@ func digestName(value string) string {
 }
 
 func (coordinator *fileOwnershipCoordinator) identity() string { return coordinator.memberID }
-
-func (coordinator *fileOwnershipCoordinator) heartbeatLoop() {
-	defer close(coordinator.done)
-	ticker := time.NewTicker(clusterHeartbeatInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			_ = coordinator.heartbeat()
-		case <-coordinator.stop:
-			return
-		}
-	}
-}
 
 func (coordinator *fileOwnershipCoordinator) heartbeat() error {
 	return coordinator.withLock(func() error {
@@ -279,8 +262,7 @@ func (coordinator *fileOwnershipCoordinator) close() error {
 	if !coordinator.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	close(coordinator.stop)
-	<-coordinator.done
+	coordinator.stopBeat()
 	defer coordinator.lockFile.Close()
 	return coordinator.withLock(func() error {
 		if err := os.Remove(coordinator.memberFile(coordinator.memberID)); err != nil && !errors.Is(err, os.ErrNotExist) {
