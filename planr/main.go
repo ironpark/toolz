@@ -53,7 +53,7 @@ func newRootCommand() *cli.Command {
 			if cmd.Args() != nil {
 				commandName = cmd.Args().First()
 			}
-			if commandName == "config" || commandName == "doctor" || commandName == "completion" {
+			if commandName == "config" || commandName == "doctor" || commandName == "completion" || isShellCompletionInvocation(os.Args) {
 				// `config` can inspect defaults without git, and `doctor` needs
 				// to turn a missing repository into a diagnostic rather than an
 				// early generic failure.

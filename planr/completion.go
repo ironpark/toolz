@@ -81,3 +81,15 @@ func planNameCompletionValues(planDirectories []string, prefix string) ([]string
 	sort.Strings(result)
 	return result, nil
 }
+
+func isShellCompletionInvocation(args []string) bool {
+	if len(args) < 2 || args[len(args)-1] != "--generate-shell-completion" {
+		return false
+	}
+	for _, arg := range args[1 : len(args)-1] {
+		if arg == "--" {
+			return false
+		}
+	}
+	return true
+}

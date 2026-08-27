@@ -69,3 +69,23 @@ func TestRootEnablesShellCompletionAndCompletesPlanNames(t *testing.T) {
 		t.Fatalf("completion output = %q, want %q", got, want)
 	}
 }
+
+func TestIsShellCompletionInvocation(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "root", args: []string{"planr", "--generate-shell-completion"}, want: true},
+		{name: "subcommand", args: []string{"planr", "status", "check", "--generate-shell-completion"}, want: true},
+		{name: "not last", args: []string{"planr", "--generate-shell-completion", "status"}, want: false},
+		{name: "after separator", args: []string{"planr", "--", "--generate-shell-completion"}, want: false},
+		{name: "ordinary", args: []string{"planr", "status"}, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isShellCompletionInvocation(test.args); got != test.want {
+				t.Fatalf("isShellCompletionInvocation(%#v) = %v, want %v", test.args, got, test.want)
+			}
+		})
+	}
+}
