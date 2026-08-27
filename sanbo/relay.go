@@ -1049,25 +1049,27 @@ func (r *Relay) admitsMessage(c Connection, typ websocket.MessageType, source *r
 	return !source.shed.Load()
 }
 
-func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType, b []byte) {
+// beginDelivery reserves ingress, re-checks admission, charges the source's
+// heap fuse, publishes the delivery gauges, and marks the source blocked. It
+// reports false once the source has already been closed or killed for whichever
+// rung it failed; on success release unwinds the accounting in LIFO order.
+func (r *Relay) beginDelivery(c Connection, source *relayPeer, typ websocket.MessageType, b []byte) (func(), bool) {
 	weighted := int64(len(b) * r.Config.IngressWeight)
 	if !r.reserveIngress(weighted) {
 		closeAsync(source.conn, websocket.StatusTryAgainLater, "Relay ingress capacity")
-		return
+		return nil, false
 	}
 	// Pressure that arrives between admission and delivery stops the message
 	// here instead, which the reference reports with its own close reason.
 	if !r.admitsMessage(c, typ, source) {
 		r.releaseInFlight(weighted)
 		closeAsync(source.conn, websocket.StatusTryAgainLater, "Relay memory pressure")
-		return
+		return nil, false
 	}
 	if !source.chargeHeapOrKill(int64(len(b)), r.heapFuse()) {
 		r.releaseInFlight(weighted)
-		return
+		return nil, false
 	}
-	defer r.releaseInFlight(weighted)
-	defer source.releaseHeap(int64(len(b)))
 
 	// Capacity marks a source blocked once when start_delivery admits its
 	// message, before owner/data lookup and fan-out begin. The reference keeps
@@ -1076,15 +1078,29 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 	deliveryStarted := time.Now()
 	r.inflightDelivery.Add(int64(len(b)))
 	r.backpressuredSources.Add(1)
-	defer func() {
-		r.backpressuredSources.Add(-1)
-		r.inflightDelivery.Add(-int64(len(b)))
-		r.observeDeliveryWait(time.Since(deliveryStarted))
-	}()
 	// A source with a delivery in flight is blocked, and shedding drops the
 	// longest-blocked source first.
 	source.blockSeq.Store(r.nextSeq())
-	defer source.blockSeq.Store(0)
+
+	return func() {
+		source.blockSeq.Store(0)
+		r.backpressuredSources.Add(-1)
+		r.inflightDelivery.Add(-int64(len(b)))
+		r.observeDeliveryWait(time.Since(deliveryStarted))
+		source.releaseHeap(int64(len(b)))
+		// Last: reconcileCapacity reads ingressReserved minus ingressInFlight,
+		// so the reservation may not outlive the work it covers.
+		r.releaseInFlight(weighted)
+	}, true
+}
+
+func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType, b []byte) {
+	release, ok := r.beginDelivery(c, source, typ, b)
+	if !ok {
+		return
+	}
+	defer release()
+
 	deadline := r.deliveryDeadline()
 	ownerResult := r.ownerDestinations(c, source, deadline)
 	if ownerResult.code != 0 {
