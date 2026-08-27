@@ -2,7 +2,7 @@
 depends_on:
 - "01-internal-claude#0"
 perf_phase: false
-status: planned
+status: in-progress
 ---
 > DONE-WHEN: Table-driven tests using real fixture lines (taken from the Python SDK's
 > NEXT: none

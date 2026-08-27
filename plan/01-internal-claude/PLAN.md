@@ -7,7 +7,7 @@ registered_at: "2026-08-27T20:07:58Z"
 
 # Phases
 
-- [ ] [Phase 00: Errors, message types, and options](phases/00-types-options-errors.md)
+- [x] [Phase 00: Errors, message types, and options](phases/00-types-options-errors.md)
 - [ ] [Phase 01: Message parser](phases/01-message-parser.md)
 - [ ] [Phase 02: Transport interface and subprocess CLI transport](phases/02-subprocess-transport.md)
 - [ ] [Phase 03: Control protocol engine](phases/03-control-protocol.md)

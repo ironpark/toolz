@@ -1,6 +1,7 @@
 ---
+completed_at: "2026-08-27T20:13:51Z"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: `go build ./...` and `go vet ./...` pass; unit tests marshal/unmarshal
 > NEXT: none
