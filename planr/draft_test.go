@@ -68,9 +68,9 @@ func TestValidatePhaseDependencies(t *testing.T) {
 	}
 }
 
-// A draft produced by `planr new` must be registrable by `planr add` once the
+// A draft produced by `planr new` must be registrable by `planr apply` once the
 // author fills in its placeholders, and must report every unfilled placeholder
-// at once rather than one failed `add` at a time.
+// at once rather than one failed application at a time.
 func newDraftForTest(t *testing.T, language string) string {
 	t.Helper()
 	raw, err := renderNewDraft(language, "demo", nil, "a demo plan")

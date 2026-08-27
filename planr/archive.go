@@ -11,7 +11,7 @@ import (
 
 // archiveCommand moves a completed plan to the last configured plans_dirs
 // entry. The first plans directory is locked as a directory-level coordination
-// point so add and archive cannot race while plan numbering is discovered.
+// point so apply and archive cannot race while plan numbering is discovered.
 func archiveCommand(_ context.Context, cmd *cli.Command) error {
 	if cmd.NArg() != 1 {
 		return fmt.Errorf("archive requires <plan-name>")

@@ -1,0 +1,32 @@
+---
+planr_new: phase
+planr_plan: {{ .Plan }}
+phase_title: {{ quote .Title }}
+slug: {{ .Slug }}
+perf_phase: false
+depends_on: []
+status: planned
+entry_condition: null
+---
+<!--
+planr phase draft. Apply this document with `planr apply` after replacing both
+TODO(planr) lines. The phase number is assigned by planr when it is applied;
+do not add one yourself.
+
+Fields:
+  slug        lowercase kebab-case and unique within the plan
+  perf_phase  true when this phase measures or improves performance
+  depends_on  existing phases in this plan, by number or slug
+  status      planned or conditional
+              conditional requires a non-empty entry_condition
+              planned requires entry_condition: null
+-->
+# {{ .Title }}
+
+## Planned Work
+
+- TODO(planr): replace this line with the work this phase carries out.
+
+## Done When
+
+- TODO(planr): replace this line with how to tell this phase is finished.

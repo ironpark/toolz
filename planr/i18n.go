@@ -21,6 +21,8 @@ const (
 type documentStrings struct {
 	// template is the embedded draft skeleton emitted by `planr new`.
 	template string
+	// phaseTemplate is the embedded phase draft emitted by `planr new plan#phase`.
+	phaseTemplate string
 	// plannedWork and doneWhen title the two required blocks of a phase.
 	plannedWork, doneWhen string
 	// noNext marks a phase document that does not point at a follow-up.
@@ -31,22 +33,24 @@ type documentStrings struct {
 
 var documentLanguages = map[string]documentStrings{
 	languageEnglish: {
-		template:     "draft.en.md.tmpl",
-		plannedWork:  "Planned Work",
-		doneWhen:     "Done When",
-		noNext:       "none",
-		verification: "Shared Verification",
-		ordering:     "Decisions That Constrain Ordering",
-		nextTarget:   "Next Implementation Target",
+		template:      "draft.en.md.tmpl",
+		phaseTemplate: "phase.en.md.tmpl",
+		plannedWork:   "Planned Work",
+		doneWhen:      "Done When",
+		noNext:        "none",
+		verification:  "Shared Verification",
+		ordering:      "Decisions That Constrain Ordering",
+		nextTarget:    "Next Implementation Target",
 	},
 	languageKorean: {
-		template:     "draft.ko.md.tmpl",
-		plannedWork:  "계획된 작업",
-		doneWhen:     "완료 조건",
-		noNext:       "없음",
-		verification: "공통 검증",
-		ordering:     "구현 순서를 제한하는 결정",
-		nextTarget:   "다음 구현 대상",
+		template:      "draft.ko.md.tmpl",
+		phaseTemplate: "phase.ko.md.tmpl",
+		plannedWork:   "계획된 작업",
+		doneWhen:      "완료 조건",
+		noNext:        "없음",
+		verification:  "공통 검증",
+		ordering:      "구현 순서를 제한하는 결정",
+		nextTarget:    "다음 구현 대상",
 	},
 }
 

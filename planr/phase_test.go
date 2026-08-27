@@ -56,7 +56,7 @@ func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
 	assertPlanChecklist(t, planPath, 0, false)
 }
 
-// The dependency graph `add` validates is only meaningful if it also governs
+// The dependency graph application validates is only meaningful if it also governs
 // execution, so advancing a phase ahead of its prerequisites is refused.
 func TestEnsureDependenciesMetBlocksOutOfOrderPhases(t *testing.T) {
 	plansRoot := t.TempDir()

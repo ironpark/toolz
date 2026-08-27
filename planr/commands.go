@@ -20,6 +20,17 @@ func newCommand(_ context.Context, cmd *cli.Command) error {
 	if cmd.NArg() < 1 || cmd.NArg() > 2 {
 		return fmt.Errorf("new requires <plan-name> and a short description")
 	}
+	selector := cmd.Args().First()
+	if strings.Contains(selector, "#") {
+		if cmd.NArg() != 1 {
+			return fmt.Errorf("phase draft selector must be the only positional argument")
+		}
+		return newPhaseCommand(cmd, selector)
+	}
+	return newPlanCommand(cmd)
+}
+
+func newPlanCommand(cmd *cli.Command) error {
 	name := cmd.Args().First()
 	if !kebab.MatchString(name) {
 		return fmt.Errorf("plan name %q must be lowercase kebab-case", name)
@@ -43,10 +54,12 @@ func newCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(absOutput); err == nil {
-		return fmt.Errorf("draft file already exists: %s", absOutput)
-	} else if !os.IsNotExist(err) {
-		return err
+	if !cmd.Bool("json") {
+		if _, err := os.Stat(absOutput); err == nil {
+			return fmt.Errorf("draft file already exists: %s", absOutput)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
 	}
 	dependsOn, err := normalizePlanDependencies(cmd.StringSlice("depends-on"), name)
 	if err != nil {
@@ -61,18 +74,24 @@ func newCommand(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 	settings = commandConfig(settings, cmd)
-	if err := runConfiguredHooks(repoRoot, settings, "before", hookEventNew, name, -1, "draft"); err != nil {
+	if err := runDocumentHooks(repoRoot, settings, "before", hookEventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
 		return err
 	}
 	draft, err := renderNewDraft(settings.Language, name, dependsOn, description)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(absOutput, []byte(draft), 0644); err != nil {
-		return err
+	if cmd.Bool("json") {
+		if err := writeJSON(makeTemplateJSON("plan", name, draft)); err != nil {
+			return err
+		}
+	} else {
+		if err := os.WriteFile(absOutput, []byte(draft), 0644); err != nil {
+			return err
+		}
+		fmt.Printf("Created %s\n", absOutput)
 	}
-	fmt.Printf("Created %s\n", absOutput)
-	if err := runConfiguredHooks(repoRoot, settings, "after", hookEventNew, name, -1, "draft"); err != nil {
+	if err := runDocumentHooks(repoRoot, settings, "after", hookEventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
 		return err
 	}
 	return nil
@@ -155,78 +174,6 @@ func parseDependency(value string) (planDependency, error) {
 	return planDependency{plan: plan, phase: &phase}, nil
 }
 
-func addCommand(_ context.Context, cmd *cli.Command) error {
-	if cmd.NArg() != 1 {
-		return fmt.Errorf("register requires <draft-file>")
-	}
-	file := cmd.Args().First()
-	raw, err := os.ReadFile(file)
-	if err != nil {
-		return err
-	}
-	d, err := parseDraft(raw, file)
-	if err != nil {
-		return err
-	}
-	if name := cmd.String("name"); name != "" {
-		if !kebab.MatchString(name) {
-			return fmt.Errorf("--name must be lowercase kebab-case")
-		}
-		d.Name = name
-	}
-	if err := validateDraftDependencies(&d); err != nil {
-		return err
-	}
-	workingDirectory, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	settings, repoRoot, err := loadConfig(workingDirectory)
-	if err != nil {
-		return err
-	}
-	settings = commandConfig(settings, cmd)
-	planDirectories := settings.planDirs(repoRoot)
-	plans := planDirectories[0]
-	directoryLock, err := acquirePlansDirectoryLock(plans)
-	if err != nil {
-		return err
-	}
-	defer directoryLock.close()
-	planDirectory, err := nextPlanDirectory(planDirectories, d.Name)
-	if err != nil {
-		return err
-	}
-	if err := runConfiguredHooks(repoRoot, settings, "before", hookEventAdd, planDirectory, -1, "registered"); err != nil {
-		return err
-	}
-	target := filepath.Join(plans, planDirectory)
-	tmp, err := os.MkdirTemp(plans, ".planr-")
-	if err != nil {
-		if os.IsNotExist(err) {
-			if err = os.MkdirAll(plans, 0755); err != nil {
-				return err
-			}
-			tmp, err = os.MkdirTemp(plans, ".planr-")
-		}
-		if err != nil {
-			return err
-		}
-	}
-	defer os.RemoveAll(tmp)
-	if err := writePlan(tmp, d, planDirectory, settings.Language); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, target); err != nil {
-		return err
-	}
-	fmt.Printf("Registered %s\n", planDirectory)
-	if err := runConfiguredHooks(repoRoot, settings, "after", hookEventAdd, planDirectory, -1, "registered"); err != nil {
-		return err
-	}
-	return nil
-}
-
 func nextPlanDirectory(planDirectories []string, name string) (string, error) {
 	maxIndex := -1
 	prefix := regexp.MustCompile(`^(\d+)-(.+)$`)
@@ -262,28 +209,44 @@ func nextPlanDirectory(planDirectories []string, name string) (string, error) {
 }
 
 func writePlan(root string, d draft, planDirectory, language string) error {
-	text := documentStringsFor(language)
+	documents, err := renderPlanDocuments(d, planDirectory, language, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Join(root, "phases"), 0755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(root, "GOALS.md"), []byte("# GOALS\n\n"+d.Goals+"\n"), 0644); err != nil {
-		return err
+	for relative, contents := range documents {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(relative)), []byte(contents), 0644); err != nil {
+			return err
+		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "CONTEXT.md"), []byte("# SCOPE\n\n"+d.Scope+"\n\n# CONTEXT\n\n"+d.Context+"\n"), 0644); err != nil {
-		return err
+	return nil
+}
+
+// renderPlanDocuments produces the complete set of files written when a plan
+// is registered. Keeping this separate from writePlan lets apply --dry-run
+// return the exact resulting documents without touching the repository.
+func renderPlanDocuments(d draft, planDirectory, language, registeredAt string) (map[string]string, error) {
+	text := documentStringsFor(language)
+	documents := map[string]string{
+		"GOALS.md":   "# GOALS\n\n" + d.Goals + "\n",
+		"CONTEXT.md": "# SCOPE\n\n" + d.Scope + "\n\n# CONTEXT\n\n" + d.Context + "\n",
 	}
 	checklist := []string{}
 	for _, p := range d.Phases {
 		checklist = append(checklist, phaseChecklistEntry(p.Meta.Phase, p.Title, p.Meta.Slug, p.Meta.Status == "done"))
-		path := filepath.Join(root, phaseDocumentPath(p.Meta.Phase, p.Meta.Slug))
-		if err := writeFrontmatterFile(path, phaseFrontmatter(planDirectory, p.Meta), phaseDocumentBody(language, p.Title, p.Planned, p.Completion)); err != nil {
-			return err
+		path := phaseDocumentPath(p.Meta.Phase, p.Meta.Slug)
+		contents, err := renderFrontmatterDocument(phaseFrontmatter(planDirectory, p.Meta), phaseDocumentBody(language, p.Title, p.Planned, p.Completion))
+		if err != nil {
+			return nil, err
 		}
+		documents[path] = contents
 	}
-	meta := map[string]any{"description": d.Description, "registered_at": time.Now().UTC().Format(time.RFC3339), "plan_status": "in-progress", "depends_on": d.DependsOn, "succeeded_by": nil, "preceded_by": nil}
+	meta := map[string]any{"description": d.Description, "registered_at": registeredAt, "plan_status": "in-progress", "depends_on": d.DependsOn, "succeeded_by": nil, "preceded_by": nil}
 	header, err := yaml.Marshal(pruneEmptyMeta(meta))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	nextDoc := ""
 	for _, p := range d.Phases {
@@ -291,12 +254,20 @@ func writePlan(root string, d draft, planDirectory, language string) error {
 			nextDoc = phaseDocumentPath(p.Meta.Phase, p.Meta.Slug)
 		}
 	}
-	plan := fmt.Sprintf("---\n%s---\n> NEXT: %s ([Phase %d](%s))\n\n# Phases\n\n%s\n\n# %s\n\n%s\n\n# %s\n\n%s\n\n# %s\n\n%s\n",
+	documents["PLAN.md"] = fmt.Sprintf("---\n%s---\n> NEXT: %s ([Phase %d](%s))\n\n# Phases\n\n%s\n\n# %s\n\n%s\n\n# %s\n\n%s\n\n# %s\n\n%s\n",
 		header, d.NextText, d.NextPhase, nextDoc, strings.Join(checklist, "\n"),
 		text.verification, d.Verification,
 		text.ordering, d.Ordering,
 		text.nextTarget, d.NextText)
-	return os.WriteFile(filepath.Join(root, "PLAN.md"), []byte(plan), 0644)
+	return documents, nil
+}
+
+func renderFrontmatterDocument(front map[string]any, body string) (string, error) {
+	header, err := yaml.Marshal(pruneEmptyMeta(front))
+	if err != nil {
+		return "", err
+	}
+	return "---\n" + string(header) + "---\n" + body, nil
 }
 
 // phaseFilePrefix matches a phase document filename, capturing its number and slug.
@@ -334,6 +305,10 @@ func phaseDocumentBody(language, title, planned, completion string) string {
 	text := documentStringsFor(language)
 	return fmt.Sprintf("> DONE-WHEN: %s\n> NEXT: %s\n\n# %s\n\n## %s\n\n%s\n\n## %s\n\n%s\n",
 		firstPhaseLine(completion), text.noNext, title, text.plannedWork, planned, text.doneWhen, completion)
+}
+
+func firstPhaseLine(value string) string {
+	return strings.TrimPrefix(strings.TrimSpace(strings.SplitN(value, "\n", 2)[0]), "- ")
 }
 
 // planSummary is the shared on-disk view of a plan used by both `status` and

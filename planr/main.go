@@ -53,7 +53,7 @@ func newRootCommand() *cli.Command {
 			if cmd.Args() != nil {
 				commandName = cmd.Args().First()
 			}
-			if commandName == "config" || commandName == "doctor" || commandName == "completion" || isShellCompletionInvocation(os.Args) {
+			if commandName == "config" || commandName == "doctor" || commandName == "completion" || commandName == "schema" || isShellCompletionInvocation(os.Args) {
 				// `config` can inspect defaults without git, and `doctor` needs
 				// to turn a missing repository into a diagnostic rather than an
 				// early generic failure.
@@ -86,23 +86,46 @@ func newRootCommand() *cli.Command {
 			{
 				Name:      "new",
 				Usage:     "create a structured Markdown draft",
-				ArgsUsage: "<plan-name> [description]",
+				ArgsUsage: "<plan-name>[#phase-name] [description]",
 				Flags: []cli.Flag{
 					&cli.StringFlag{Name: "output", Usage: "draft file path"},
 					&cli.StringSliceFlag{Name: "depends-on", Usage: "plan dependency (repeatable)"},
 					&cli.StringFlag{Name: "description", Usage: "short plan description (max 200 characters)"},
+					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
 				},
 				ShellComplete: planNameShellComplete,
 				Action:        newCommand,
 			},
 			{
-				Name:      "add",
-				Usage:     "add a structured Markdown draft as a plan",
-				ArgsUsage: "<draft-file>",
+				Name:      "edit",
+				Usage:     "check out an existing plan document for editing",
+				ArgsUsage: "<plan-name>#<phase-number> or <plan-name>",
 				Flags: []cli.Flag{
-					&cli.StringFlag{Name: "name", Usage: "plan name"},
+					&cli.StringFlag{Name: "section", Usage: "goals, context, or plan"},
+					&cli.StringFlag{Name: "output", Usage: "editable file path"},
+					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
 				},
-				Action: addCommand,
+				ShellComplete: planNameShellComplete,
+				Action:        editCommand,
+			},
+			{
+				Name:      "apply",
+				Usage:     "validate and write a plan document",
+				ArgsUsage: "[document-file]",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "stdin", Usage: "read the document from stdin"},
+					&cli.BoolFlag{Name: "dry-run", Usage: "report changes without writing"},
+					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
+				},
+				Action: applyCommand,
+			},
+			{
+				Name:  "schema",
+				Usage: "describe the plan document contract",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
+				},
+				Action: schemaCommand,
 			},
 			{
 				Name:      "status",
@@ -120,6 +143,8 @@ func newRootCommand() *cli.Command {
 				ArgsUsage: "<plan-name> [phase-number]",
 				Flags: []cli.Flag{
 					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
+					&cli.StringFlag{Name: "section", Usage: "goals, context, or plan"},
+					&cli.BoolFlag{Name: "all", Usage: "show the entire plan"},
 				},
 				ShellComplete: planNameShellComplete,
 				Action:        showCommand,
@@ -155,22 +180,6 @@ func newRootCommand() *cli.Command {
 				Name:  "phase",
 				Usage: "manage plan phases",
 				Commands: []*cli.Command{
-					{
-						Name:      "add",
-						Usage:     "add a phase to an open plan",
-						ArgsUsage: "<plan-name> <phase-title>",
-						Flags: []cli.Flag{
-							&cli.StringFlag{Name: "slug", Usage: "phase slug (derived from the title when omitted)"},
-							&cli.StringSliceFlag{Name: "depends-on", Usage: "existing phase number or slug (repeatable)"},
-							&cli.StringFlag{Name: "status", Value: "planned", Usage: "planned or conditional"},
-							&cli.StringFlag{Name: "entry-condition", Usage: "required when status is conditional"},
-							&cli.BoolFlag{Name: "perf-phase", Usage: "mark this as a performance phase"},
-							&cli.StringFlag{Name: "work", Usage: "planned work (required)"},
-							&cli.StringFlag{Name: "done-when", Usage: "completion condition (required)"},
-						},
-						ShellComplete: planNameShellComplete,
-						Action:        phaseAddCommand,
-					},
 					{
 						Name:      "set",
 						Aliases:   []string{"update"},

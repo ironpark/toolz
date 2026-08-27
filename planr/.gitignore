@@ -7,3 +7,7 @@
 
 # uv virtualenv for the Python runners
 /scripts/.venv/
+
+# Human edit checkouts and advisory locks are transient planr state.
+/.planr/
+.planr.lock

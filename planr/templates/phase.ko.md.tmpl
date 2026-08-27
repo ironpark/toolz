@@ -1,0 +1,31 @@
+---
+planr_new: phase
+planr_plan: {{ .Plan }}
+phase_title: {{ quote .Title }}
+slug: {{ .Slug }}
+perf_phase: false
+depends_on: []
+status: planned
+entry_condition: null
+---
+<!--
+planr phase draft. 두 TODO(planr) 줄을 실제 내용으로 바꾼 뒤 `planr apply`로
+적용합니다. phase 번호는 적용할 때 planr가 지정하므로 직접 적지 않습니다.
+
+Fields:
+  slug        lowercase kebab-case이며 plan 안에서 고유해야 합니다
+  perf_phase  성능을 측정하거나 개선하는 phase이면 true
+  depends_on  이 plan의 기존 phase를 번호나 slug로 지정합니다
+  status      planned 또는 conditional
+              conditional이면 비어 있지 않은 entry_condition이 필요합니다
+              planned이면 entry_condition: null이어야 합니다
+-->
+# {{ .Title }}
+
+## 계획된 작업
+
+- TODO(planr): 이 phase에서 수행할 작업으로 바꿉니다.
+
+## 완료 조건
+
+- TODO(planr): 이 phase가 끝났다고 판정할 기준으로 바꿉니다.

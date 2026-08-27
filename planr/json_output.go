@@ -59,6 +59,72 @@ type showJSONOutput struct {
 	File        string   `json:"file"`
 }
 
+type templateJSONOutput struct {
+	Kind     string `json:"kind"`
+	Selector string `json:"selector"`
+	Template string `json:"template"`
+}
+
+type editJSONOutput struct {
+	Kind     string `json:"kind"`
+	Selector string `json:"selector"`
+	Section  string `json:"section,omitempty"`
+	Target   string `json:"target"`
+	Base     string `json:"base"`
+	Document string `json:"document"`
+}
+
+type applyJSONOutput struct {
+	Ok        bool              `json:"ok"`
+	Action    string            `json:"action"`
+	Selector  string            `json:"selector"`
+	DryRun    bool              `json:"dry_run"`
+	Changed   bool              `json:"changed"`
+	Documents map[string]string `json:"documents"`
+	Diff      []applyDiffJSON   `json:"diff"`
+}
+
+type applyDiffJSON struct {
+	Path   string `json:"path"`
+	Before string `json:"before"`
+	After  string `json:"after"`
+}
+
+type applyFailureJSON struct {
+	Ok     bool                  `json:"ok"`
+	Errors []validationErrorJSON `json:"errors"`
+}
+
+type validationErrorJSON struct {
+	Rule    string `json:"rule"`
+	Section string `json:"section,omitempty"`
+	Phase   *int   `json:"phase,omitempty"`
+	Line    int    `json:"line,omitempty"`
+	Phases  []int  `json:"phases,omitempty"`
+	Detail  string `json:"detail"`
+}
+
+type showSectionJSONOutput struct {
+	Plan      string `json:"plan"`
+	Directory string `json:"directory"`
+	Section   string `json:"section"`
+	Content   string `json:"content"`
+	File      string `json:"file"`
+}
+
+type showAllJSONOutput struct {
+	Plan         string            `json:"plan"`
+	Directory    string            `json:"directory"`
+	Status       string            `json:"status"`
+	Description  string            `json:"description"`
+	DependsOn    []string          `json:"depends_on"`
+	Goals        string            `json:"goals"`
+	Context      string            `json:"context"`
+	PlanDocument string            `json:"plan_document"`
+	Phases       []showJSONOutput  `json:"phases"`
+	Documents    map[string]string `json:"documents"`
+}
+
 type configJSONOutput struct {
 	ConfigFile     *string         `json:"config_file"`
 	RepositoryRoot string          `json:"repository_root"`
@@ -186,6 +252,45 @@ func makeShowJSON(phase phaseDetails) showJSONOutput {
 		DependsOn:   append([]string{}, phase.dependencies...),
 		File:        phase.file,
 	}
+}
+
+func makeTemplateJSON(kind, selector, template string) templateJSONOutput {
+	return templateJSONOutput{Kind: kind, Selector: selector, Template: template}
+}
+
+func makeApplyJSON(operation applyOperation) applyJSONOutput {
+	documents := operation.documents
+	if documents == nil {
+		documents = map[string]string{}
+	}
+	diffs := operation.diffs
+	if diffs == nil {
+		diffs = []applyDiffJSON{}
+	}
+	return applyJSONOutput{
+		Ok:        true,
+		Action:    operation.action,
+		Selector:  operation.selector,
+		DryRun:    operation.dryRun,
+		Changed:   operation.changed,
+		Documents: documents,
+		Diff:      diffs,
+	}
+}
+
+func makeValidationJSON(records []validationRecord) []validationErrorJSON {
+	result := make([]validationErrorJSON, 0, len(records))
+	for _, record := range records {
+		result = append(result, validationErrorJSON{
+			Rule:    record.Rule,
+			Section: record.Section,
+			Phase:   record.Phase,
+			Line:    record.Line,
+			Phases:  append([]int{}, record.Phases...),
+			Detail:  record.Detail,
+		})
+	}
+	return result
 }
 
 func makeConfigJSON(settings config, root string) configJSONOutput {

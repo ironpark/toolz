@@ -31,3 +31,15 @@ func renderNewDraft(language, name string, dependsOn []string, descriptions ...s
 	}
 	return output.String(), nil
 }
+
+func renderNewPhaseDraft(language, plan, title, slug string) (string, error) {
+	var output bytes.Buffer
+	if err := draftTemplates.ExecuteTemplate(&output, documentStringsFor(language).phaseTemplate, struct {
+		Plan  string
+		Title string
+		Slug  string
+	}{plan, title, slug}); err != nil {
+		return "", fmt.Errorf("render phase draft: %w", err)
+	}
+	return output.String(), nil
+}

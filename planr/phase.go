@@ -13,7 +13,6 @@ import (
 	"time"
 
 	git "github.com/go-git/go-git/v5"
-	"github.com/goccy/go-yaml"
 	"github.com/urfave/cli/v3"
 )
 
@@ -82,7 +81,7 @@ func phaseCommand(cmd *cli.Command, status string) error {
 	}
 	if !cmd.Bool("force") {
 		// Starting or completing a phase out of order silently invalidates the
-		// ordering the plan was validated against, so the same graph `add`
+		// ordering the plan was validated against, so the same graph `apply`
 		// checked is enforced here too.
 		if err := ensureDependenciesMet(planDirectories, planRoot, planDirectory, phaseID, status); err != nil {
 			return err
@@ -301,11 +300,15 @@ func uncommittedSourcePaths(repoRoot string, planDirectories, ignore []string) (
 	return paths, nil
 }
 
-// isPlanDraftPath reports whether a dirty file is a draft produced by
-// `planr new`. Drafts survive `planr add`, so without this they show up as
-// "uncommitted source changes" and force the author to either commit planr's
+// isPlanDraftPath reports whether a dirty file is planr's own scratch output.
+// Drafts and checkouts survive their apply command, so without this they show
+// up as "uncommitted source changes" and force the author to commit planr's
 // own scratch output or reach for --force.
 func isPlanDraftPath(repoRoot, relativePath string) bool {
+	clean := filepath.ToSlash(filepath.Clean(relativePath))
+	if clean == ".planr" || strings.HasPrefix(clean, ".planr/") {
+		return true
+	}
 	if !strings.EqualFold(filepath.Ext(relativePath), ".md") {
 		return false
 	}
@@ -317,8 +320,14 @@ func isPlanDraftPath(repoRoot, relativePath string) bool {
 	if err != nil {
 		return false
 	}
-	name, ok := front["plan_name"].(string)
-	return ok && name != ""
+	if name, ok := front["plan_name"].(string); ok && name != "" {
+		return true
+	}
+	if value, ok := front["planr_new"].(string); ok && value == "phase" {
+		return true
+	}
+	_, ok := front["planr_edit"]
+	return ok
 }
 
 func isIgnoredPath(relativePath string, patterns []string) bool {
@@ -603,11 +612,11 @@ func findPhaseFile(planRoot string, phaseID int) (string, error) {
 }
 
 func writeFrontmatterFile(path string, front map[string]any, body string) error {
-	header, err := yaml.Marshal(pruneEmptyMeta(front))
+	contents, err := renderFrontmatterDocument(front, body)
 	if err != nil {
 		return fmt.Errorf("encode %s frontmatter: %w", filepath.Base(path), err)
 	}
-	return writeFileAtomically(path, "---\n"+string(header)+"---\n"+body)
+	return writeFileAtomically(path, contents)
 }
 
 // writeFileAtomically rewrites a document that may already be tracked in git,

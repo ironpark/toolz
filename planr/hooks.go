@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -89,12 +90,16 @@ func validateHooks(value hookConfig) error {
 }
 
 func runConfiguredHooks(repoRoot string, settings config, when, event, planDirectory string, phaseID int, status string) error {
+	return runConfiguredHooksTo(repoRoot, settings, when, event, planDirectory, phaseID, status, os.Stdout)
+}
+
+func runConfiguredHooksTo(repoRoot string, settings config, when, event, planDirectory string, phaseID int, status string, outputWriter io.Writer) error {
 	if settings.skipHooks {
 		return nil
 	}
 	for index, command := range settings.Hooks.commands(when, event) {
 		label := fmt.Sprintf("%s %s hook #%d", when, event, index+1)
-		if err := runHook(repoRoot, command, label, event, planDirectory, phaseID, status, settings.Hooks.timeoutDuration()); err != nil {
+		if err := runHookTo(repoRoot, command, label, event, planDirectory, phaseID, status, settings.Hooks.timeoutDuration(), outputWriter); err != nil {
 			return err
 		}
 	}
@@ -113,6 +118,10 @@ func (value hookConfig) timeoutDuration() time.Duration {
 }
 
 func runHook(repoRoot, command, label, event, planDirectory string, phaseID int, status string, timeout time.Duration) error {
+	return runHookTo(repoRoot, command, label, event, planDirectory, phaseID, status, timeout, os.Stdout)
+}
+
+func runHookTo(repoRoot, command, label, event, planDirectory string, phaseID int, status string, timeout time.Duration, outputWriter io.Writer) error {
 	if strings.TrimSpace(command) == "" {
 		return nil
 	}
@@ -141,7 +150,7 @@ func runHook(repoRoot, command, label, event, planDirectory string, phaseID int,
 		return fmt.Errorf("%s failed: %w", label, err)
 	}
 	if text := strings.TrimSpace(string(output)); text != "" {
-		fmt.Printf("%s: %s\n", label, text)
+		_, _ = fmt.Fprintf(outputWriter, "%s: %s\n", label, text)
 	}
 	return nil
 }
