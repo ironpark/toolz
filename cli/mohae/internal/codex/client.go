@@ -61,9 +61,12 @@ type Client struct {
 
 	pending *pendingRequests
 
+	accounts chan AccountUpdate
+
 	mu          sync.Mutex
 	initialized bool
 	threads     map[string]*threadSubscription
+	logins      map[string][]chan *LoginCompletedParams
 }
 
 // New spawns `codex app-server`, performs the initialize/initialized
@@ -97,7 +100,9 @@ func dial(ctx context.Context, opts Options, in io.Reader, out io.Writer, releas
 		logger:  logger,
 		pending: newPendingRequests(),
 		threads: make(map[string]*threadSubscription),
+		logins:  make(map[string][]chan *LoginCompletedParams),
 	}
+	c.accounts = make(chan AccountUpdate, c.eventBuffer())
 	c.tr = newTransport(transportConfig{
 		in:              in,
 		out:             out,
@@ -213,6 +218,11 @@ func routeIDs(params json.RawMessage) (threadID, turnID string) {
 func (c *Client) handleNotification(method string, params json.RawMessage) {
 	if c.opts.OnNotification != nil {
 		c.opts.OnNotification(method, params)
+	}
+	switch method {
+	case MethodLoginCompleted, MethodAccountUpdated:
+		c.routeAccountNotification(method, params)
+		return
 	}
 	// Thread and turn subscribers are registered by the thread and turn APIs
 	// and dispatched from here.

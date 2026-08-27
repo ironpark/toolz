@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T20:35:52Z"
 depends_on:
 - "00-internal-codex#4"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: A scripted turn requiring command approval completes when the handler
 > NEXT: none

@@ -2,7 +2,7 @@
 depends_on:
 - "00-internal-codex#2"
 perf_phase: false
-status: planned
+status: in-progress
 ---
 > DONE-WHEN: All auth methods have wire-shape + decode tests; AwaitLogin ignores
 > NEXT: none
