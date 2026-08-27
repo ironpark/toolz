@@ -1,0 +1,192 @@
+package main
+
+import (
+	"context"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+)
+
+// pressureConfig returns a config whose watermark is low enough that any
+// sample the relay takes crosses it.
+func pressureConfig(watermark int) Config {
+	config := DefaultConfig()
+	config.MemoryWatermarkBytes = watermark
+	return config
+}
+
+func TestMemoryPressureEngagesAtWatermarkAndClosesAdmission(t *testing.T) {
+	relay := NewRelay(pressureConfig(1_000))
+	server := httptestServerForRelay(t, relay)
+	if status, _, _ := getResponse(t, server.URL+"/ready"); status != http.StatusOK {
+		t.Fatalf("readiness before pressure=%d, want 200", status)
+	}
+
+	relay.sampleMemoryPressure(1_000)
+
+	if !relay.memoryPressure.Load() {
+		t.Fatal("reaching the watermark did not engage memory pressure")
+	}
+	if status, _, _ := getResponse(t, server.URL+"/ready"); status != http.StatusServiceUnavailable {
+		t.Fatalf("readiness under pressure=%d, want 503", status)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), relayTestTimeout)
+	defer cancel()
+	conn, response, err := websocket.Dial(ctx, relayWebSocketURL(server, "pressure-admission", RoleServer, 1, ""), nil)
+	if conn != nil {
+		_ = conn.CloseNow()
+		t.Fatal("relay admitted a connection while under memory pressure")
+	}
+	if err == nil || response == nil || response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("admission under pressure response=%v err=%v", response, err)
+	}
+	_ = response.Body.Close()
+}
+
+func TestMemoryPressureShedsAttachedPeersAndBuffers(t *testing.T) {
+	relay := NewRelay(pressureConfig(1_000))
+	server := httptestServerForRelay(t, relay)
+	conn := dialRelay(t, server, "pressure-shed", RoleServer, 1, "")
+	defer conn.CloseNow()
+	eventually(t, relayTestTimeout, func() bool { return relay.activeWebSockets.Load() == 1 })
+
+	relay.sampleMemoryPressure(1_000)
+
+	code, reason, err := scenarioReadClose(conn)
+	if err != nil {
+		t.Fatalf("read shed close: %v", err)
+	}
+	if code != websocket.StatusTryAgainLater || reason != "Relay memory pressure" {
+		t.Fatalf("shed close=%d %q, want 1013 \"Relay memory pressure\"", code, reason)
+	}
+	if got := relay.memoryPressureDisconnects.Load(); got != 1 {
+		t.Fatalf("memory pressure disconnects=%d, want 1", got)
+	}
+	if reserved := relay.ingressReserved.Load(); reserved != 0 {
+		t.Fatalf("ingress reserved after shed=%d, want 0", reserved)
+	}
+}
+
+func TestMemoryPressureShedsOnlyOncePerCrossing(t *testing.T) {
+	relay := NewRelay(pressureConfig(1_000))
+	server := httptestServerForRelay(t, relay)
+	conn := dialRelay(t, server, "pressure-once", RoleServer, 1, "")
+	defer conn.CloseNow()
+	eventually(t, relayTestTimeout, func() bool { return relay.activeWebSockets.Load() == 1 })
+
+	relay.sampleMemoryPressure(2_000)
+	relay.sampleMemoryPressure(3_000)
+	relay.sampleMemoryPressure(4_000)
+
+	if got := relay.memoryPressureDisconnects.Load(); got != 1 {
+		t.Fatalf("disconnects across three samples above the watermark=%d, want 1", got)
+	}
+}
+
+func TestMemoryPressureHoldsUntilUsageFallsBelowReleaseThreshold(t *testing.T) {
+	relay := NewRelay(pressureConfig(1_000))
+	relay.sampleMemoryPressure(1_000)
+
+	// Just under the watermark is not enough; hysteresis keeps pressure on so a
+	// heap sitting at the line cannot flap admission.
+	relay.sampleMemoryPressure(950)
+	if !relay.memoryPressure.Load() {
+		t.Fatal("pressure released at 95% of the watermark, want it held")
+	}
+
+	relay.sampleMemoryPressure(800)
+	if relay.memoryPressure.Load() {
+		t.Fatal("pressure did not release at 80% of the watermark")
+	}
+}
+
+func TestMemoryPressureReadmitsAfterRelief(t *testing.T) {
+	relay := NewRelay(pressureConfig(1_000))
+	server := httptestServerForRelay(t, relay)
+	relay.sampleMemoryPressure(1_000)
+	relay.sampleMemoryPressure(0)
+
+	conn := dialRelay(t, server, "pressure-relief", RoleServer, 1, "")
+	_ = conn.CloseNow()
+	if status, _, _ := getResponse(t, server.URL+"/ready"); status != http.StatusOK {
+		t.Fatalf("readiness after relief=%d, want 200", status)
+	}
+}
+
+func TestMemoryPressureDisabledByZeroWatermark(t *testing.T) {
+	relay := NewRelay(pressureConfig(0))
+	server := httptestServerForRelay(t, relay)
+	conn := dialRelay(t, server, "pressure-disabled", RoleServer, 1, "")
+	defer conn.CloseNow()
+
+	relay.sampleMemoryPressure(1 << 62)
+
+	if relay.memoryPressure.Load() {
+		t.Fatal("a zero watermark engaged memory pressure")
+	}
+	if status, _, _ := getResponse(t, server.URL+"/ready"); status != http.StatusOK {
+		t.Fatalf("readiness with pressure disabled=%d, want 200", status)
+	}
+	if stop := relay.watchMemoryPressure(); stop != nil {
+		stop()
+	}
+}
+
+// TestMemoryPressureSamplerRunsFromStart covers the wiring the unit cases skip:
+// the sampler goroutine reading real memory use against the watermark.
+func TestMemoryPressureSamplerRunsFromStart(t *testing.T) {
+	relay := NewRelay(pressureConfig(1))
+	stop := relay.watchMemoryPressure()
+	defer stop()
+
+	if !waitScenario(relay.memoryPressure.Load, 2*time.Second) {
+		t.Fatal("sampler did not engage pressure against a 1-byte watermark")
+	}
+}
+
+func TestHeapInUseReportsNonZero(t *testing.T) {
+	if heapInUse() == 0 {
+		t.Fatal("heapInUse reported no memory held by the runtime")
+	}
+}
+
+// TestMemoryPressureReleasesBufferedFrames covers the part of shedding that
+// actually frees memory: queued frames awaiting a data route.
+func TestMemoryPressureReleasesBufferedFrames(t *testing.T) {
+	config := pressureConfig(1_000)
+	config.DataAttachTimeoutMS = 10_000
+	relay := NewRelay(config)
+	server := httptestServerForRelay(t, relay)
+	serverID := "pressure-buffer"
+
+	control := dialRelay(t, server, serverID, RoleServer, 2, "")
+	defer control.CloseNow()
+	client := dialRelay(t, server, serverID, RoleClient, 2, "buffered")
+	defer client.CloseNow()
+
+	ctx, cancel := context.WithTimeout(context.Background(), relayTestTimeout)
+	defer cancel()
+	if err := client.Write(ctx, websocket.MessageBinary, []byte("queued-while-detached")); err != nil {
+		t.Fatalf("write buffered frame: %v", err)
+	}
+	if !waitScenario(func() bool { return relay.ingressReserved.Load() > 0 }, relayTestTimeout) {
+		t.Fatal("frame was not buffered")
+	}
+
+	relay.sampleMemoryPressure(1_000)
+
+	if !waitScenario(func() bool { return relay.ingressReserved.Load() == 0 }, relayTestTimeout) {
+		t.Fatalf("buffered bytes not released by shedding: %d", relay.ingressReserved.Load())
+	}
+	// Shedding closes every peer, so the emptied session is reclaimed too.
+	if !waitScenario(func() bool { return !relayHasSession(relay, serverID) }, relayTestTimeout) {
+		relay.mu.Lock()
+		buffered := len(relay.sessions[serverID].buffer)
+		relay.mu.Unlock()
+		if buffered != 0 {
+			t.Fatalf("buffered frames after shedding=%d, want 0", buffered)
+		}
+	}
+}

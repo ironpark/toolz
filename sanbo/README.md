@@ -119,6 +119,38 @@ v2 client에서 `connectionId`를 생략하면 relay가 `conn_` 접두사의 ID�
 | `RELEASE_NODE` | 빈 값 | 분산 노드 식별자 호환 설정 |
 | `RELEASE_COOKIE` | 빈 값 | 분산 노드 인증 cookie 호환 설정 |
 
+### 메모리 pressure
+
+`PASEO_RELAY_MEMORY_WATERMARK_BYTES`가 설정되면 relay는 250ms마다 Go 런타임이
+OS로부터 확보한 메모리(`runtime/metrics`의 `총 메모리 - 반환된 heap`)를
+샘플링합니다. watermark에 도달하면
+
+- `/ready`와 WebSocket admission이 닫히고,
+- 버퍼링된 프레임을 모두 폐기하고 예약된 ingress를 반환하며,
+- 연결된 모든 peer를 `1013 Relay memory pressure`로 종료한 뒤
+  (`paseo_relay_memory_pressure_disconnects_total` 증가) `runtime.GC()`를 호출합니다.
+
+Shedding은 watermark를 넘는 순간 한 번만 수행됩니다. 사용량이 watermark의 90%
+아래로 내려가야 pressure가 해제되므로, 경계에 머무는 heap이 admission을
+반복적으로 여닫지 않습니다. Ownership reroute는 pressure보다 우선하므로 다른
+노드가 소유한 세션은 pressure 중에도 `409`로 안내됩니다.
+
+### Capacity 조정
+
+`PASEO_RELAY_CAPACITY_MUTATION_TIMEOUT_MS` 주기마다 relay는 ingress 원장을 실제
+상태와 대조합니다. 예약된 바이트는 항상 (세션 버퍼에 쌓인 바이트 + 라우팅
+진행 중인 바이트)와 일치해야 하며, 예약이 이를 초과하면 유실된 예약으로
+간주합니다. 이 경우
+
+- admission을 닫고 (`capacity_unavailable`),
+- capacity epoch을 증가시키고,
+- 초과분을 예산에 반환한 뒤 admission을 다시 엽니다.
+
+진행 중인 예약은 `reserveIngress`가 예약보다 먼저 등록하고 반환보다 나중에
+해제하므로, 조정 시점의 스냅샷은 항상 과다 계상 방향으로만 어긋납니다. 즉
+정상적으로 라우팅 중인 프레임이 유실로 오인되어 회수되는 일은 없습니다.
+이 값은 "불일치가 정정되기까지 허용되는 최대 시간"으로 읽으면 됩니다.
+
 설정은 시작 시 검증됩니다. 특히 다음 조건을 만족해야 합니다.
 
 - `PASEO_RELAY_DELIVERY_TIMEOUT_MS`는 transport send timeout보다 작아야 합니다.

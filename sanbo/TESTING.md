@@ -43,6 +43,16 @@ coverage for readiness at capacity, the complete metrics surface, session and
 buffer cleanup, handshake role boundaries, data-attach expiry, ingress budget
 enforcement, rejection accounting, and the control read limit.
 
+`memory_pressure_test.go` drives the watermark sampler itself: watermark
+crossing, admission closure, peer and buffer shedding with the `1013` close
+code, once-per-crossing shedding, hysteresis on release, and readmission after
+relief.
+
+`capacity_reconcile_test.go` covers the ingress ledger reconciler: orphaned
+reservations reclaimed with a capacity-epoch bump, in-flight and buffered
+reservations left untouched, ledgers balancing after ordinary routing, and the
+reconciler goroutine running on its configured interval.
+
 Internal scheduler, process-death, memory-pressure, multi-node, and load cases
 enter through a same-package scenario boundary. Every scenario opens real
 HTTP/WebSocket connections or mutates an actual production capacity/ownership

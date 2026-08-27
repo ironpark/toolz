@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"runtime/metrics"
 	"sort"
 	"strconv"
 
@@ -37,6 +38,7 @@ type Relay struct {
 	connectionRejections      atomic.Int64
 	rerouteResponses          atomic.Int64
 	ingressReserved           atomic.Int64
+	ingressInFlight           atomic.Int64
 	inflightDelivery          atomic.Int64
 	backpressuredSources      atomic.Int64
 	slowConsumerDisconnects   atomic.Int64
@@ -112,7 +114,11 @@ func (r *Relay) Start() error {
 	r.serverMu.Unlock()
 
 	stopWatching := r.watchOwnership()
+	stopSampling := r.watchMemoryPressure()
+	stopReconciling := r.watchCapacity()
 	err = server.Serve(listener)
+	stopReconciling()
+	stopSampling()
 	stopWatching()
 	r.closeCoordinator()
 	if errors.Is(err, http.ErrServerClosed) {
@@ -325,6 +331,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 			delete(s.bufferTimers, connection.ConnectionID)
 		}
 		control := s.control
+		r.ingressReserved.Add(-bufferedBytes)
 		r.mu.Unlock()
 		if old != nil {
 			_ = old.conn.Close(websocket.StatusPolicyViolation, "Replaced by new connection")
@@ -332,7 +339,6 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		for _, m := range buffered {
 			_ = r.forward(peer, m.typ, m.payload)
 		}
-		r.ingressReserved.Add(-bufferedBytes)
 		r.syncControl(s, control)
 	}
 	defer func() { r.removePeer(connection, peer) }()
@@ -545,6 +551,7 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 		if dst = s.data[c.ConnectionID]; dst == nil {
 			s.buffer[c.ConnectionID] = append(s.buffer[c.ConnectionID], relayMessage{typ: typ, payload: append([]byte(nil), b...)})
 			s.bufferBytes[c.ConnectionID] += weighted
+			r.ingressInFlight.Add(-weighted)
 			if s.bufferTimers[c.ConnectionID] == nil {
 				s.bufferTimers[c.ConnectionID] = time.AfterFunc(time.Duration(r.Config.DataAttachTimeoutMS)*time.Millisecond, func() {
 					r.expireDataRoute(c.ServerID, c.ConnectionID, source)
@@ -559,17 +566,32 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 		if err := r.forward(dst, typ, b); err != nil {
 			_ = source.conn.Close(websocket.StatusTryAgainLater, "Delivery unavailable")
 		}
-		r.ingressReserved.Add(-weighted)
+		r.releaseInFlight(weighted)
 	} else if !(c.Version == 2 && c.Role == RoleClient) {
-		r.ingressReserved.Add(-weighted)
+		r.releaseInFlight(weighted)
 	}
 }
 
+// reserveIngress takes a routing reservation. The in-flight share is published
+// before the reservation itself and retired after it, so a capacity snapshot
+// taken mid-route always over-accounts rather than under-accounts and can never
+// mistake a live route for a leak.
 func (r *Relay) reserveIngress(bytes int64) bool {
 	if bytes < 0 {
 		return false
 	}
-	return reserveCounter(&r.ingressReserved, bytes, int64(r.Config.IngressBudgetBytes))
+	r.ingressInFlight.Add(bytes)
+	if reserveCounter(&r.ingressReserved, bytes, int64(r.Config.IngressBudgetBytes)) {
+		return true
+	}
+	r.ingressInFlight.Add(-bytes)
+	return false
+}
+
+// releaseInFlight retires a reservation that never became a buffered frame.
+func (r *Relay) releaseInFlight(bytes int64) {
+	r.ingressReserved.Add(-bytes)
+	r.ingressInFlight.Add(-bytes)
 }
 
 func (r *Relay) expireDataRoute(serverID, connectionID string, source *relayPeer) {
@@ -579,12 +601,11 @@ func (r *Relay) expireDataRoute(serverID, connectionID string, source *relayPeer
 		r.mu.Unlock()
 		return
 	}
-	bytes := s.bufferBytes[connectionID]
 	delete(s.buffer, connectionID)
+	r.ingressReserved.Add(-s.bufferBytes[connectionID])
 	delete(s.bufferBytes, connectionID)
 	delete(s.bufferTimers, connectionID)
 	r.mu.Unlock()
-	r.ingressReserved.Add(-bytes)
 	_ = source.conn.Close(websocket.StatusTryAgainLater, "Data route unavailable")
 }
 
@@ -651,6 +672,157 @@ func (r *Relay) ready() bool {
 func (r *Relay) readyForAdmission() bool {
 	members, err := r.ownership.members()
 	return err == nil && !r.Config.Drain && members >= r.Config.MinimumClusterSize && !r.capacityUnavailable.Load() && !r.memoryPressure.Load()
+}
+
+// watchCapacity reconciles the ingress ledger against live state. The interval
+// is PASEO_RELAY_CAPACITY_MUTATION_TIMEOUT_MS: the longest an inconsistency may
+// persist before admission is closed and the ledger corrected.
+func (r *Relay) watchCapacity() func() {
+	interval := time.Duration(r.Config.CapacityMutationTimeoutMS) * time.Millisecond
+	if interval <= 0 {
+		return func() {}
+	}
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				r.reconcileCapacity()
+			case <-stop:
+				return
+			}
+		}
+	}()
+	return func() { close(stop); <-done }
+}
+
+// reconcileCapacity releases ingress reservations that no live route or buffer
+// accounts for. Without it a reservation orphaned by an unusual teardown is
+// held until restart, shrinking the effective budget for good.
+func (r *Relay) reconcileCapacity() {
+	r.mu.Lock()
+	accounted := r.ingressInFlight.Load()
+	for _, session := range r.sessions {
+		for _, bytes := range session.bufferBytes {
+			accounted += bytes
+		}
+	}
+	r.mu.Unlock()
+
+	leaked := r.ingressReserved.Load() - accounted
+	if leaked <= 0 {
+		return
+	}
+	// Admission stays shut across the correction so no upgrade reserves against
+	// a budget that is mid-mutation.
+	r.capacityUnavailable.Store(true)
+	r.capacityEpoch.Add(1)
+	r.ingressReserved.Add(-leaked)
+	r.capacityUnavailable.Store(false)
+}
+
+const (
+	memoryPressureInterval = 250 * time.Millisecond
+	// Pressure clears only once usage falls this far below the watermark, so a
+	// heap hovering at the line does not flap admission open and shut.
+	memoryPressureReleaseRatio = 0.9
+)
+
+// heapInUse reports the memory the Go runtime currently holds from the OS. It
+// reads runtime/metrics rather than runtime.ReadMemStats because the sampler
+// runs continuously and ReadMemStats stops the world.
+func heapInUse() uint64 {
+	samples := []metrics.Sample{
+		{Name: "/memory/classes/total:bytes"},
+		{Name: "/memory/classes/heap/released:bytes"},
+	}
+	metrics.Read(samples)
+	total, released := samples[0].Value.Uint64(), samples[1].Value.Uint64()
+	if released > total {
+		return 0
+	}
+	return total - released
+}
+
+// watchMemoryPressure samples memory use against the configured watermark and
+// returns a function that stops the sampler. A zero watermark disables it.
+func (r *Relay) watchMemoryPressure() func() {
+	if r.Config.MemoryWatermarkBytes <= 0 {
+		return func() {}
+	}
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(memoryPressureInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				r.sampleMemoryPressure(heapInUse())
+			case <-stop:
+				return
+			}
+		}
+	}()
+	return func() { close(stop); <-done }
+}
+
+// sampleMemoryPressure applies one reading. Crossing the watermark closes
+// admission and sheds attached traffic once; usage must fall back below the
+// release threshold before admission reopens.
+func (r *Relay) sampleMemoryPressure(inUse uint64) {
+	if r.Config.MemoryWatermarkBytes <= 0 {
+		return
+	}
+	watermark := uint64(r.Config.MemoryWatermarkBytes)
+	if r.memoryPressure.Load() {
+		if inUse < uint64(float64(watermark)*memoryPressureReleaseRatio) {
+			r.memoryPressure.Store(false)
+		}
+		return
+	}
+	if inUse < watermark {
+		return
+	}
+	// Only the goroutine that wins the transition sheds, so a shed storm cannot
+	// be triggered twice for one crossing.
+	if !r.memoryPressure.CompareAndSwap(false, true) {
+		return
+	}
+	r.shedForMemoryPressure()
+}
+
+// shedForMemoryPressure drops every buffered frame and closes every attached
+// peer, then returns the freed memory to the runtime so the next sample can
+// observe the relief.
+func (r *Relay) shedForMemoryPressure() {
+	r.mu.Lock()
+	peers := make([]*relayPeer, 0, len(r.sessions))
+	released := int64(0)
+	for _, session := range r.sessions {
+		peers = append(peers, sessionPeers(session)...)
+		for connectionID, timer := range session.bufferTimers {
+			timer.Stop()
+			delete(session.bufferTimers, connectionID)
+		}
+		for connectionID, bytes := range session.bufferBytes {
+			released += bytes
+			delete(session.buffer, connectionID)
+			delete(session.bufferBytes, connectionID)
+		}
+	}
+	r.ingressReserved.Add(-released)
+	r.mu.Unlock()
+
+	for _, peer := range peers {
+		_ = peer.conn.Close(websocket.StatusTryAgainLater, "Relay memory pressure")
+	}
+	r.memoryPressureDisconnects.Add(int64(len(peers)))
+	// Without this the shed memory stays uncollected and pressure never clears.
+	runtime.GC()
 }
 
 // watchOwnership starts the cluster reconciler and returns a function that
