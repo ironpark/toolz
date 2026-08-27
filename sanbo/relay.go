@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"runtime"
@@ -169,11 +170,6 @@ type relayDataWaitResult struct {
 	destination *relayPeer
 	code        websocket.StatusCode
 	reason      string
-}
-
-type relayDataWaitResultWithWaiter struct {
-	waiter *relayDataWaiter
-	result relayDataWaitResult
 }
 
 // NewRelay constructs a relay with validated runtime configuration. A cluster
@@ -449,10 +445,7 @@ func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connec
 		return Connection{}, nil, nil, false
 	}
 	if reason := r.capacityAdmissionReason(); reason != "" {
-		if reason == "Relay connection capacity" || reason == "Relay memory pressure" {
-			r.connectionRejections.Add(1)
-		}
-		writeText(writer, http.StatusServiceUnavailable, reason)
+		r.rejectCapacity(writer, reason)
 		return Connection{}, nil, nil, false
 	}
 	if r.sessionOwnerClosed(connection.ServerID) {
@@ -494,10 +487,7 @@ func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connec
 		if reason == "" {
 			reason = "Relay connection capacity"
 		}
-		if reason == "Relay connection capacity" || reason == "Relay memory pressure" {
-			r.connectionRejections.Add(1)
-		}
-		writeText(writer, http.StatusServiceUnavailable, reason)
+		r.rejectCapacity(writer, reason)
 		return Connection{}, nil, nil, false
 	}
 	reserved = true
@@ -554,23 +544,22 @@ func (r *Relay) attach(connection Connection, conn *websocket.Conn) *relayPeer {
 	r.mu.Lock()
 	peer.attachSeq.Store(r.nextSeq())
 	s := r.sessions[connection.ServerID]
-	if s == nil && r.moved[connection.ServerID] {
+	refusal := ""
+	switch {
+	case s != nil && s.ownerClosed.Load():
+		refusal = "Session owner moved"
+	case r.moved[connection.ServerID]:
+		refusal = "Session expired"
+	}
+	if refusal != "" {
 		r.mu.Unlock()
-		_ = conn.Close(websocket.StatusServiceRestart, "Session expired")
+		_ = conn.Close(websocket.StatusServiceRestart, refusal)
 		return nil
 	}
 	if s == nil {
 		s = newRelaySession()
 		r.sessions[connection.ServerID] = s
 		r.ownerSessions.Store(connection.ServerID, s)
-	} else if s.ownerClosed.Load() {
-		r.mu.Unlock()
-		_ = conn.Close(websocket.StatusServiceRestart, "Session owner moved")
-		return nil
-	} else if r.moved[connection.ServerID] {
-		r.mu.Unlock()
-		_ = conn.Close(websocket.StatusServiceRestart, "Session expired")
-		return nil
 	}
 	switch connection.kind() {
 	case peerV1Server, peerV1Client:
@@ -613,9 +602,7 @@ func (r *Relay) attach(connection Connection, conn *websocket.Conn) *relayPeer {
 		s.publishPeersLocked()
 		r.mu.Unlock()
 		closeReplaced(replaced)
-		for _, waiter := range waiting {
-			waiter.ready <- relayDataWaitResult{destination: peer}
-		}
+		notifyDataWaiters(waiting, relayDataWaitResult{destination: peer})
 	}
 	return peer
 }
@@ -733,9 +720,15 @@ func (r *Relay) armControlWatchdogLocked(s *relaySession, control *relayPeer) {
 	})
 }
 
+// deliveryDeadline is the absolute delivery budget PASEO_RELAY_DELIVERY_TIMEOUT_MS
+// grants a message admitted now.
+func (r *Relay) deliveryDeadline() time.Time {
+	return time.Now().Add(time.Duration(r.Config.DeliveryTimeoutMS) * time.Millisecond)
+}
+
 // deliveryContext bounds one write by PASEO_RELAY_DELIVERY_TIMEOUT_MS.
 func (r *Relay) deliveryContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), time.Duration(r.Config.DeliveryTimeoutMS)*time.Millisecond)
+	return context.WithDeadline(context.Background(), r.deliveryDeadline())
 }
 
 // dropSlowConsumer retires a destination that could not keep up. timedOut
@@ -747,10 +740,6 @@ func (r *Relay) dropSlowConsumer(p *relayPeer, timedOut bool) {
 	}
 	r.slowConsumerDisconnects.Add(1)
 	closeAsync(p.conn, websocket.StatusTryAgainLater, "Slow consumer")
-}
-
-func (r *Relay) send(p *relayPeer, typ websocket.MessageType, b []byte) error {
-	return r.sendUntil(p, typ, b, time.Now().Add(time.Duration(r.Config.DeliveryTimeoutMS)*time.Millisecond))
 }
 
 // sendUntil performs one destination write against an absolute delivery
@@ -860,7 +849,7 @@ func (r *Relay) writeControl(p *relayPeer, b []byte) error {
 }
 
 func (r *Relay) forward(p *relayPeer, typ websocket.MessageType, b []byte) error {
-	return r.forwardUntil(p, typ, b, time.Now().Add(time.Duration(r.Config.DeliveryTimeoutMS)*time.Millisecond))
+	return r.forwardUntil(p, typ, b, r.deliveryDeadline())
 }
 
 func (r *Relay) forwardUntil(p *relayPeer, typ websocket.MessageType, b []byte, deadline time.Time) error {
@@ -951,11 +940,7 @@ func (r *Relay) finishTimedOutSession(serverID string, session *relaySession) {
 		return
 	}
 	r.moved[serverID] = true
-	var waiting []*relayDataWaiter
-	for connectionID, routeWaiters := range session.waiting {
-		waiting = append(waiting, routeWaiters...)
-		delete(session.waiting, connectionID)
-	}
+	waiting := drainWaitersLocked(session)
 	peers := session.peerSnapshot()
 	r.mu.Unlock()
 
@@ -970,11 +955,7 @@ func (r *Relay) finishTimedOutSession(serverID string, session *relaySession) {
 
 	r.mu.Lock()
 	if r.sessions[serverID] == session {
-		delete(r.sessions, serverID)
-		if value, ok := r.ownerSessions.Load(serverID); ok && value == session {
-			r.ownerSessions.Delete(serverID)
-		}
-		delete(r.moved, serverID)
+		r.dropSessionLocked(serverID, session)
 	}
 	r.mu.Unlock()
 }
@@ -1118,7 +1099,7 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 	// longest-blocked source first.
 	source.blockSeq.Store(r.nextSeq())
 	defer source.blockSeq.Store(0)
-	deadline := time.Now().Add(time.Duration(r.Config.DeliveryTimeoutMS) * time.Millisecond)
+	deadline := r.deliveryDeadline()
 	ownerResult := r.ownerDestinations(c, source, deadline)
 	if ownerResult.code != 0 {
 		closeAsync(source.conn, ownerResult.code, ownerResult.reason)
@@ -1153,11 +1134,6 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 	}
 }
 
-// dataDestinationOrWait returns the data peer immediately when attached, or
-// registers one waiter for this source and blocks until that peer attaches. The
-// timeout is the earlier of the remaining delivery deadline and the configured
-// data-attach timeout, so waiting cannot grant the subsequent write a fresh
-// delivery budget.
 type ownerDestinationsResult struct {
 	destinations []*relayPeer
 	code         websocket.StatusCode
@@ -1239,6 +1215,11 @@ func (r *Relay) ownerDestinationsCall(c Connection, source *relayPeer, deadline 
 	return ownerDestinationsResult{destinations: destinations}
 }
 
+// dataDestinationOrWait returns the data peer immediately when attached, or
+// registers one waiter for this source and blocks until that peer attaches. The
+// timeout is the earlier of the remaining delivery deadline and the configured
+// data-attach timeout, so waiting cannot grant the subsequent write a fresh
+// delivery budget.
 func (r *Relay) dataDestinationOrWait(s *relaySession, connectionID string, source *relayPeer, deadline time.Time) (*relayPeer, websocket.StatusCode, string) {
 	now := time.Now()
 	attachDeadline := now.Add(time.Duration(r.Config.DataAttachTimeoutMS) * time.Millisecond)
@@ -1317,6 +1298,17 @@ func notifyDataWaiters(waiters []*relayDataWaiter, result relayDataWaitResult) {
 	for _, waiter := range waiters {
 		waiter.ready <- result
 	}
+}
+
+// drainWaitersLocked empties every route's attach waiters so the caller can
+// notify them after releasing Relay.mu.
+func drainWaitersLocked(s *relaySession) []*relayDataWaiter {
+	var waiting []*relayDataWaiter
+	for connectionID, routeWaiters := range s.waiting {
+		waiting = append(waiting, routeWaiters...)
+		delete(s.waiting, connectionID)
+	}
+	return waiting
 }
 
 // reserveIngress takes a routing reservation. The in-flight share is published
@@ -1430,13 +1422,19 @@ func (r *Relay) reclaimSessionLocked(serverID string, s *relaySession) {
 		return
 	}
 	if s.v1 == nil && s.v1Client == nil && s.control == nil && len(s.clients) == 0 && len(s.data) == 0 && len(s.waiting) == 0 {
-		delete(r.sessions, serverID)
-		if value, ok := r.ownerSessions.Load(serverID); ok && value == s {
-			r.ownerSessions.Delete(serverID)
-		}
-		delete(r.moved, serverID)
+		r.dropSessionLocked(serverID, s)
 		_ = r.ownership.release(serverID, r)
 	}
+}
+
+// dropSessionLocked removes every index entry for one session: the session
+// table, the watchdog's owner index, and the moved marker.
+func (r *Relay) dropSessionLocked(serverID string, s *relaySession) {
+	delete(r.sessions, serverID)
+	if value, ok := r.ownerSessions.Load(serverID); ok && value == s {
+		r.ownerSessions.Delete(serverID)
+	}
+	delete(r.moved, serverID)
 }
 
 func (r *Relay) ready() bool {
@@ -1459,18 +1457,27 @@ func (r *Relay) capacityAdmissionReason() string {
 	if r.memoryPressure.Load() {
 		return "Relay memory pressure"
 	}
+	// A mismatch also covers an invalid live limit, so past this check the
+	// limit captured at construction is the live limit.
 	if r.capacityConfigurationMismatch() {
 		return "Relay capacity configuration"
 	}
-	if limit, valid := connectionCapacityLimit(r.Config); !valid {
-		return "Relay capacity configuration"
-	} else if r.activeWebSockets.Load() >= limit {
+	if r.activeWebSockets.Load() >= r.connectionLimit {
 		return "Relay connection capacity"
 	}
 	if r.capacityUnavailable.Load() {
 		return "Relay capacity unavailable"
 	}
 	return ""
+}
+
+// rejectCapacity emits one capacity 503 and counts the bodies the reference
+// counts as connection rejections.
+func (r *Relay) rejectCapacity(writer http.ResponseWriter, reason string) {
+	if reason == "Relay connection capacity" || reason == "Relay memory pressure" {
+		r.connectionRejections.Add(1)
+	}
+	writeText(writer, http.StatusServiceUnavailable, reason)
 }
 
 func (r *Relay) capacityConfigurationMismatch() bool {
@@ -1484,8 +1491,7 @@ func connectionCapacityLimit(config Config) (int64, bool) {
 	}
 	acceptors := int64(config.Acceptors)
 	connections := int64(config.ConnectionsPerAcceptor)
-	maxInt64 := int64(^uint64(0) >> 1)
-	if acceptors > maxInt64/connections {
+	if acceptors > math.MaxInt64/connections {
 		return 0, false
 	}
 	return acceptors * connections, true
@@ -1528,11 +1534,7 @@ func (r *Relay) watchCapacity() func() {
 // unusual teardown is held until restart, shrinking the effective budget for
 // good.
 func (r *Relay) reconcileCapacity() {
-	r.mu.Lock()
-	accounted := r.ingressInFlight.Load()
-	r.mu.Unlock()
-
-	leaked := r.ingressReserved.Load() - accounted
+	leaked := r.ingressReserved.Load() - r.ingressInFlight.Load()
 	if leaked <= 0 {
 		return
 	}
@@ -1702,23 +1704,21 @@ func (r *Relay) shedForMemoryPressure(batch int) {
 	// much work to hold the global lock for four times a second.
 	peers := shedCandidates(attached, batch)
 
+	shedding := make(map[*relayPeer]struct{}, len(peers))
+	for _, peer := range peers {
+		shedding[peer] = struct{}{}
+	}
 	r.mu.Lock()
 	for _, peer := range peers {
 		peer.shed.Store(true)
 	}
-	var waiting []relayDataWaitResultWithWaiter
+	var waiting []*relayDataWaiter
 	for _, session := range r.sessions {
 		for connectionID, waiters := range session.waiting {
 			kept := waiters[:0]
 			for _, waiter := range waiters {
-				if slices.Contains(peers, waiter.source) {
-					waiting = append(waiting, relayDataWaitResultWithWaiter{
-						waiter: waiter,
-						result: relayDataWaitResult{
-							code:   websocket.StatusTryAgainLater,
-							reason: "Relay memory pressure",
-						},
-					})
+				if _, shed := shedding[waiter.source]; shed {
+					waiting = append(waiting, waiter)
 					continue
 				}
 				kept = append(kept, waiter)
@@ -1732,9 +1732,10 @@ func (r *Relay) shedForMemoryPressure(batch int) {
 	}
 	r.mu.Unlock()
 
-	for _, wake := range waiting {
-		wake.waiter.ready <- wake.result
-	}
+	notifyDataWaiters(waiting, relayDataWaitResult{
+		code:   websocket.StatusTryAgainLater,
+		reason: "Relay memory pressure",
+	})
 	for _, peer := range peers {
 		closeAsync(peer.conn, websocket.StatusTryAgainLater, "Relay memory pressure")
 	}
@@ -1784,18 +1785,13 @@ func (r *Relay) closeLostSessions() {
 		var waiting []*relayDataWaiter
 		if session != nil {
 			session.markOwnerClosed()
-			for connectionID, routeWaiters := range session.waiting {
-				waiting = append(waiting, routeWaiters...)
-				delete(session.waiting, connectionID)
-			}
+			waiting = drainWaitersLocked(session)
 		}
 		r.mu.Unlock()
-		for _, waiter := range waiting {
-			waiter.ready <- relayDataWaitResult{
-				code:   websocket.StatusServiceRestart,
-				reason: "Session owner moved",
-			}
-		}
+		notifyDataWaiters(waiting, relayDataWaitResult{
+			code:   websocket.StatusServiceRestart,
+			reason: "Session owner moved",
+		})
 		for _, peer := range peers {
 			_ = peer.conn.Close(websocket.StatusServiceRestart, "Session owner moved")
 		}

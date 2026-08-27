@@ -81,7 +81,7 @@ func TestRelayV2ControlDiscardsBinaryBeforeObservationAndAdmission(t *testing.T)
 	if got := relay.frameBytes.Load(); got != beforeBytes+int64(len(ping)) {
 		t.Fatalf("observed bytes = %d, want %d (only ping)", got, beforeBytes+int64(len(ping)))
 	}
-	wantMax := maxInt64(beforeMax, int64(len(ping)))
+	wantMax := max(beforeMax, int64(len(ping)))
 	if got := relay.maxFrameBytes.Load(); got != wantMax {
 		t.Fatalf("max frame bytes = %d, want %d", got, wantMax)
 	}
@@ -91,13 +91,6 @@ func TestRelayV2ControlDiscardsBinaryBeforeObservationAndAdmission(t *testing.T)
 	if got := relay.framesForwarded.Load(); got != beforeForwarded+1 {
 		t.Fatalf("forwarded frames = %d, want %d (only pong)", got, beforeForwarded+1)
 	}
-}
-
-func maxInt64(left, right int64) int64 {
-	if left > right {
-		return left
-	}
-	return right
 }
 
 func TestRelayV2ClientBlocksOneMessageUntilDataAttaches(t *testing.T) {
