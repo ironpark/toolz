@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="280" viewBox="0 0 960 280" role="img" aria-labelledby="title desc">
+  <title id="title">toolz</title>
+  <desc id="desc">A collection of small, useful command-line tools and agent skills.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7ee787"/>
+      <stop offset="1" stop-color="#58a6ff"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12"/>
+    </filter>
+  </defs>
+
+  <rect width="960" height="280" rx="24" fill="url(#background)"/>
+  <circle cx="775" cy="76" r="88" fill="#238636" opacity=".12" filter="url(#glow)"/>
+  <circle cx="866" cy="214" r="104" fill="#1f6feb" opacity=".12" filter="url(#glow)"/>
+
+  <g transform="translate(62 58)">
+    <rect x="0" y="0" width="164" height="164" rx="38" fill="#161b22" stroke="#30363d" stroke-width="2"/>
+    <path d="M44 55h76M44 82h53M44 109h76" fill="none" stroke="url(#accent)" stroke-width="13" stroke-linecap="round"/>
+    <circle cx="123" cy="82" r="9" fill="#7ee787"/>
+  </g>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="270" y="129" fill="#f0f6fc" font-size="86" font-weight="750" letter-spacing="-4">toolz</text>
+    <text x="276" y="172" fill="#8b949e" font-size="21" font-weight="500" letter-spacing="1.2">SMALL TOOLS, KEPT USEFUL</text>
+
+    <g transform="translate(276 201)" font-size="15" font-weight="600">
+      <rect width="68" height="31" rx="15.5" fill="#238636" opacity=".2"/>
+      <text x="34" y="21" fill="#7ee787" text-anchor="middle">CLI</text>
+      <rect x="78" width="123" height="31" rx="15.5" fill="#1f6feb" opacity=".2"/>
+      <text x="139.5" y="21" fill="#79c0ff" text-anchor="middle">AGENT SKILLS</text>
+      <rect x="211" width="126" height="31" rx="15.5" fill="#8957e5" opacity=".2"/>
+      <text x="274" y="21" fill="#d2a8ff" text-anchor="middle">EXPERIMENTS</text>
+    </g>
+  </g>
+
+  <g fill="none" stroke="#30363d" stroke-width="2">
+    <path d="M711 74h54v54h54v54h54"/>
+  </g>
+  <g fill="#0d1117" stroke-width="3">
+    <circle cx="711" cy="74" r="8" stroke="#7ee787"/>
+    <circle cx="765" cy="128" r="8" stroke="#58a6ff"/>
+    <circle cx="819" cy="182" r="8" stroke="#d2a8ff"/>
+    <circle cx="873" cy="182" r="8" stroke="#f2cc60"/>
+  </g>
+</svg>
