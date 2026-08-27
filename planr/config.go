@@ -10,6 +10,7 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/goccy/go-yaml"
+	"github.com/urfave/cli/v3"
 )
 
 const defaultHookTimeout = 10 * time.Minute
@@ -21,10 +22,19 @@ type config struct {
 	Language  string     `yaml:"language"`
 	Hooks     hookConfig `yaml:"hooks"`
 
+	// skipHooks is set only for the current CLI invocation by --no-hooks. It
+	// never comes from .planr.yaml.
+	skipHooks bool `yaml:"-"`
+
 	// configPath is populated only when a configuration file was found. It is
 	// intentionally not part of the YAML model; the `config` command uses it to
 	// explain which file supplied the effective values.
 	configPath string `yaml:"-"`
+}
+
+func commandConfig(settings config, cmd *cli.Command) config {
+	settings.skipHooks = cmd.Bool("no-hooks")
+	return settings
 }
 
 type hookConfig struct {

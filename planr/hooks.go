@@ -89,6 +89,9 @@ func validateHooks(value hookConfig) error {
 }
 
 func runConfiguredHooks(repoRoot string, settings config, when, event, planDirectory string, phaseID int, status string) error {
+	if settings.skipHooks {
+		return nil
+	}
 	for index, command := range settings.Hooks.commands(when, event) {
 		label := fmt.Sprintf("%s %s hook #%d", when, event, index+1)
 		if err := runHook(repoRoot, command, label, event, planDirectory, phaseID, status, settings.Hooks.timeoutDuration()); err != nil {
