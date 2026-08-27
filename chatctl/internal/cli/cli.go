@@ -42,6 +42,12 @@ func New(version string) *cli.Command {
 					return err
 				},
 			},
+			&cli.StringFlag{
+				Name:    "user-data-dir",
+				Aliases: []string{"d"},
+				Usage:   "기존 Chrome 사용자 데이터 디렉터리를 그대로 사용합니다 (chrome 엔진으로 전환됩니다). 해당 프로필을 쓰는 Chrome 은 먼저 종료해야 합니다",
+				Sources: cli.EnvVars("CHATCTL_USER_DATA_DIR"),
+			},
 			&cli.DurationFlag{
 				Name:  "timeout",
 				Usage: "브라우저 작업 제한 시간",
@@ -82,6 +88,15 @@ func doctorCommand() *cli.Command {
 				fmt.Println("moli:    미설치 (https://github.com/lexmount/moli) — chrome 으로 동작합니다")
 			}
 
+			if dir := cmd.String("user-data-dir"); dir != "" {
+				if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+					return fmt.Errorf("사용자 데이터 디렉터리를 열 수 없습니다: %s", dir)
+				}
+				fmt.Printf("프로필:  기존 Chrome 사용자 데이터 디렉터리 (%s)\n", dir)
+				fmt.Println("쿠키:    Chrome 프로필의 로그인 세션을 그대로 사용합니다")
+				return nil
+			}
+
 			profile := cmd.String("profile")
 			dir, err := browser.ProfileDir(profile)
 			if err != nil {
@@ -94,7 +109,11 @@ func doctorCommand() *cli.Command {
 				return err
 			}
 			if len(cookies) == 0 {
-				fmt.Println("쿠키:    유효한 쿠키 없음 — `chatctl login <서비스>` 로 로그인하세요")
+				if detected, ok := browser.DetectChromeDir(); ok {
+					fmt.Printf("쿠키:    저장된 쿠키 없음 — 자동 탐색된 기존 Chrome 프로필을 사용합니다 (%s)\n", detected)
+				} else {
+					fmt.Println("쿠키:    유효한 쿠키 없음 — `chatctl login <서비스>` 로 로그인하세요")
+				}
 			} else {
 				fmt.Printf("쿠키:    유효 %d개 (%s)\n", len(cookies), session.CookiePath(dir))
 			}
@@ -115,7 +134,8 @@ func loginCommand() *cli.Command {
 			}
 
 			// 로그인은 사람이 직접 입력해야 하므로 창이 필요합니다. 엔진 선택은 browser 가 맡습니다.
-			sess, err := openSession(ctx, cmd, browser.Options{Headless: false})
+			// -d 를 명시하지 않았다면 관리 프로필에 세션을 만들어야 하므로 자동 탐색을 끕니다.
+			sess, err := openSession(ctx, cmd, browser.Options{Headless: false, NoAutoDetect: true})
 			if err != nil {
 				return err
 			}
@@ -126,6 +146,12 @@ func loginCommand() *cli.Command {
 			}
 			fmt.Printf("%s 로그인 창을 열었습니다. 로그인을 마친 뒤 Enter 를 누르세요.\n", p.Name)
 			fmt.Scanln()
+
+			// 기존 Chrome 프로필은 로그인 세션을 스스로 보관하므로 내보낼 필요가 없습니다.
+			if sess.External {
+				fmt.Println("로그인 세션이 Chrome 프로필에 저장되었습니다.")
+				return nil
+			}
 
 			// moli 는 chrome 프로필을 공유하지 못하므로 쿠키를 따로 내보내 둡니다.
 			n, err := session.Save(sess.Ctx, sess.Dir)
@@ -231,6 +257,7 @@ func openSession(ctx context.Context, cmd *cli.Command, opts browser.Options) (*
 	}
 	opts.Engine = engine
 	opts.Profile = cmd.String("profile")
+	opts.UserDataDir = cmd.String("user-data-dir")
 	opts.Timeout = cmd.Duration("timeout")
 	return browser.New(ctx, opts)
 }
