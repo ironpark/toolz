@@ -1,0 +1,5 @@
+language: en
+plans_dirs:
+  - cli/mohae/plan
+ignore:
+  - cli/mohae/plan/.planr.lock
