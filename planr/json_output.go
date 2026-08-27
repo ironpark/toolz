@@ -46,6 +46,49 @@ type notesJSONOutput struct {
 	Notes []noteJSON `json:"notes"`
 }
 
+type showJSONOutput struct {
+	Plan        string   `json:"plan"`
+	Directory   string   `json:"directory"`
+	PhaseNumber int      `json:"phase_number"`
+	Slug        string   `json:"slug"`
+	Title       string   `json:"title"`
+	Status      string   `json:"status"`
+	PlannedWork string   `json:"planned_work"`
+	DoneWhen    string   `json:"done_when"`
+	DependsOn   []string `json:"depends_on"`
+	File        string   `json:"file"`
+}
+
+type configJSONOutput struct {
+	ConfigFile     *string         `json:"config_file"`
+	RepositoryRoot string          `json:"repository_root"`
+	Agent          string          `json:"agent"`
+	Language       string          `json:"language"`
+	PlansDirs      []string        `json:"plans_dirs"`
+	Ignore         []string        `json:"ignore"`
+	Hooks          configHooksJSON `json:"hooks"`
+}
+
+type configHooksJSON struct {
+	Timeout string         `json:"timeout"`
+	Before  []hookRuleJSON `json:"before"`
+	After   []hookRuleJSON `json:"after"`
+}
+
+type hookRuleJSON struct {
+	On  []string `json:"on"`
+	Run string   `json:"run"`
+}
+
+type doctorJSONOutput struct {
+	Issues []doctorIssueJSON `json:"issues"`
+}
+
+type doctorIssueJSON struct {
+	Location string `json:"location"`
+	Message  string `json:"message"`
+}
+
 type noteJSON struct {
 	CompletedAt string `json:"completed_at"`
 	Plan        string `json:"plan"`
@@ -128,4 +171,56 @@ func makeNotesJSON(notes []planNote) notesJSONOutput {
 		})
 	}
 	return notesJSONOutput{Notes: values}
+}
+
+func makeShowJSON(phase phaseDetails) showJSONOutput {
+	return showJSONOutput{
+		Plan:        phase.plan,
+		Directory:   phase.directory,
+		PhaseNumber: phase.id,
+		Slug:        phase.slug,
+		Title:       phase.title,
+		Status:      phase.status,
+		PlannedWork: phase.plannedWork,
+		DoneWhen:    phase.doneWhen,
+		DependsOn:   append([]string{}, phase.dependencies...),
+		File:        phase.file,
+	}
+}
+
+func makeConfigJSON(settings config, root string) configJSONOutput {
+	var configFile *string
+	if settings.configPath != "" {
+		value := settings.configPath
+		configFile = &value
+	}
+	return configJSONOutput{
+		ConfigFile:     configFile,
+		RepositoryRoot: root,
+		Agent:          currentAgentDescription(),
+		Language:       settings.Language,
+		PlansDirs:      append([]string{}, settings.PlansDirs...),
+		Ignore:         append([]string{}, settings.Ignore...),
+		Hooks: configHooksJSON{
+			Timeout: settings.Hooks.timeoutDuration().String(),
+			Before:  makeHookRulesJSON(settings.Hooks.Before),
+			After:   makeHookRulesJSON(settings.Hooks.After),
+		},
+	}
+}
+
+func makeHookRulesJSON(rules []hookRule) []hookRuleJSON {
+	result := make([]hookRuleJSON, 0, len(rules))
+	for _, rule := range rules {
+		result = append(result, hookRuleJSON{On: append([]string{}, rule.On...), Run: rule.Run})
+	}
+	return result
+}
+
+func makeDoctorJSON(issues []doctorIssue) doctorJSONOutput {
+	result := make([]doctorIssueJSON, 0, len(issues))
+	for _, issue := range issues {
+		result = append(result, doctorIssueJSON{Location: issue.location, Message: issue.message})
+	}
+	return doctorJSONOutput{Issues: result}
 }

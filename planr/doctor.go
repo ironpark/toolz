@@ -20,16 +20,29 @@ type doctorIssue struct {
 }
 
 type doctorReporter struct {
-	issues int
+	issues  int
+	records []doctorIssue
+	json    bool
 }
 
 func (r *doctorReporter) add(issue doctorIssue) {
+	r.records = append(r.records, issue)
+	if r.json {
+		r.issues++
+		return
+	}
 	if issue.location == "" {
 		fmt.Printf("FAIL: %s\n", issue.message)
 	} else {
 		fmt.Printf("FAIL %s: %s\n", issue.location, issue.message)
 	}
 	r.issues++
+}
+
+func (r *doctorReporter) printf(format string, values ...any) {
+	if !r.json {
+		fmt.Printf(format, values...)
+	}
 }
 
 type doctorPhase struct {
@@ -76,26 +89,26 @@ func doctorCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	reporter := &doctorReporter{}
+	reporter := &doctorReporter{json: cmd.Bool("json")}
 
 	if err := ensureGitRepository(cwd); err != nil {
 		reporter.add(doctorIssue{location: "git", message: err.Error()})
 	} else {
-		fmt.Printf("PASS git repository: %s\n", location.baseRoot)
+		reporter.printf("PASS git repository: %s\n", location.baseRoot)
 	}
 
-	fmt.Printf("INFO agent: %s\n", currentAgentDescription())
+	reporter.printf("INFO agent: %s\n", currentAgentDescription())
 
 	settings := defaultConfig()
 	if location.path == "" {
-		fmt.Println("INFO config: .planr.yaml not found; using defaults")
+		reporter.printf("INFO config: .planr.yaml not found; using defaults\n")
 	} else {
 		parsed, parseErr := parseConfigFile(location.path)
 		if parseErr != nil {
 			reporter.add(doctorIssue{location: location.path, message: parseErr.Error()})
 		} else {
 			settings = parsed
-			fmt.Printf("PASS config: %s\n", location.path)
+			reporter.printf("PASS config: %s\n", location.path)
 		}
 	}
 
@@ -111,7 +124,7 @@ func doctorCommand(_ context.Context, cmd *cli.Command) error {
 		case !info.IsDir():
 			reporter.add(doctorIssue{location: "plans_dirs", message: fmt.Sprintf("path is not a directory: %s", plans)})
 		default:
-			fmt.Printf("PASS plans_dirs: %s\n", plans)
+			reporter.printf("PASS plans_dirs: %s\n", plans)
 			validDirectories = append(validDirectories, plans)
 		}
 	}
@@ -138,7 +151,7 @@ func doctorCommand(_ context.Context, cmd *cli.Command) error {
 					issues = append(issues, doctorIssue{location: plan.directory + "/PLAN.md", message: fmt.Sprintf("cannot repair checklist: %v", writeErr)})
 					issues = append(issues, plan.checklistIssues...)
 				} else {
-					fmt.Printf("FIXED %s/PLAN.md: synchronized checklist with phases\n", plan.directory)
+					reporter.printf("FIXED %s/PLAN.md: synchronized checklist with phases\n", plan.directory)
 				}
 			} else {
 				issues = append(issues, plan.checklistIssues...)
@@ -164,8 +177,16 @@ func doctorCommand(_ context.Context, cmd *cli.Command) error {
 	}
 
 	if reporter.issues == 0 {
+		if reporter.json {
+			return writeJSON(makeDoctorJSON(reporter.records))
+		}
 		fmt.Println("Doctor found no problems")
 		return nil
+	}
+	if reporter.json {
+		if err := writeJSON(makeDoctorJSON(reporter.records)); err != nil {
+			return err
+		}
 	}
 	return fmt.Errorf("doctor found %d problem(s)", reporter.issues)
 }

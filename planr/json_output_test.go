@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -77,5 +79,64 @@ func TestOverviewAndNotesJSONKeepEmptyArrays(t *testing.T) {
 	}
 	if got := decoded["notes"][0]["short_commit"]; got != "0123456" {
 		t.Fatalf("short_commit = %q", got)
+	}
+}
+
+func TestShowJSONContainsStructuredPhaseContent(t *testing.T) {
+	value, err := json.Marshal(makeShowJSON(phaseDetails{
+		plan: "checkout-v2", directory: "00-checkout-v2", id: 2,
+		slug: "rollout", title: "Gradual Rollout", status: "conditional",
+		plannedWork: "- move traffic", doneWhen: "- metrics are stable",
+		dependencies: []string{"00-checkout-v2#1"},
+		file:         filepath.Join(string(filepath.Separator), "repo", "phases", "02-rollout.md"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(value, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"plan", "directory", "phase_number", "slug", "title", "status", "planned_work", "done_when", "depends_on", "file"} {
+		if _, ok := decoded[key]; !ok {
+			t.Errorf("show JSON missing %q: %s", key, value)
+		}
+	}
+	if got := decoded["planned_work"]; got != "- move traffic" {
+		t.Errorf("planned_work = %#v", got)
+	}
+}
+
+func TestDiagnosticJSONUsesStableStructuredFields(t *testing.T) {
+	config, err := json.Marshal(makeConfigJSON(config{
+		PlansDirs: []string{"plans-active", "plans-archive"},
+		Ignore:    []string{"tmp/**"},
+		Language:  languageKorean,
+		Hooks: hookConfig{
+			Timeout: 5,
+			Before:  []hookRule{{On: []string{hookEventDone}, Run: "go test ./..."}},
+		},
+	}, "/repo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(config), `"plans_dirs":["plans-active","plans-archive"]`) ||
+		!strings.Contains(string(config), `"timeout":"5ns"`) {
+		t.Fatalf("config JSON = %s", config)
+	}
+
+	doctor, err := json.Marshal(makeDoctorJSON([]doctorIssue{{location: "plan/PLAN.md", message: "broken checklist"}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(doctor) != `{"issues":[{"location":"plan/PLAN.md","message":"broken checklist"}]}` {
+		t.Fatalf("doctor JSON = %s", doctor)
+	}
+	empty, err := json.Marshal(makeDoctorJSON(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(empty) != `{"issues":[]}` {
+		t.Fatalf("empty doctor JSON = %s", empty)
 	}
 }

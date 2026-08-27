@@ -298,8 +298,42 @@ func parsePhases(section string) ([]draftPhase, error) {
 // done-when halves. A draft may use the headings of any supported language, not
 // only the configured one, so a plan authored elsewhere still parses here.
 func splitPhaseSections(title, rest string) (string, string, error) {
+	return splitPhaseSectionsWithHeading(title, rest, "### ")
+}
+
+// splitPhaseDocumentSections reads the two prose sections from a registered
+// phase document. Registered documents use level-two headings and include a
+// title and NEXT marker before them; the heading names themselves still come
+// from the language table used by draft parsing.
+func splitPhaseDocumentSections(title, body string) (string, string, error) {
+	start := -1
 	for _, pair := range phaseSectionHeadings() {
-		work, done := "### "+pair[0], "### "+pair[1]
+		candidate := phaseDocumentHeadingOffset(body, "## "+pair[0])
+		if candidate >= 0 && (start < 0 || candidate < start) {
+			start = candidate
+		}
+	}
+	if start >= 0 {
+		return splitPhaseSectionsWithHeading(title, body[start:], "## ")
+	}
+	return splitPhaseSectionsWithHeading(title, strings.TrimSpace(body), "## ")
+}
+
+func phaseDocumentHeadingOffset(body, heading string) int {
+	offset := 0
+	for _, line := range strings.SplitAfter(body, "\n") {
+		value := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+		if value == heading {
+			return offset
+		}
+		offset += len(line)
+	}
+	return -1
+}
+
+func splitPhaseSectionsWithHeading(title, rest, headingPrefix string) (string, string, error) {
+	for _, pair := range phaseSectionHeadings() {
+		work, done := headingPrefix+pair[0], headingPrefix+pair[1]
 		if !strings.HasPrefix(rest, work) {
 			continue
 		}
@@ -311,7 +345,7 @@ func splitPhaseSections(title, rest string) (string, string, error) {
 	}
 	expected := make([]string, 0, len(phaseSectionHeadings()))
 	for _, pair := range phaseSectionHeadings() {
-		expected = append(expected, fmt.Sprintf("### %s / ### %s", pair[0], pair[1]))
+		expected = append(expected, fmt.Sprintf("%s%s / %s%s", headingPrefix, pair[0], headingPrefix, pair[1]))
 	}
 	return "", "", fmt.Errorf("phase %q must contain a planned-work and a done-when section; expected one of: %s",
 		title, strings.Join(expected, " | "))

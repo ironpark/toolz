@@ -21,6 +21,9 @@ func configCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	if cmd.Bool("json") {
+		return writeJSON(makeConfigJSON(settings, root))
+	}
 
 	if settings.configPath == "" {
 		fmt.Println("config_file: none (using defaults)")
