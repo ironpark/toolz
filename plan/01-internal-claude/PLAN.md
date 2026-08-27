@@ -9,7 +9,7 @@ registered_at: "2026-08-27T20:07:58Z"
 
 - [x] [Phase 00: Errors, message types, and options](phases/00-types-options-errors.md)
 - [x] [Phase 01: Message parser](phases/01-message-parser.md)
-- [ ] [Phase 02: Transport interface and subprocess CLI transport](phases/02-subprocess-transport.md)
+- [x] [Phase 02: Transport interface and subprocess CLI transport](phases/02-subprocess-transport.md)
 - [ ] [Phase 03: Control protocol engine](phases/03-control-protocol.md)
 - [ ] [Phase 04: One-shot Query API](phases/04-query-api.md)
 - [ ] [Phase 05: Bidirectional Client API](phases/05-client-api.md)

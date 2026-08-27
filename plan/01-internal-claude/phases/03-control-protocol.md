@@ -3,7 +3,7 @@ depends_on:
 - "01-internal-claude#1"
 - "01-internal-claude#2"
 perf_phase: false
-status: planned
+status: in-progress
 ---
 > DONE-WHEN: Tests with an in-memory fake Transport verify: request/response ID
 > NEXT: none

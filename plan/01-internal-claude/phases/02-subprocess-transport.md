@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T20:20:32Z"
 depends_on:
 - "01-internal-claude#0"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: Unit tests (no real CLI) cover: command-line construction per option, CLI
 > NEXT: none
