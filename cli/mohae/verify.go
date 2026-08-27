@@ -119,13 +119,6 @@ func verifyConfig(cmd *cli.Command, config *Config) []checkResult {
 	if cmd.Bool("check-mcp") {
 		results = append(results, checkResult{statusWarn, "mcp", "--check-mcp is not implemented yet"})
 	}
-	if command := config.TargetCLI.Command; command != "" && config.TargetCLI.Build == "" {
-		if _, err := exec.LookPath(strings.Fields(command)[0]); err != nil {
-			results = append(results, checkResult{statusWarn, "target_cli.command", command + " is not on PATH and no build is configured"})
-		} else {
-			results = append(results, checkResult{statusPass, "target_cli.command", ""})
-		}
-	}
 	return results
 }
 

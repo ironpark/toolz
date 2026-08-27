@@ -183,10 +183,10 @@ func TestRunOverridesReachEveryConfig(t *testing.T) {
 	if config.Agent.Type != "claude-code" {
 		t.Errorf("agent = %q", config.Agent.Type)
 	}
-	if config.Prompt.Text != "inline" || config.Prompt.File != "" {
-		// An override that only added a prompt would leave two of them set and
-		// fail validation for a reason nobody typed.
-		t.Errorf("prompt = %+v", config.Prompt)
+	if len(config.Prompts) != 1 || config.Prompts[0].Text != "inline" || config.Prompts[0].File != "" {
+		// An override that appended instead of replacing would send the
+		// configured prompt too, and measure a conversation nobody typed.
+		t.Errorf("prompts = %+v", config.Prompts)
 	}
 	if config.Limits.TimeoutSeconds != 42 {
 		t.Errorf("timeout = %d", config.Limits.TimeoutSeconds)

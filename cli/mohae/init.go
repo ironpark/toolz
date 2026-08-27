@@ -115,7 +115,7 @@ description: what this trial is meant to measure
 agent:
   type: codex
   model: gpt-5.6-luna
-  reasoning: medium
+  effort: medium
 
 workspace:
   # Copied into an isolated directory before every trial, so a run never
@@ -127,10 +127,17 @@ workspace:
   agent_md: ./AGENTS.md
   git: true
 
-prompt:
-  # Deliberately not placed in the workspace: the agent works from the
-  # conversation, not from a task file it can re-read on disk.
-  file: ./PROMPT.md
+prompts:
+  # The conversation, in order. Deliberately not placed in the workspace: the
+  # agent works from what it was told, not from a task file it can re-read on
+  # disk. More than one entry makes the trial multi-turn.
+  - file: ./PROMPT.md
+  # A follow-up sent only when its condition holds. Conditions are expr
+  # expressions over the conversation so far (turn, previous, responses,
+  # elapsed_seconds, timed_out) and the workspace the agent
+  # worked in (exists, read, sh).
+  - text: The build is broken. Fix it before you stop.
+    when: sh("go build ./...") != 0
 
 verify:
   # Runs outside the workspace once the agent stops, and is never copied in, so
@@ -139,7 +146,6 @@ verify:
 
 limits:
   timeout_seconds: 300
-  max_turns: 30
 
 report:
   dir: .mohae/reports
@@ -153,12 +159,12 @@ mcp:
 `
 	case "cli-skill":
 		return header + `
-target_cli:
-  # Built before the trial so the agent gets the current source rather than
-  # whatever happens to be installed on the machine.
-  command: mytool
-  build: go build -o bin/mytool ./cmd/mytool
-  bin_dir: bin
+# Build and install the CLI under test from init.sh, which runs inside the
+# isolated workspace before the agent starts. Building there rather than
+# relying on the machine means the agent gets the current source:
+#
+#   go build -o "$PWD/bin/mytool" ./cmd/mytool
+#   export PATH="$PWD/bin:$PATH"
 `
 	case "multi-agent":
 		return header + `

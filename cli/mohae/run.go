@@ -9,10 +9,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-const (
-	DefaultTimeoutSeconds = 300
-	DefaultMaxTurns       = 30
-)
+const DefaultTimeoutSeconds = 300
 
 func newRunCommand() *cli.Command {
 	return &cli.Command{
@@ -24,13 +21,17 @@ func newRunCommand() *cli.Command {
 			// invocation only, which is what makes a config reusable across
 			// variants instead of edited between runs.
 			&cli.StringFlag{Name: "agent", Aliases: []string{"a"}, Usage: "override the agent type (claude-code, codex, custom-cli)"},
-			&cli.StringFlag{Name: "prompt", Aliases: []string{"p"}, Usage: "override the opening prompt inline"},
-			&cli.StringFlag{Name: "prompt-file", Aliases: []string{"P"}, Usage: "override the opening prompt with a file"},
+			// Repeatable: the configured conversation is replaced wholesale,
+			// in the order the flags were given. Replacing rather than
+			// appending keeps `--prompt` meaning the same thing whatever the
+			// config happened to contain.
+			&cli.StringSliceFlag{Name: "prompt", Aliases: []string{"p"}, Usage: "replace the conversation with these inline prompts, one turn each (repeatable)"},
+			&cli.StringSliceFlag{Name: "prompt-file", Aliases: []string{"P"}, Usage: "replace the conversation with these prompt files, one turn each (repeatable)"},
+			&cli.StringSliceFlag{Name: "prompt-when", Usage: "expr condition gating the prompt at the same position; use '' to leave one unconditional (repeatable)"},
 			&cli.StringFlag{Name: "agent-md", Usage: "override the AGENTS.md installed in the workspace"},
 			&cli.StringFlag{Name: "init-script", Usage: "override the workspace setup script"},
 			&cli.StringFlag{Name: "verify-script", Usage: "override the script that grades the finished workspace"},
 			&cli.StringFlag{Name: "mcp-config", Aliases: []string{"m"}, Usage: "override the MCP server configuration"},
-			&cli.StringFlag{Name: "target-cli", Usage: "override the CLI under test"},
 
 			&cli.StringFlag{Name: "output", Aliases: []string{"o"}, Value: "terminal", Usage: "report format: terminal, json, markdown, html"},
 			&cli.StringFlag{Name: "report-dir", Value: DefaultReportDir, Usage: "directory to write reports into"},
@@ -39,7 +40,6 @@ func newRunCommand() *cli.Command {
 			&cli.BoolFlag{Name: "web", Usage: "serve the dashboard alongside the run"},
 
 			&cli.IntFlag{Name: "timeout", Aliases: []string{"t"}, Value: DefaultTimeoutSeconds, Usage: "seconds allowed for one trial"},
-			&cli.IntFlag{Name: "max-turns", Value: DefaultMaxTurns, Usage: "maximum conversation turns"},
 			&cli.BoolFlag{Name: "fail-fast", Usage: "stop at the first failed verification or command error"},
 			&cli.IntFlag{Name: "concurrency", Aliases: []string{"c"}, Value: 1, Usage: "trials to run at the same time"},
 		},
@@ -62,7 +62,10 @@ func runAction(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("concurrency must be at least 1")
 	}
 	for _, config := range configs {
-		fmt.Printf("%s  agent=%s workspace=%s\n", config.Name, config.Agent.Type, config.Workspace.Source)
+		fmt.Printf("%s  agent=%s workspace=%s turns=%d\n", config.Name, config.Agent.Type, config.Workspace.Source, len(config.Prompts))
+		for index, prompt := range config.Prompts {
+			fmt.Printf("  %d. %s\n", index+1, prompt.Describe())
+		}
 	}
 	return notImplemented("run")
 }
@@ -70,18 +73,16 @@ func runAction(_ context.Context, cmd *cli.Command) error {
 // applyRunOverrides folds the command line into every selected configuration,
 // so `--prompt` means the same thing whether one config was named or twenty.
 func applyRunOverrides(cmd *cli.Command, configs []*Config) error {
-	if cmd.IsSet("prompt") && cmd.IsSet("prompt-file") {
-		return fmt.Errorf("--prompt and --prompt-file are mutually exclusive")
+	prompts, err := overridePrompts(cmd)
+	if err != nil {
+		return err
 	}
 	for _, config := range configs {
 		if value := cmd.String("agent"); value != "" {
 			config.Agent.Type = value
 		}
-		if cmd.IsSet("prompt") {
-			config.Prompt = PromptConfig{Text: cmd.String("prompt")}
-		}
-		if cmd.IsSet("prompt-file") {
-			config.Prompt = PromptConfig{File: absoluteOverride(cmd.String("prompt-file"))}
+		if prompts != nil {
+			config.Prompts = prompts
 		}
 		if value := cmd.String("agent-md"); value != "" {
 			config.Workspace.AgentMD = absoluteOverride(value)
@@ -95,14 +96,8 @@ func applyRunOverrides(cmd *cli.Command, configs []*Config) error {
 		if value := cmd.String("mcp-config"); value != "" {
 			config.MCP.Config = absoluteOverride(value)
 		}
-		if value := cmd.String("target-cli"); value != "" {
-			config.TargetCLI.Command = value
-		}
 		if cmd.IsSet("timeout") {
 			config.Limits.TimeoutSeconds = cmd.Int("timeout")
-		}
-		if cmd.IsSet("max-turns") {
-			config.Limits.MaxTurns = cmd.Int("max-turns")
 		}
 		if cmd.IsSet("report-dir") {
 			config.Report.Dir = cmd.String("report-dir")
@@ -112,6 +107,38 @@ func applyRunOverrides(cmd *cli.Command, configs []*Config) error {
 		}
 	}
 	return nil
+}
+
+// overridePrompts builds the conversation named on the command line, or nil if
+// none was. --prompt and --prompt-file stay mutually exclusive because a
+// conversation drawn from both would have no defined turn order.
+func overridePrompts(cmd *cli.Command) ([]Prompt, error) {
+	texts, files := cmd.StringSlice("prompt"), cmd.StringSlice("prompt-file")
+	if len(texts) > 0 && len(files) > 0 {
+		return nil, fmt.Errorf("--prompt and --prompt-file are mutually exclusive")
+	}
+	conditions := cmd.StringSlice("prompt-when")
+	count := len(texts) + len(files)
+	if count == 0 {
+		if len(conditions) > 0 {
+			return nil, fmt.Errorf("--prompt-when needs --prompt or --prompt-file to attach to")
+		}
+		return nil, nil
+	}
+	if len(conditions) > count {
+		return nil, fmt.Errorf("%d --prompt-when values for %d prompt(s)", len(conditions), count)
+	}
+	prompts := make([]Prompt, 0, count)
+	for _, text := range texts {
+		prompts = append(prompts, Prompt{Text: text})
+	}
+	for _, file := range files {
+		prompts = append(prompts, Prompt{File: absoluteOverride(file)})
+	}
+	for index, condition := range conditions {
+		prompts[index].When = condition
+	}
+	return prompts, nil
 }
 
 // absoluteOverride pins a command-line path to the working directory before it

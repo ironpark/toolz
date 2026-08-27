@@ -32,12 +32,14 @@ type Config struct {
 
 	Agent     AgentConfig     `yaml:"agent"`
 	Workspace WorkspaceConfig `yaml:"workspace"`
-	Prompt    PromptConfig    `yaml:"prompt"`
-	MCP       MCPConfig       `yaml:"mcp,omitempty"`
-	TargetCLI TargetCLIConfig `yaml:"target_cli,omitempty"`
-	Verify    VerifyConfig    `yaml:"verify,omitempty"`
-	Limits    LimitsConfig    `yaml:"limits,omitempty"`
-	Report    ReportConfig    `yaml:"report,omitempty"`
+	// Prompts is the conversation, in order. More than one makes the trial
+	// multi-turn; each entry may carry a `when` condition, so the same
+	// configuration can describe follow-ups that only some runs need.
+	Prompts []Prompt     `yaml:"prompts"`
+	MCP     MCPConfig    `yaml:"mcp,omitempty"`
+	Verify  VerifyConfig `yaml:"verify,omitempty"`
+	Limits  LimitsConfig `yaml:"limits,omitempty"`
+	Report  ReportConfig `yaml:"report,omitempty"`
 }
 
 // AgentConfig selects the agent under test. `type` names a built-in driver;
@@ -46,7 +48,7 @@ type Config struct {
 type AgentConfig struct {
 	Type      string            `yaml:"type"`
 	Model     string            `yaml:"model,omitempty"`
-	Reasoning string            `yaml:"reasoning,omitempty"`
+	Effort    string            `yaml:"effort,omitempty"`
 	Command   []string          `yaml:"command,omitempty"`
 	Env       map[string]string `yaml:"env,omitempty"`
 }
@@ -64,25 +66,8 @@ type WorkspaceConfig struct {
 	Git     bool   `yaml:"git,omitempty"`
 }
 
-// PromptConfig is the first and only user message. It is deliberately not
-// placed in the workspace: the agent has to work from the conversation, not
-// from a task file it can re-read on disk.
-type PromptConfig struct {
-	Text string `yaml:"text,omitempty"`
-	File string `yaml:"file,omitempty"`
-}
-
 type MCPConfig struct {
 	Config string `yaml:"config,omitempty"`
-}
-
-// TargetCLIConfig is the tool the agent is expected to reach for. Build runs
-// before the trial so the agent gets the current source, not whatever happens
-// to be installed on the machine.
-type TargetCLIConfig struct {
-	Command string `yaml:"command,omitempty"`
-	Build   string `yaml:"build,omitempty"`
-	BinDir  string `yaml:"bin_dir,omitempty"`
 }
 
 // VerifyConfig grades the finished workspace. The script runs outside the
@@ -95,7 +80,6 @@ type VerifyConfig struct {
 
 type LimitsConfig struct {
 	TimeoutSeconds int `yaml:"timeout_seconds,omitempty"`
-	MaxTurns       int `yaml:"max_turns,omitempty"`
 }
 
 type ReportConfig struct {
@@ -142,9 +126,6 @@ func (c *Config) applyDefaults() {
 	if c.Limits.TimeoutSeconds == 0 {
 		c.Limits.TimeoutSeconds = DefaultTimeoutSeconds
 	}
-	if c.Limits.MaxTurns == 0 {
-		c.Limits.MaxTurns = DefaultMaxTurns
-	}
 	if c.Report.Dir == "" {
 		c.Report.Dir = DefaultReportDir
 	}
@@ -169,13 +150,13 @@ func (c *Config) Validate() error {
 	if c.Workspace.Source == "" {
 		return fmt.Errorf("workspace.source is required")
 	}
-	if c.Prompt.Text == "" && c.Prompt.File == "" {
-		return fmt.Errorf("prompt.text or prompt.file is required")
+	if len(c.Prompts) == 0 {
+		return fmt.Errorf("prompts is required and must list at least one prompt")
 	}
-	if c.Prompt.Text != "" && c.Prompt.File != "" {
-		// Silently preferring one would make a trial measure a prompt nobody
-		// meant to send.
-		return fmt.Errorf("prompt.text and prompt.file are mutually exclusive")
+	for index := range c.Prompts {
+		if err := c.Prompts[index].Validate(fmt.Sprintf("prompts[%d]", index)); err != nil {
+			return err
+		}
 	}
 	for _, format := range c.Report.Formats {
 		if !contains(KnownFormats, format) {
@@ -184,9 +165,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Limits.TimeoutSeconds < 0 {
 		return fmt.Errorf("limits.timeout_seconds must not be negative")
-	}
-	if c.Limits.MaxTurns < 0 {
-		return fmt.Errorf("limits.max_turns must not be negative")
 	}
 	return nil
 }
@@ -211,9 +189,11 @@ func (c *Config) ReferencedPaths() []LabeledPath {
 		{"workspace.source", c.Workspace.Source},
 		{"workspace.init_script", c.Workspace.InitScript},
 		{"workspace.agent_md", c.Workspace.AgentMD},
-		{"prompt.file", c.Prompt.File},
 		{"mcp.config", c.MCP.Config},
 		{"verify.script", c.Verify.Script},
+	}
+	for index, prompt := range c.Prompts {
+		candidates = append(candidates, LabeledPath{fmt.Sprintf("prompts[%d].file", index), prompt.File})
 	}
 	paths := make([]LabeledPath, 0, len(candidates))
 	for _, candidate := range candidates {

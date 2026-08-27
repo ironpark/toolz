@@ -10,7 +10,7 @@ import (
 // CompareFields are the things an A/B trial can differ in. `auto` infers the
 // field from what actually differs between the two sides, so the common case
 // needs no flag at all.
-var CompareFields = []string{"auto", "prompt", "agent-md", "agent", "mcp", "config"}
+var CompareFields = []string{"auto", "prompts", "agent-md", "agent", "mcp", "config"}
 
 // CompareMetrics are the numbers a comparison can be decided on.
 var CompareMetrics = []string{"success-rate", "tokens", "cost", "duration"}
@@ -22,7 +22,7 @@ func newCompareCommand() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "a", Usage: "baseline: a configuration path, or a value for the compared field", Required: true},
 			&cli.StringFlag{Name: "b", Usage: "variant: a configuration path, or a value for the compared field", Required: true},
-			&cli.StringFlag{Name: "target", Value: "auto", Usage: "field that differs: auto, prompt, agent-md, agent, mcp, config"},
+			&cli.StringFlag{Name: "target", Value: "auto", Usage: "field that differs: auto, prompts, agent-md, agent, mcp, config"},
 			// Agent runs are not deterministic, so a single pair of runs cannot
 			// separate a real difference from noise.
 			&cli.IntFlag{Name: "repeat", Aliases: []string{"n"}, Value: 3, Usage: "repetitions per side"},

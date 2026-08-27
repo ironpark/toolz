@@ -12,8 +12,8 @@ agent:
   type: codex
 workspace:
   source: ./fixture
-prompt:
-  file: ./PROMPT.md
+prompts:
+  - file: ./PROMPT.md
 `
 
 func writeConfig(t *testing.T, contents string) string {
@@ -30,7 +30,7 @@ func TestLoadConfigAppliesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Limits.TimeoutSeconds != DefaultTimeoutSeconds || config.Limits.MaxTurns != DefaultMaxTurns {
+	if config.Limits.TimeoutSeconds != DefaultTimeoutSeconds {
 		t.Errorf("limits not defaulted: %+v", config.Limits)
 	}
 	if config.Report.Dir != DefaultReportDir {
@@ -63,8 +63,12 @@ func TestValidateRejectsIncompleteConfigurations(t *testing.T) {
 		"missing agent type":  strings.Replace(minimalConfig, "  type: codex\n", "", 1),
 		"unknown agent type":  strings.Replace(minimalConfig, "codex", "not-an-agent", 1),
 		"missing workspace":   strings.Replace(minimalConfig, "  source: ./fixture\n", "", 1),
-		"missing prompt":      strings.Replace(minimalConfig, "  file: ./PROMPT.md\n", "", 1),
-		"two prompts":         minimalConfig + "    text: inline\n",
+		"missing prompt":      strings.Replace(minimalConfig, "  - file: ./PROMPT.md\n", "", 1),
+		"two prompt sources":  minimalConfig + "    text: inline\n",
+		"unknown prompt key":  minimalConfig + "    unles: turn > 1\n",
+		"broken condition":    minimalConfig + "    when: turn >\n",
+		"unknown condition":   minimalConfig + "    when: nonexistent_variable\n",
+		"non-boolean when":    minimalConfig + "    when: turn\n",
 		"unknown format":      minimalConfig + "report:\n  formats: [smoke-signal]\n",
 		"custom without argv": strings.Replace(minimalConfig, "codex", "custom-cli", 1),
 	}
@@ -106,7 +110,7 @@ func TestReferencedPathsSkipUnsetFieldsAndAreAbsolute(t *testing.T) {
 		}
 		fields[referenced.Field] = true
 	}
-	if !fields["workspace.source"] || !fields["prompt.file"] {
+	if !fields["workspace.source"] || !fields["prompts[0].file"] {
 		t.Errorf("missing referenced paths: %v", fields)
 	}
 	if fields["verify.script"] {

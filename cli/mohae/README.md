@@ -20,8 +20,10 @@
    않으므로 같은 설정의 두 실행은 동일한 상태에서 시작합니다.
 2. **준비** — `workspace.init_script`로 의존성을 빌드하거나 데이터를 심고,
    `workspace.agent_md`를 `AGENTS.md`로 설치합니다.
-3. **실행** — 시작 프롬프트를 **한 번만** 보내고 개입하지 않습니다. 에이전트가 스스로
-   완료를 판단해야 하며, 그동안 대화·명령 실행·실패·토큰 사용량을 기록합니다.
+3. **실행** — `prompts`를 순서대로 보냅니다. 각 프롬프트는 앞 턴이 끝난 뒤에 전송되고,
+   `when` 조건이 붙어 있으면 조건이 참일 때만 보냅니다. 그 사이에는 개입하지 않으므로
+   에이전트가 스스로 완료를 판단해야 하며, 그동안 대화·명령 실행·실패·토큰 사용량을
+   기록합니다.
 4. **채점** — `verify.script`가 끝난 워크스페이스를 검사합니다. 워크스페이스 **밖**에서
    실행되고 안으로 복사되지도 않으므로, 에이전트가 검사 항목에 맞춰 결과를 꾸밀 수
    없습니다.
@@ -43,7 +45,7 @@ description: 로그 기반 KV 저장소 과제를 codex로 평가
 agent:
   type: codex # claude-code | codex | custom-cli
   model: gpt-5.6-luna
-  reasoning: medium
+  effort: medium
 
 workspace:
   source: ./fixture # 격리 디렉터리로 복사할 원본
@@ -51,23 +53,65 @@ workspace:
   agent_md: ./AGENTS.md # 워크스페이스에 AGENTS.md로 설치
   git: true
 
-prompt:
-  file: ./PROMPT.md # 또는 text: "..."
-
-target_cli:
-  command: planr # 에이전트가 사용할 도구
-  build: go build -o bin/planr ./cli/planr
+prompts: # 대화. 순서대로 전송되며, 둘 이상이면 멀티턴
+  - file: ./PROMPT.md
+  - text: 빌드가 깨져 있습니다. 멈추기 전에 고치세요.
+    when: sh("go build ./...") != 0 # 조건이 참일 때만 전송
 
 verify:
   script: ./verify.sh
 
 limits:
   timeout_seconds: 300
-  max_turns: 30
 
 report:
   dir: .mohae/reports
   formats: [terminal, json]
+```
+
+### 프롬프트와 실행 조건
+
+`prompts`는 대화 전체입니다. 항목이 하나면 단일 턴, 여럿이면 멀티턴 실행이 됩니다.
+각 항목은 `text:` 또는 `file:` 중 하나를 가지며, 한 줄짜리 프롬프트는 문자열로 줄여
+쓸 수 있습니다.
+
+```yaml
+prompts:
+  - file: ./PROMPT.md
+  - 이제 테스트를 작성하세요 # text: 의 축약형
+```
+
+`when:`을 붙이면 그 프롬프트는 조건이 참일 때만 전송됩니다. 후속 지시가 항상 필요한
+것은 아니기 때문입니다 — "빌드가 깨졌으면 고치라고 한 번 더 말한다" 같은 분기를 설정
+파일 하나로 표현할 수 있고, 조건이 거짓인 실행은 그 턴을 건너뛰므로 토큰도 쓰지
+않습니다.
+
+조건은 [expr](https://github.com/expr-lang/expr) 표현식이며 불리언으로 평가되어야
+합니다. 설정을 읽는 시점에 컴파일되므로, 오타는 토큰을 쓰기 전에 잡힙니다.
+
+| 이름                 | 뜻                                            |
+| -------------------- | --------------------------------------------- |
+| `turn`               | 이 프롬프트의 순서 (1부터)                    |
+| `previous`           | 직전 응답 (첫 턴 전에는 빈 문자열)            |
+| `responses`          | 지금까지의 모든 응답, 오래된 것부터           |
+| `elapsed_seconds`    | 지금까지 소요된 시간                          |
+| `timed_out`          | 제한 시간에 이미 걸렸는지                     |
+| `exists(path)`       | 워크스페이스 기준 경로가 존재하는지           |
+| `read(path)`         | 파일 내용, 읽을 수 없으면 `""`                |
+| `sh(cmd)`            | 워크스페이스에서 명령을 실행하고 종료 코드 반환 |
+
+`exists`/`read`/`sh`는 에이전트가 **말한 것**이 아니라 **실제로 한 것**을 보고 분기하기
+위한 것입니다.
+
+```yaml
+prompts:
+  - file: ./PROMPT.md
+  - text: 테스트가 없습니다. 추가하세요.
+    when: not exists("main_test.go")
+  - text: 빌드가 깨져 있습니다. 멈추기 전에 고치세요.
+    when: sh("go build ./...") != 0
+  - text: 요약해 주세요.
+    when: previous contains "완료" and not timed_out
 ```
 
 `AGENTS.md`를 픽스처 안이 아니라 밖에 두는 것이 중요합니다. 과제와 무관한 문서이므로
@@ -100,24 +144,31 @@ mohae run                                   # 실행과 리포트
 mohae run
 mohae run 'trials/*.config.yaml' --concurrency 4
 mohae run --agent claude-code --detailed-tokens
+mohae run -p '구현하세요' -p '이제 테스트를 작성하세요'
+mohae run -p '구현하세요' -p '빌드를 고치세요' \
+  --prompt-when '' --prompt-when 'sh("go build ./...") != 0'
 ```
+
+`--prompt`와 `--prompt-file`은 설정의 대화를 **덧붙이지 않고 통째로 대체**합니다.
+설정에 무엇이 들어 있든 `--prompt`의 의미가 같아야 하기 때문입니다. 순서가 정의되지
+않으므로 둘을 섞어 쓸 수는 없습니다. `--prompt-when`은 같은 위치의 프롬프트에
+붙으며, 조건을 걸지 않을 자리는 `''`로 비워 둡니다.
 
 | 옵션                     | 설명                                                       |
 | ------------------------ | ---------------------------------------------------------- |
 | `-a, --agent <TYPE>`     | 에이전트 종류 오버라이드                                   |
-| `-p, --prompt <TEXT>`    | 시작 프롬프트를 인라인으로 대체                            |
-| `-P, --prompt-file`      | 시작 프롬프트를 파일로 대체                                |
+| `-p, --prompt <TEXT>`    | 대화 전체를 인라인 프롬프트로 대체 (반복 가능, 한 번이 한 턴) |
+| `-P, --prompt-file`      | 대화 전체를 프롬프트 파일로 대체 (반복 가능, 한 번이 한 턴)   |
+| `--prompt-when <EXPR>`   | 같은 순서의 프롬프트에 붙일 실행 조건 (반복 가능)          |
 | `--agent-md <PATH>`      | 설치할 `AGENTS.md` 대체                                    |
 | `--init-script <PATH>`   | 환경 구성 스크립트 대체                                    |
 | `--verify-script <PATH>` | 검증 스크립트 대체                                         |
 | `-m, --mcp-config`       | MCP 서버 설정 주입                                         |
-| `--target-cli <CMD>`     | 테스트 대상 CLI 대체                                       |
 | `-o, --output <FORMAT>`  | `terminal`, `json`, `markdown`, `html`                      |
 | `--report-dir <DIR>`     | 리포트 저장 위치 (기본 `.mohae/reports`)                   |
 | `--show-dialogue`        | 대화 내용을 터미널로 실시간 출력                           |
 | `--detailed-tokens`      | 입력·출력·캐시 읽기/쓰기로 토큰을 나눠 출력                |
 | `-t, --timeout <SEC>`    | 실행 하나당 제한 시간 (기본 300)                           |
-| `--max-turns <NUM>`      | 최대 대화 턴 수 (기본 30)                                  |
 | `--fail-fast`            | 검증 실패나 명령 에러 발생 시 즉시 중단                    |
 | `-c, --concurrency`      | 동시에 실행할 trial 수 (기본 1)                            |
 
@@ -137,7 +188,7 @@ mohae compare --a ./agents-en.md --b ./agents-strict.md --target agent-md -n 5
 | 옵션                  | 설명                                                        |
 | --------------------- | ----------------------------------------------------------- |
 | `--a`, `--b`          | 기준군과 대조군 (설정 파일 경로 또는 비교 대상 값)          |
-| `--target <FIELD>`    | `auto`, `prompt`, `agent-md`, `agent`, `mcp`, `config`       |
+| `--target <FIELD>`    | `auto`, `prompts`, `agent-md`, `agent`, `mcp`, `config`       |
 | `-n, --repeat <NUM>`  | 반복 횟수 (기본 3)                                          |
 | `--metric <TYPE>`     | `success-rate`, `tokens`, `cost`, `duration`                |
 | `--diff-only`         | 차이가 발생한 대화 턴과 결과만 출력                         |
@@ -170,6 +221,9 @@ mohae init trials/kvstore --template cli-skill --with-scripts
 
 템플릿은 `basic`, `mcp-server`, `cli-skill`, `multi-agent`입니다. 무엇을 테스트 대상으로
 두는지만 다르고, 격리·프롬프트·검증이라는 흐름은 모두 같습니다.
+
+테스트 대상 CLI는 `workspace.init_script`에서 빌드해 `PATH`에 올립니다. 격리된
+워크스페이스 안에서 빌드하므로 머신에 설치된 것이 아니라 현재 소스가 평가됩니다.
 
 ### `mohae web`
 
