@@ -102,10 +102,10 @@ func verifyConfig(cmd *cli.Command, config *Config) []checkResult {
 			results = append(results, checkResult{statusPass, referenced.Field, ""})
 		}
 	}
-	if len(config.Verify.Scripts) == 0 {
+	if len(config.Verify.Commands) == 0 {
 		// A trial with nothing to grade it still produces a transcript, but no
 		// verdict; that is a choice, not necessarily a mistake.
-		results = append(results, checkResult{statusWarn, "verify.scripts", "not set: the trial will have no pass/fail verdict"})
+		results = append(results, checkResult{statusWarn, "verify.commands", "not set: the trial will have no pass/fail verdict"})
 	}
 	if config.Workspace.AgentMD == "" {
 		results = append(results, checkResult{statusWarn, "workspace.agent_md", "not set: the agent gets no instructions"})
@@ -124,11 +124,9 @@ func verifyConfig(cmd *cli.Command, config *Config) []checkResult {
 
 func checkScripts(config *Config) []checkResult {
 	results := []checkResult{}
-	scripts := []LabeledPath{{"workspace.init_script", config.Workspace.InitScript}}
-	for index, script := range config.Verify.Scripts {
-		scripts = append(scripts, LabeledPath{fmt.Sprintf("verify.scripts[%d]", index), script})
-	}
-	for _, script := range scripts {
+	// Verify commands are shell text rather than files, so only the init
+	// script has an executable bit to check.
+	for _, script := range []LabeledPath{{"workspace.init_script", config.Workspace.InitScript}} {
 		if script.Path == "" {
 			continue
 		}

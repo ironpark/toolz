@@ -149,11 +149,12 @@ prompts:
     after: [fix-build]
 
 verify:
-  # Run in order outside the workspace once the agent stops, and never copied
-  # in, so the agent cannot tailor its output to the checks. Each script exits
-  # zero to pass; what it prints is up to it.
-  scripts:
+  # Shell commands run in order outside the workspace once the agent stops,
+  # with $MOHAE_WORKSPACE pointing at it. Each exits zero to pass; what it
+  # prints is up to it.
+  commands:
     - ./verify.sh
+    - test -f "$MOHAE_WORKSPACE/README.md"
 
 limits:
   timeout_seconds: 300
