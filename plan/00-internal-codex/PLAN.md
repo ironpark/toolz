@@ -1,6 +1,7 @@
 ---
+completed_at: "2026-08-27T20:42:19Z"
 description: "Go package internal/codex: client controlling Codex via the app-server JSON-RPC protocol over a subprocess (transport, types, threads, turns, events, approvals)"
-plan_status: in-progress
+plan_status: done
 registered_at: "2026-08-27T20:07:33Z"
 ---
 > NEXT: Build the JSON-RPC stdio transport with subprocess management, framing, id correlation, and dispatch, tested over in-memory pipes. ([Phase 0](phases/00-jsonrpc-transport.md))
@@ -14,7 +15,7 @@ registered_at: "2026-08-27T20:07:33Z"
 - [x] [Phase 04: Turn execution and event streaming](phases/04-turn-streaming.md)
 - [x] [Phase 05: Approvals and server-initiated requests](phases/05-approvals.md)
 - [x] [Phase 06: Auth surface](phases/06-auth-surface.md)
-- [ ] [Phase 07: Fake-server hardening, docs, and package test sweep](phases/07-hardening-and-docs.md)
+- [x] [Phase 07: Fake-server hardening, docs, and package test sweep](phases/07-hardening-and-docs.md)
 
 # Shared Verification
 

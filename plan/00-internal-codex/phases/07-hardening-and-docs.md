@@ -1,9 +1,10 @@
 ---
+completed_at: "2026-08-27T20:42:19Z"
 depends_on:
 - "00-internal-codex#5"
 - "00-internal-codex#6"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: `go test -race ./internal/codex/...` passes; malformed-input and
 > NEXT: none
