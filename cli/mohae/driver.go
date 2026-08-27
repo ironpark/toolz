@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 )
 
 // Driver is one agent under test, already opened on a trial's workspace. The
@@ -71,8 +72,10 @@ func NewDriver(ctx context.Context, options DriverOptions) (Driver, error) {
 	switch options.Config.Agent.Type {
 	case "custom-cli":
 		return newCustomDriver(options)
-	case "claude-code", "codex":
-		return nil, notImplemented(options.Config.Agent.Type + " driver")
+	case "claude-code":
+		return newClaudeDriver(ctx, options)
+	case "codex":
+		return newCodexDriver(ctx, options)
 	default:
 		return nil, fmt.Errorf("no driver for agent type %q", options.Config.Agent.Type)
 	}
@@ -98,6 +101,11 @@ func driverEnv(config *Config, workspace *Workspace) []string {
 	}
 	return env
 }
+
+// driverEnvironment is the process environment a driver's subprocess starts
+// from. It is the parent's: an agent CLI needs its own credentials and PATH,
+// and stripping them would only mean measuring an agent that cannot log in.
+func driverEnvironment() []string { return os.Environ() }
 
 // sortedEnvKeys keeps the environment deterministic, so two runs of the same
 // configuration differ in the agent's behaviour and not in their inputs.
