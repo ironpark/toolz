@@ -338,6 +338,9 @@ func notesCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	if cmd.Bool("json") {
+		return writeJSON(makeNotesJSON(notes))
+	}
 	if len(notes) == 0 {
 		fmt.Println("no completions recorded")
 		return nil

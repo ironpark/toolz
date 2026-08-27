@@ -43,6 +43,9 @@ func overviewCommand(_ context.Context, cmd *cli.Command) error {
 		}
 		summaries = matched
 	}
+	if cmd.Bool("json") {
+		return writeJSON(makeOverviewJSON(summaries))
+	}
 	if len(summaries) == 0 {
 		fmt.Println("No plans found")
 		return nil

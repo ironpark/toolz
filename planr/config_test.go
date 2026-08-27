@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	git "github.com/go-git/go-git/v5"
 )
 
 func TestLoadConfigHooks(t *testing.T) {
@@ -31,6 +34,67 @@ func TestLoadConfigHooks(t *testing.T) {
 	}
 	if got := value.Hooks.commands("before", hookEventStart); len(got) != 0 {
 		t.Fatalf("before start hooks = %#v, want empty", got)
+	}
+}
+
+func TestLoadConfigStopsAtGitRepositoryRoot(t *testing.T) {
+	parent := t.TempDir()
+	if err := os.WriteFile(filepath.Join(parent, ".planr.yaml"), []byte("language: ko\nplans_dir: parent-plans\n"), 0644); err != nil {
+		t.Fatalf("write parent config: %v", err)
+	}
+	repoRoot := filepath.Join(parent, "repo")
+	if err := os.MkdirAll(filepath.Join(repoRoot, "nested"), 0755); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	if _, err := git.PlainInit(repoRoot, false); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+
+	value, foundRoot, err := loadConfig(filepath.Join(repoRoot, "nested"))
+	if err != nil {
+		t.Fatalf("loadConfig() unexpected error: %v", err)
+	}
+	if foundRoot != repoRoot {
+		t.Fatalf("loadConfig() root = %q, want %q", foundRoot, repoRoot)
+	}
+	if value.Language != defaultLanguage || len(value.PlansDirs) != 1 || value.PlansDirs[0] != "plan" {
+		t.Fatalf("loadConfig() crossed git root: %#v", value)
+	}
+	if value.configPath != "" {
+		t.Fatalf("default config unexpectedly has a path: %q", value.configPath)
+	}
+	// The boundary also applies when a command is given a path that does not
+	// exist yet; this keeps a parent config from being selected while creating
+	// a new nested directory.
+	value, foundRoot, err = loadConfig(filepath.Join(repoRoot, "not-yet-created", "nested"))
+	if err != nil {
+		t.Fatalf("loadConfig() for a missing nested path unexpected error: %v", err)
+	}
+	if foundRoot != repoRoot || value.configPath != "" {
+		t.Fatalf("missing nested path crossed git root: root=%q config=%q", foundRoot, value.configPath)
+	}
+}
+
+func TestLoadConfigKeepsAppliedPathAndHookTimeout(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".planr.yaml")
+	contents := []byte("language: ko\nplans_dirs: [plans-active, plans-archive]\nignore: [tmp]\nhooks:\n  timeout: 25ms\n")
+	if err := os.WriteFile(path, contents, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	value, foundRoot, err := loadConfig(root)
+	if err != nil {
+		t.Fatalf("loadConfig() unexpected error: %v", err)
+	}
+	if foundRoot != root || value.configPath != path {
+		t.Fatalf("loadConfig() path/root = %q/%q, want %q/%q", value.configPath, foundRoot, path, root)
+	}
+	if value.Hooks.Timeout != 25*time.Millisecond {
+		t.Fatalf("hooks.timeout = %s, want 25ms", value.Hooks.Timeout)
+	}
+	if got := value.Hooks.timeoutDuration(); got != 25*time.Millisecond {
+		t.Fatalf("timeoutDuration() = %s, want 25ms", got)
 	}
 }
 
@@ -74,6 +138,9 @@ func TestLoadConfigLanguage(t *testing.T) {
 	}
 	if value.Language != languageEnglish {
 		t.Fatalf("language without a config file = %q, want %q", value.Language, languageEnglish)
+	}
+	if value.Hooks.Timeout != defaultHookTimeout {
+		t.Fatalf("hook timeout without a config file = %s, want %s", value.Hooks.Timeout, defaultHookTimeout)
 	}
 }
 
@@ -152,7 +219,7 @@ func TestIsIgnoredPath(t *testing.T) {
 func TestRunHookEnvironment(t *testing.T) {
 	root := t.TempDir()
 	command := `printf '%s:%s:%s:%s' "$PLANR_EVENT" "$PLANR_PLAN" "$PLANR_PHASE" "$PLANR_STATUS" > hook.out`
-	if err := runHook(root, command, "after done hook #1", hookEventDone, "00-checkout-v2", 2, "done"); err != nil {
+	if err := runHook(root, command, "after done hook #1", hookEventDone, "00-checkout-v2", 2, "done", defaultHookTimeout); err != nil {
 		t.Fatalf("runHook() unexpected error: %v", err)
 	}
 	output, err := os.ReadFile(filepath.Join(root, "hook.out"))
@@ -167,7 +234,7 @@ func TestRunHookEnvironment(t *testing.T) {
 func TestRunHookPlanEventHasEmptyPhase(t *testing.T) {
 	root := t.TempDir()
 	command := `printf '<%s>' "$PLANR_PHASE" > hook.out`
-	if err := runHook(root, command, "after add hook #1", hookEventAdd, "00-checkout-v2", -1, "registered"); err != nil {
+	if err := runHook(root, command, "after add hook #1", hookEventAdd, "00-checkout-v2", -1, "registered", defaultHookTimeout); err != nil {
 		t.Fatalf("runHook() unexpected error: %v", err)
 	}
 	output, err := os.ReadFile(filepath.Join(root, "hook.out"))
@@ -194,6 +261,22 @@ func TestRunConfiguredHooksPreservesRuleOrder(t *testing.T) {
 	}
 	if got, want := string(output), "onetwo"; got != want {
 		t.Fatalf("hook output = %q, want %q", got, want)
+	}
+}
+
+func TestRunConfiguredHooksUsesConfiguredTimeout(t *testing.T) {
+	root := t.TempDir()
+	settings := config{Hooks: hookConfig{
+		Timeout: 20 * time.Millisecond,
+		After:   []hookRule{{On: []string{hookEventDone}, Run: "sleep 1"}},
+	}}
+	started := time.Now()
+	err := runConfiguredHooks(root, settings, "after", hookEventDone, "00-checkout-v2", -1, "done")
+	if err == nil || !strings.Contains(err.Error(), "timed out after 20ms") {
+		t.Fatalf("runConfiguredHooks() error = %v, want configured timeout", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("configured timeout took too long: %s", elapsed)
 	}
 }
 

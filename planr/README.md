@@ -7,7 +7,7 @@
 
 - [설치](#설치)
 - [빠른 시작](#빠른-시작)
-- [명령](#명령) — [plan 등록](#plan-등록), [조회](#조회), [phase 관리](#phase-관리)
+- [명령](#명령) — [plan 등록](#plan-등록), [조회](#조회), [설정 확인과 진단](#설정-확인과-진단), [phase 관리](#phase-관리)
 - [설정](#설정) — [plan 저장 위치](#plan-저장-위치), [문서 언어](#문서-언어), [훅](#훅)
 - [저장 구조](#저장-구조)
 - [초안 규격](#초안-규격) — [frontmatter](#frontmatter), [섹션](#섹션), [PHASE 블록](#phase-블록), [의존성](#의존성)
@@ -16,8 +16,11 @@
 
 ## 요구 사항
 
-planr은 git 저장소 안에서만 동작합니다. 완료 기록을 git note로 남기고, phase 완료 시
-작업 트리 상태를 확인하기 때문입니다. 저장소 밖에서 실행하면 명령이 다음과 같이 중단됩니다.
+planr의 plan 조회·변경 명령은 git 저장소 안에서 동작합니다. 완료 기록을 git note로
+남기고, phase 완료 시 작업 트리 상태를 확인하기 때문입니다. `config`와 `doctor`는
+설정과 저장소 상태를 진단할 수 있도록 저장소 밖에서도 실행되며, `doctor`가 git
+저장소 없음 문제를 non-zero로 보고합니다. 그 밖의 명령을 저장소 밖에서 실행하면
+다음과 같이 중단됩니다.
 
 ```text
 planr requires a git repository, but /tmp/scratch is not inside one; run `git init` at your project root first
@@ -59,12 +62,14 @@ planr phase done checkout-v2 1
 | --- | --- |
 | `planr new <plan-name>` | 규격 초안 파일을 생성합니다 |
 | `planr add <draft-file>` | 초안을 검증하고 plan 디렉터리로 등록합니다 |
-| `planr status [plan-name]` | 남은 phase와 대기 중인 의존성을 자세히 출력합니다 |
-| `planr overview [plan-name]` | 모든 plan의 진행률을 한 줄씩 요약합니다 |
+| `planr config` | 실제 적용된 설정 파일과 effective 설정값을 출력합니다 |
+| `planr doctor [--fix]` | 설정·저장소·등록된 plan 문서의 정합성을 진단합니다 |
+| `planr status [plan-name] [--json]` | 남은 phase와 대기 중인 의존성을 자세히 출력합니다 |
+| `planr overview [plan-name] [--json]` | 모든 plan의 진행률을 한 줄씩 요약합니다 |
 | `planr phase add <plan-name> <title>` | 열린 plan에 phase를 추가합니다 |
 | `planr phase set <plan-name> <number> --status <status>` | phase 상태를 지정한 값으로 변경합니다 |
 | `planr phase start\|done\|reset <plan-name> <number>` | phase 상태 변경 단축 명령입니다 |
-| `planr notes [plan-name]` | 커밋에 연결된 완료 기록을 조회합니다 |
+| `planr notes [plan-name] [--json]` | 커밋에 연결된 완료 기록을 조회합니다 |
 | `planr --version` | 설치된 버전을 출력합니다 |
 
 plan 이름을 받는 모든 명령은 `checkout-v2`와 `00-checkout-v2`를 모두 인식합니다.
@@ -103,6 +108,11 @@ planr status platform-refresh
 # 전체 plan 간단 요약 (완료된 plan 포함)
 planr overview
 planr overview checkout-v2
+
+# 스크립트/에이전트용 JSON 출력
+planr status --json
+planr overview --json
+planr notes --json
 ```
 
 **`status`** — `phases/*.md`의 현재 frontmatter를 읽어 남은 phase와 `wait` 목록을
@@ -113,6 +123,50 @@ planr overview checkout-v2
 **`overview`** — 완료된 plan을 포함해 각 plan의 상태와 `완료 phase/전체 phase`
 진행률, 다음 미완료 phase, 의존성 대기를 한눈에 보여 줍니다. 자세한 phase 목록과
 기본 완료 plan 숨김 규칙이 필요하면 `status`를 사용합니다.
+
+`status`, `overview`, `notes`는 `--json`을 지정하면 텍스트 표 대신 JSON 한 객체를
+출력합니다. 텍스트 출력은 기존 형식을 유지하며, JSON의 필드명은 다음처럼
+snake_case로 고정됩니다. plan이 없거나 완료 기록이 없을 때도 배열은 `null`이 아닌
+빈 배열입니다.
+
+`status --json`의 최상위 필드는 `plans`이며 각 항목은 `name`, `directory`, `status`,
+`done_phases`, `total_phases`, `remaining`, `wait`를 가집니다. `remaining` 항목은
+`phase_number`, `slug`, `title`, `status`를 가집니다. 텍스트 `status`와 같은 가시성
+규칙(완료 plan 숨김)을 적용합니다.
+
+`overview --json`도 `plans`를 사용하며 각 항목은 `name`, `directory`, `status`,
+`done_phases`, `total_phases`, `next_phase`, `wait`를 가집니다. `next_phase`는 다음
+미완료 phase 제목이며 없으면 빈 문자열입니다.
+
+`notes --json`의 최상위 필드는 `notes`이며 각 항목은 `completed_at`, `plan`, `event`,
+`phase`, `commit`, `short_commit`, `subject`를 가집니다. plan 단위 기록의 `phase`는
+빈 문자열입니다.
+
+### 설정 확인과 진단
+
+```sh
+# 현재 명령에 실제 적용된 설정 확인
+planr config
+
+# 읽기 전용 정합성 진단
+planr doctor
+
+# PLAN.md 체크리스트와 phase 파일의 불일치까지 복구
+planr doctor --fix
+```
+
+`config`는 `config_file`에 적용된 `.planr.yaml`의 절대 경로를 출력하고,
+`language`, `plans_dirs`, `ignore`, `hooks.before`, `hooks.after`, `hooks.timeout`의
+최종값을 보여 줍니다. 설정 파일이 없으면 `config_file: none (using defaults)`라고
+표시하고 기본값(`language: en`, `plans_dirs: [plan]`, 10분 훅 타임아웃)을 사용한다고
+알립니다. `.planr.yaml`은 현재 디렉터리에서 시작해 git worktree 루트까지 검색합니다.
+
+`doctor`는 `.planr.yaml`의 파싱·검증, `plans_dirs` 경로의 존재, git 저장소 여부,
+등록된 plan의 PLAN/phase frontmatter, plan·phase 의존성, `PLAN.md` 체크리스트와
+`phases/*.md`의 파일명·제목·상태·링크 일치를 검사합니다. 문제가 하나라도 있으면
+non-zero로 종료합니다. 기본 동작은 읽기 전용이며, `--fix`를 지정한 경우에만 유효한
+phase 파일을 기준으로 체크리스트를 다시 씁니다. frontmatter 오류나 의존성 오류는
+자동으로 변경하지 않습니다.
 
 ### phase 관리
 
@@ -169,7 +223,7 @@ finish them first or use --force
 ## 설정
 
 리포지토리 루트의 `.planr.yaml`에서 설정합니다. 설정 파일은 현재 디렉터리부터 상위
-디렉터리로 탐색합니다.
+디렉터리로 탐색하되 git worktree 루트를 넘어가지는 않습니다.
 
 ```yaml
 language: ko
@@ -180,6 +234,7 @@ ignore:
   - generated/**
   - tmp
 hooks:
+  timeout: 30s
   before:
     - on: [new, add]
       run: "echo plan command started"
@@ -234,9 +289,9 @@ hooks:
 - **`before`** 훅은 상태나 파일을 기록하기 전에 실행되며, 실패하면 작업을 중단합니다.
 - **`after`** 훅은 작업이 기록된 뒤 실행되며, 실패해도 기록을 되돌리지 않고 오류만
   알립니다.
-- 훅 하나는 **10분**까지 실행할 수 있고, 넘으면 중단되며 어느 훅이 멈췄는지 알려
-  줍니다. 테스트 스위트를 돌리기에는 넉넉하면서, 멈춘 훅이 planr을 무한정 붙잡지는
-  못하게 하는 값입니다.
+- `hooks.timeout`은 훅 하나의 최대 실행 시간이며 `30s`, `5m`처럼 Go duration 형식으로
+  지정합니다. 생략하면 기존 기본값인 **10분**을 사용하고, 넘으면 중단되며 어느 훅이
+  멈췄는지 알려 줍니다.
 
 모든 훅은 리포지토리 루트에서 셸 명령으로 실행되고 다음 환경 변수를 받습니다.
 

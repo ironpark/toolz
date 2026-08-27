@@ -55,6 +55,9 @@ func (value hookConfig) commands(when, event string) []string {
 }
 
 func validateHooks(value hookConfig) error {
+	if value.Timeout < 0 {
+		return fmt.Errorf("hooks.timeout must not be negative")
+	}
 	for _, group := range []struct {
 		name  string
 		rules []hookRule
@@ -88,23 +91,29 @@ func validateHooks(value hookConfig) error {
 func runConfiguredHooks(repoRoot string, settings config, when, event, planDirectory string, phaseID int, status string) error {
 	for index, command := range settings.Hooks.commands(when, event) {
 		label := fmt.Sprintf("%s %s hook #%d", when, event, index+1)
-		if err := runHook(repoRoot, command, label, event, planDirectory, phaseID, status); err != nil {
+		if err := runHook(repoRoot, command, label, event, planDirectory, phaseID, status, settings.Hooks.timeoutDuration()); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// hookTimeout bounds a single hook. Hooks routinely run test suites, so the
-// budget is generous, but an unbounded hook would hang planr forever with no
-// indication of which command is stuck.
-const hookTimeout = 10 * time.Minute
+// timeoutDuration is the budget for a single hook. Hooks routinely run test
+// suites, so the default is generous, but an unbounded hook would hang planr
+// forever with no indication of which command is stuck. A repository can
+// override it with hooks.timeout.
+func (value hookConfig) timeoutDuration() time.Duration {
+	if value.Timeout <= 0 {
+		return defaultHookTimeout
+	}
+	return value.Timeout
+}
 
-func runHook(repoRoot, command, label, event, planDirectory string, phaseID int, status string) error {
+func runHook(repoRoot, command, label, event, planDirectory string, phaseID int, status string, timeout time.Duration) error {
 	if strings.TrimSpace(command) == "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), hookTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	hook := exec.CommandContext(ctx, "sh", "-c", command)
 	hook.Dir = repoRoot
@@ -118,7 +127,7 @@ func runHook(repoRoot, command, label, event, planDirectory string, phaseID int,
 	if err != nil {
 		message := strings.TrimSpace(string(output))
 		if ctx.Err() == context.DeadlineExceeded {
-			err = fmt.Errorf("timed out after %s", hookTimeout)
+			err = fmt.Errorf("timed out after %s", timeout)
 		}
 		if message != "" {
 			return fmt.Errorf("%s failed: %w\n%s", label, err, message)

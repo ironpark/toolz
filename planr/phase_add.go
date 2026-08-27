@@ -257,7 +257,7 @@ func appendPhaseChecklist(body string, phaseID int, title, slug string) (string,
 	if phasesHeadingEnd < 0 {
 		return "", fmt.Errorf("PLAN.md does not contain a # Phases section")
 	}
-	entry := phaseChecklistEntry(phaseID, title, slug)
+	entry := phaseChecklistEntry(phaseID, title, slug, false)
 	before := strings.TrimRight(body[:insertion], "\n")
 	after := strings.TrimLeft(body[insertion:], "\n")
 	if after == "" {

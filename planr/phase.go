@@ -587,10 +587,14 @@ func writeFrontmatterFile(path string, front map[string]any, body string) error 
 	if err != nil {
 		return fmt.Errorf("encode %s frontmatter: %w", filepath.Base(path), err)
 	}
-	contents := "---\n" + string(header) + "---\n" + body
-	// A status change rewrites a document that is already tracked in git, so it
-	// is staged next to the target and renamed into place: an interrupted write
-	// leaves the previous contents rather than a truncated document.
+	return writeFileAtomically(path, "---\n"+string(header)+"---\n"+body)
+}
+
+// writeFileAtomically rewrites a document that may already be tracked in git,
+// so the contents are staged next to the target and renamed into place: an
+// interrupted write leaves the previous contents rather than a truncated
+// document.
+func writeFileAtomically(path, contents string) error {
 	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".")
 	if err != nil {
 		return fmt.Errorf("write %s: %w", filepath.Base(path), err)

@@ -267,7 +267,7 @@ func writePlan(root string, d draft, planDirectory, language string) error {
 	}
 	checklist := []string{}
 	for _, p := range d.Phases {
-		checklist = append(checklist, phaseChecklistEntry(p.Meta.Phase, p.Title, p.Meta.Slug))
+		checklist = append(checklist, phaseChecklistEntry(p.Meta.Phase, p.Title, p.Meta.Slug, p.Meta.Status == "done"))
 		path := filepath.Join(root, phaseDocumentPath(p.Meta.Phase, p.Meta.Slug))
 		if err := writeFrontmatterFile(path, phaseFrontmatter(planDirectory, p.Meta), phaseDocumentBody(language, p.Title, p.Planned, p.Completion)); err != nil {
 			return err
@@ -301,8 +301,12 @@ func phaseDocumentPath(id int, slug string) string {
 	return fmt.Sprintf("phases/%02d-%s.md", id, slug)
 }
 
-func phaseChecklistEntry(id int, title, slug string) string {
-	return fmt.Sprintf("- [ ] [Phase %02d: %s](%s)", id, title, phaseDocumentPath(id, slug))
+func phaseChecklistEntry(id int, title, slug string, done bool) string {
+	checkmark := " "
+	if done {
+		checkmark = "x"
+	}
+	return fmt.Sprintf("- [%s] [Phase %02d: %s](%s)", checkmark, id, title, phaseDocumentPath(id, slug))
 }
 
 func phaseFrontmatter(planDirectory string, meta phaseMeta) map[string]any {
@@ -522,8 +526,10 @@ func statusCommand(_ context.Context, cmd *cli.Command) error {
 		if filter := cmd.Args().First(); filter != "" {
 			return fmt.Errorf("plan %q not found", filter)
 		}
-		fmt.Println("No plans found")
-		return nil
+		if !cmd.Bool("json") {
+			fmt.Println("No plans found")
+			return nil
+		}
 	}
 	requiredPlans := annotatePlanWaits(summaries)
 	if cmd.NArg() == 0 {
@@ -535,6 +541,9 @@ func statusCommand(_ context.Context, cmd *cli.Command) error {
 			}
 		}
 		summaries = visible
+	}
+	if cmd.Bool("json") {
+		return writeJSON(makeStatusJSON(summaries))
 	}
 	printPlanGroups(summaries, func(name string, summary planSummary) {
 		done, total, _ := summary.progress()

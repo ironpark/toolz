@@ -31,8 +31,22 @@ func main() {
 		Usage:   "register and track structured implementation plans",
 		Version: buildVersion(),
 		// Every command reads or writes plan state inside a repository, so the
-		// check runs once here instead of at each call site.
-		Before: func(ctx context.Context, _ *cli.Command) (context.Context, error) {
+		// check runs once here instead of at each call site. The two diagnostic
+		// commands are intentionally allowed to run outside a repository so they
+		// can report that condition themselves.
+		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			// The root Before callback receives the root command, whose first
+			// parsed argument is the selected subcommand.
+			commandName := ""
+			if cmd.Args() != nil {
+				commandName = cmd.Args().First()
+			}
+			if commandName == "config" || commandName == "doctor" {
+				// `config` can inspect defaults without git, and `doctor` needs
+				// to turn a missing repository into a diagnostic rather than an
+				// early generic failure.
+				return ctx, nil
+			}
 			cwd, err := os.Getwd()
 			if err != nil {
 				return ctx, err
@@ -40,6 +54,19 @@ func main() {
 			return ctx, ensureGitRepository(cwd)
 		},
 		Commands: []*cli.Command{
+			{
+				Name:   "config",
+				Usage:  "show the applied configuration",
+				Action: configCommand,
+			},
+			{
+				Name:  "doctor",
+				Usage: "diagnose configuration, plans, and repository consistency",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "fix", Usage: "repair PLAN.md checklists from phase files"},
+				},
+				Action: doctorCommand,
+			},
 			{
 				Name:      "new",
 				Usage:     "create a structured Markdown draft",
@@ -64,19 +91,28 @@ func main() {
 				Name:      "status",
 				Usage:     "show plan progress",
 				ArgsUsage: "[plan-name]",
-				Action:    statusCommand,
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
+				},
+				Action: statusCommand,
 			},
 			{
 				Name:      "overview",
 				Usage:     "show a concise overview of all plans",
 				ArgsUsage: "[plan-name]",
-				Action:    overviewCommand,
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
+				},
+				Action: overviewCommand,
 			},
 			{
 				Name:      "notes",
 				Usage:     "list plan and phase completions linked to commits",
 				ArgsUsage: "[plan-name]",
-				Action:    notesCommand,
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
+				},
+				Action: notesCommand,
 			},
 			{
 				Name:  "phase",

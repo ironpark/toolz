@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/goccy/go-yaml"
 )
+
+const defaultHookTimeout = 10 * time.Minute
 
 type config struct {
 	PlansDir  string     `yaml:"plans_dir"`
@@ -16,11 +20,17 @@ type config struct {
 	Ignore    []string   `yaml:"ignore"`
 	Language  string     `yaml:"language"`
 	Hooks     hookConfig `yaml:"hooks"`
+
+	// configPath is populated only when a configuration file was found. It is
+	// intentionally not part of the YAML model; the `config` command uses it to
+	// explain which file supplied the effective values.
+	configPath string `yaml:"-"`
 }
 
 type hookConfig struct {
-	Before []hookRule `yaml:"before"`
-	After  []hookRule `yaml:"after"`
+	Before  []hookRule    `yaml:"before"`
+	After   []hookRule    `yaml:"after"`
+	Timeout time.Duration `yaml:"timeout"`
 }
 
 type hookRule struct {
@@ -29,45 +39,157 @@ type hookRule struct {
 }
 
 func loadConfig(start string) (config, string, error) {
-	current, err := filepath.Abs(start)
+	location, err := discoverConfig(start)
 	if err != nil {
 		return config{}, "", err
 	}
+	if location.path == "" {
+		return defaultConfig(), location.baseRoot, nil
+	}
+	value, err := parseConfigFile(location.path)
+	if err != nil {
+		return config{}, "", err
+	}
+	value.configPath = location.path
+	return value, location.baseRoot, nil
+}
+
+// configLocation describes both the root against which relative settings are
+// resolved and the file selected by the upward search. When the starting path
+// is inside a worktree, the search stops at the worktree root: parent
+// directories above it must not unexpectedly contribute another .planr.yaml.
+type configLocation struct {
+	baseRoot string
+	path     string
+}
+
+func discoverConfig(start string) (configLocation, error) {
+	absolute, err := filepath.Abs(start)
+	if err != nil {
+		return configLocation{}, err
+	}
+	absolute = filepath.Clean(absolute)
+
+	searchRoot := absolute
+	baseRoot := absolute
+	insideWorktree := false
+	if repository, openErr := git.PlainOpenWithOptions(absolute, &git.PlainOpenOptions{DetectDotGit: true}); openErr == nil {
+		if worktree, worktreeErr := repository.Worktree(); worktreeErr == nil {
+			if root, rootErr := filepath.Abs(worktree.Filesystem.Root()); rootErr == nil {
+				root = rootInStartPath(root, absolute)
+				searchRoot = filepath.Clean(root)
+				baseRoot = searchRoot
+				insideWorktree = true
+			}
+		}
+	}
+
+	current := absolute
 	for {
 		path := filepath.Join(current, ".planr.yaml")
-		contents, readErr := os.ReadFile(path)
-		if readErr == nil {
-			var value config
-			if err := yaml.UnmarshalWithOptions(contents, &value, yaml.Strict()); err != nil {
-				return config{}, "", fmt.Errorf("parse %s: %w", path, err)
+		_, statErr := os.Stat(path)
+		if statErr == nil {
+			if !insideWorktree {
+				baseRoot = current
 			}
-			if len(value.PlansDirs) == 0 && value.PlansDir != "" {
-				value.PlansDirs = []string{value.PlansDir}
-			}
-			if len(value.PlansDirs) == 0 {
-				value.PlansDirs = []string{"plan"}
-			}
-			if err := validatePlanDirs(value.PlansDirs); err != nil {
-				return config{}, "", err
-			}
-			if err := validateLanguage(value.Language); err != nil {
-				return config{}, "", fmt.Errorf("%s: %w", path, err)
-			}
-			value.Language = normalizeLanguage(value.Language)
-			if err := validateHooks(value.Hooks); err != nil {
-				return config{}, "", err
-			}
-			return value, current, nil
+			return configLocation{baseRoot: baseRoot, path: path}, nil
 		}
-		if !errors.Is(readErr, os.ErrNotExist) {
-			return config{}, "", readErr
+		if !errors.Is(statErr, os.ErrNotExist) {
+			// Preserve the path so parseConfigFile can return the useful read
+			// error, instead of silently treating an inaccessible config as absent.
+			return configLocation{baseRoot: baseRoot, path: path}, nil
+		}
+		if current == searchRoot {
+			break
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
-			return config{PlansDirs: []string{"plan"}, Language: defaultLanguage}, start, nil
+			break
 		}
 		current = parent
 	}
+	return configLocation{baseRoot: baseRoot}, nil
+}
+
+// rootInStartPath keeps the spelling of the path supplied by the caller. On
+// macOS, for example, /var is commonly an alias for /private/var; go-git may
+// return the latter while callers and diagnostics use the former. Comparing
+// the resolved paths lets us safely translate the repository root back into
+// the caller's path namespace.
+func rootInStartPath(root, start string) string {
+	root = filepath.Clean(root)
+	start = filepath.Clean(start)
+	evaluatedRoot, rootErr := filepath.EvalSymlinks(root)
+	if rootErr != nil {
+		return root
+	}
+	// EvalSymlinks requires the path to exist. Walk to the nearest existing
+	// ancestor so a caller can still get the correct boundary for a path that
+	// is about to be created.
+	candidate := start
+	for {
+		evaluatedCandidate, candidateErr := filepath.EvalSymlinks(candidate)
+		if candidateErr == nil {
+			relative, relErr := filepath.Rel(evaluatedRoot, evaluatedCandidate)
+			if relErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+				translated := candidate
+				for relative != "." && relative != "" {
+					translated = filepath.Dir(translated)
+					relative = filepath.Dir(relative)
+				}
+				return filepath.Clean(translated)
+			}
+		}
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			break
+		}
+		candidate = parent
+	}
+	return root
+}
+
+func defaultConfig() config {
+	return config{PlansDirs: []string{"plan"}, Language: defaultLanguage, Hooks: hookConfig{Timeout: defaultHookTimeout}}
+}
+
+func parseConfigFile(path string) (config, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return config{}, err
+	}
+	var value config
+	if err := yaml.UnmarshalWithOptions(contents, &value, yaml.Strict()); err != nil {
+		return config{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+	value, err = normalizeConfig(value)
+	if err != nil {
+		return config{}, fmt.Errorf("%s: %w", path, err)
+	}
+	return value, nil
+}
+
+func normalizeConfig(value config) (config, error) {
+	if len(value.PlansDirs) == 0 && value.PlansDir != "" {
+		value.PlansDirs = []string{value.PlansDir}
+	}
+	if len(value.PlansDirs) == 0 {
+		value.PlansDirs = []string{"plan"}
+	}
+	if err := validatePlanDirs(value.PlansDirs); err != nil {
+		return config{}, err
+	}
+	if err := validateLanguage(value.Language); err != nil {
+		return config{}, err
+	}
+	value.Language = normalizeLanguage(value.Language)
+	if err := validateHooks(value.Hooks); err != nil {
+		return config{}, err
+	}
+	if value.Hooks.Timeout == 0 {
+		value.Hooks.Timeout = defaultHookTimeout
+	}
+	return value, nil
 }
 
 // planDirs resolves the configured plans directories against the repository root.
