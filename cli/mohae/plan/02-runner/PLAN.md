@@ -1,6 +1,7 @@
 ---
+completed_at: "2026-08-27T22:02:34Z"
 description: Implement the mohae run trial runner and finish the init scaffolding
-plan_status: in-progress
+plan_status: done
 registered_at: "2026-08-27T21:46:21Z"
 ---
 > NEXT: Finish the init scaffolding so the templates reference only files init writes. ([Phase 0](phases/00-init-scaffolding.md))
@@ -13,7 +14,7 @@ registered_at: "2026-08-27T21:46:21Z"
 - [x] [Phase 03: claude-code and codex drivers with MCP](phases/03-driver-agents.md)
 - [x] [Phase 04: Trial runner](phases/04-trial.md)
 - [x] [Phase 05: Reports](phases/05-reports.md)
-- [ ] [Phase 06: Run command wiring](phases/06-run-command.md)
+- [x] [Phase 06: Run command wiring](phases/06-run-command.md)
 
 # Shared Verification
 

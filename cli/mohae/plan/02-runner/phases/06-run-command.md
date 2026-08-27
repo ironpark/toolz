@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T22:02:34Z"
 depends_on:
 - "02-runner#5"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: An end-to-end test runs `mohae run` on a custom-cli configuration with a
 > NEXT: none
