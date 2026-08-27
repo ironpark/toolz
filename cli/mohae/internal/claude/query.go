@@ -127,13 +127,6 @@ func QueryStream(ctx context.Context, inputs iter.Seq[UserInput], opts *Options)
 	}
 }
 
-// attachSDKMCPServers wires the in-process MCP servers configured in opts into
-// the engine's mcp_message routing. Without any, the engine answers mcp_message
-// requests with a JSON-RPC method-not-found error.
-func attachSDKMCPServers(eng *engine, opts *Options) {
-	_, _ = eng, opts
-}
-
 // prepareOptions validates the options and returns a copy carrying the
 // derived settings: the SDK permission handler and the entrypoint marker.
 func prepareOptions(opts *Options, entry string) (*Options, error) {

@@ -2,7 +2,7 @@
 depends_on:
 - "01-internal-claude#3"
 perf_phase: false
-status: planned
+status: in-progress
 ---
 > DONE-WHEN: Tests: tools/list returns declared schemas and annotations meta;
 > NEXT: none

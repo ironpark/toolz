@@ -110,7 +110,7 @@ func TestBuildCommandArgsOptions(t *testing.T) {
 func TestBuildCommandArgsMCPServers(t *testing.T) {
 	t.Parallel()
 	args, err := buildCommandArgs(&Options{MCPServers: map[string]MCPServerConfig{
-		"calc": &MCPSDKServerConfig{Name: "calc", Instance: struct{}{}},
+		"calc": &MCPSDKServerConfig{Name: "calc", Instance: &MCPServer{}},
 		"fs":   &MCPStdioServerConfig{Command: "node", Args: []string{"fs.js"}},
 	}})
 	if err != nil {

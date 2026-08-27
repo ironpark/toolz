@@ -177,7 +177,7 @@ func TestMCPServerConfigJSON(t *testing.T) {
 		{"stdio", &MCPStdioServerConfig{Command: "node", Args: []string{"srv.js"}}, `{"type":"stdio","command":"node","args":["srv.js"]}`},
 		{"sse", &MCPSSEServerConfig{URL: "https://x/sse"}, `{"type":"sse","url":"https://x/sse"}`},
 		{"http", &MCPHTTPServerConfig{URL: "https://x/mcp", Headers: map[string]string{"A": "b"}}, `{"type":"http","url":"https://x/mcp","headers":{"A":"b"}}`},
-		{"sdk", &MCPSDKServerConfig{Name: "calc", Instance: struct{}{}}, `{"name":"calc","type":"sdk"}`},
+		{"sdk", &MCPSDKServerConfig{Name: "calc", Instance: &MCPServer{}}, `{"name":"calc","type":"sdk"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -749,12 +749,12 @@ func (e *engine) handleMCPMessage(ctx context.Context, request map[string]any) (
 		id = m["id"]
 	}
 	if e.mcpRouter == nil {
-		return map[string]any{"mcp_response": jsonRPCError(id, -32601,
+		return map[string]any{"mcp_response": jsonRPCError(id, jsonRPCMethodNotFound,
 			fmt.Sprintf("Server '%s' not found", serverName))}, nil
 	}
 	response, err := e.mcpRouter(ctx, serverName, raw)
 	if err != nil {
-		return map[string]any{"mcp_response": jsonRPCError(id, -32603, err.Error())}, nil
+		return map[string]any{"mcp_response": jsonRPCError(id, jsonRPCInternalError, err.Error())}, nil
 	}
 	if response == nil {
 		// A JSON-RPC notification gets no reply, but the control request

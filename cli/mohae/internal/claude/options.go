@@ -145,9 +145,7 @@ func (c *MCPHTTPServerConfig) MarshalJSON() ([]byte, error) {
 type MCPSDKServerConfig struct {
 	Name string
 	// Instance is the in-process server that answers mcp_message requests.
-	// It is an *MCPServer; the field is typed as any so the configuration
-	// surface stays independent of the SDK MCP implementation.
-	Instance any
+	Instance *MCPServer
 }
 
 func (*MCPSDKServerConfig) isMCPServerConfig() {}

@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T20:33:09Z"
 depends_on:
 - "01-internal-claude#3"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: Fake-transport tests cover: connect/disconnect lifecycle, multi-turn
 > NEXT: none
