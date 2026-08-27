@@ -783,13 +783,7 @@ func (r *Relay) forward(p *relayPeer, typ websocket.MessageType, b []byte) error
 }
 
 func (r *Relay) forwardUntil(p *relayPeer, typ websocket.MessageType, b []byte, deadline time.Time) error {
-	started := time.Now()
-	r.inflightDelivery.Add(int64(len(b)))
-	r.backpressuredSources.Add(1)
 	err := r.sendUntil(p, typ, b, deadline)
-	r.backpressuredSources.Add(-1)
-	r.inflightDelivery.Add(-int64(len(b)))
-	r.observeDeliveryWait(time.Since(started))
 	if err == nil {
 		r.framesForwarded.Add(1)
 		r.bytesForwarded.Add(int64(len(b)))
@@ -957,6 +951,18 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 	defer r.releaseInFlight(weighted)
 	defer source.releaseHeap(int64(len(b)))
 
+	// Capacity marks a source blocked once when start_delivery admits its
+	// message, before owner/data lookup and fan-out begin. The reference keeps
+	// that one blocked entry until the whole message finishes, so the gauge and
+	// in-flight payload accounting belong to the route rather than each write.
+	deliveryStarted := time.Now()
+	r.inflightDelivery.Add(int64(len(b)))
+	r.backpressuredSources.Add(1)
+	defer func() {
+		r.backpressuredSources.Add(-1)
+		r.inflightDelivery.Add(-int64(len(b)))
+		r.observeDeliveryWait(time.Since(deliveryStarted))
+	}()
 	// A source with a delivery in flight is blocked, and shedding drops the
 	// longest-blocked source first.
 	source.blockSeq.Store(r.nextSeq())

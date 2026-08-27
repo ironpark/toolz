@@ -200,6 +200,52 @@ func TestBackpressureFanoutMetricsCountEveryDestinationDelivery(t *testing.T) {
 	}
 }
 
+func TestBackpressureFanoutCountsOneBlockedSourceAndOneDeliveryWait(t *testing.T) {
+	relay := mustNewRelay(t, DefaultConfig())
+	server := httptestServerForRelay(t, relay)
+	serverID := "fanout-metric-semantics"
+
+	control := dialRelay(t, server, serverID, RoleServer, 2, "")
+	assertControlMessage(t, control, map[string]any{"type": "sync"})
+	first := dialRelay(t, server, serverID, RoleClient, 2, "fanout")
+	assertControlMessage(t, control, map[string]any{"type": "connected", "connectionId": "fanout"})
+	second := dialRelay(t, server, serverID, RoleClient, 2, "fanout")
+	assertControlMessage(t, control, map[string]any{"type": "connected", "connectionId": "fanout"})
+	data := dialRelay(t, server, serverID, RoleServer, 2, "fanout")
+
+	peers := relayClientPeers(relay, serverID, "fanout")
+	if len(peers) != 2 {
+		t.Fatalf("fan-out peers = %d, want 2", len(peers))
+	}
+	// Hold the first destination's writer. The source still has one delivery in
+	// flight even after the second destination accepts the frame.
+	peers[0].writeSlot <- struct{}{}
+	writeRelayMessage(t, data, websocket.MessageBinary, []byte("fanout"))
+	eventually(t, relayTestTimeout, func() bool {
+		return relay.backpressuredSources.Load() == 1 && relay.inflightDelivery.Load() == int64(len("fanout"))
+	})
+	if got := relay.deliveryWaitCount.Load(); got != 0 {
+		t.Fatalf("delivery wait count while fan-out is blocked = %d, want 0", got)
+	}
+
+	assertRelayMessage(t, second, websocket.MessageBinary, []byte("fanout"))
+	if got := relay.backpressuredSources.Load(); got != 1 {
+		t.Fatalf("blocked sources after healthy fan-out delivery = %d, want 1", got)
+	}
+	if got := relay.deliveryWaitCount.Load(); got != 0 {
+		t.Fatalf("delivery wait count before blocked destination releases = %d, want 0", got)
+	}
+
+	<-peers[0].writeSlot
+	assertRelayMessage(t, first, websocket.MessageBinary, []byte("fanout"))
+	eventually(t, relayTestTimeout, func() bool {
+		return relay.backpressuredSources.Load() == 0 && relay.inflightDelivery.Load() == 0 && relay.deliveryWaitCount.Load() == 1
+	})
+	if got := relay.deliveryWaitCount.Load(); got != 1 {
+		t.Fatalf("delivery wait count = %d, want 1", got)
+	}
+}
+
 func TestBackpressureUnreadFanoutPeerCannotDelayHealthyOrder(t *testing.T) {
 	r := backpressureScenario(t, "unread-fanout-peer")
 	if len(r.Forwarded) < 2 || string(r.Forwarded[0]) != "one" || string(r.Forwarded[1]) != "two" {
