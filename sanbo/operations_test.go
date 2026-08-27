@@ -55,21 +55,21 @@ func TestOperationsReadyWaitsForMinimumClusterSize(t *testing.T) {
 }
 
 func TestOperationsMetricsRecoverAfterCapacityFailure(t *testing.T) {
-	r := requireRelayScenario(t, NewRelay(DefaultConfig()), "operations/metrics-process-restart")
+	r := requireRelayScenario(t, mustNewRelay(t, DefaultConfig()), "operations/metrics-process-restart")
 	if r.ConnectionRejections == 0 || !r.AdmissionOpen {
 		t.Fatalf("metrics state was not retained across restart: %#v", r)
 	}
 }
 
 func TestOperationsReadinessIsBoundedWhileCapacityIsStalled(t *testing.T) {
-	r := requireRelayScenario(t, NewRelay(DefaultConfig()), "operations/stalled-capacity-ready")
+	r := requireRelayScenario(t, mustNewRelay(t, DefaultConfig()), "operations/stalled-capacity-ready")
 	if r.AdmissionOpen || r.CloseCode != 0 {
 		t.Fatalf("stalled Capacity readiness was not bounded/unavailable: %#v", r)
 	}
 }
 
 func TestOperationsMetricsOmitUnavailableCapacityGauges(t *testing.T) {
-	r := requireRelayScenario(t, NewRelay(DefaultConfig()), "operations/stalled-capacity-metrics")
+	r := requireRelayScenario(t, mustNewRelay(t, DefaultConfig()), "operations/stalled-capacity-metrics")
 	if r.IngressReservedBytes != -1 || r.InflightDeliveryBytes != -1 || r.BackpressuredSources != -1 || r.ConnectionRejections == 0 {
 		t.Fatalf("unavailable gauges were rendered or independent telemetry was lost: %#v", r)
 	}

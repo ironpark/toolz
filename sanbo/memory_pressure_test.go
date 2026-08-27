@@ -19,7 +19,7 @@ func pressureConfig(watermark int) Config {
 }
 
 func TestMemoryPressureEngagesAtWatermarkAndClosesAdmission(t *testing.T) {
-	relay := NewRelay(pressureConfig(1_000))
+	relay := mustNewRelay(t, pressureConfig(1_000))
 	server := httptestServerForRelay(t, relay)
 	if status, _, _ := getResponse(t, server.URL+"/ready"); status != http.StatusOK {
 		t.Fatalf("readiness before pressure=%d, want 200", status)
@@ -37,7 +37,7 @@ func TestMemoryPressureEngagesAtWatermarkAndClosesAdmission(t *testing.T) {
 }
 
 func TestMemoryPressureShedsAttachedPeersAndBuffers(t *testing.T) {
-	relay := NewRelay(pressureConfig(1_000))
+	relay := mustNewRelay(t, pressureConfig(1_000))
 	server := httptestServerForRelay(t, relay)
 	conn := dialRelay(t, server, "pressure-shed", RoleServer, 1, "")
 	defer conn.CloseNow()
@@ -61,7 +61,7 @@ func TestMemoryPressureShedsAttachedPeersAndBuffers(t *testing.T) {
 }
 
 func TestMemoryPressureShedsOnlyOncePerCrossing(t *testing.T) {
-	relay := NewRelay(pressureConfig(1_000))
+	relay := mustNewRelay(t, pressureConfig(1_000))
 	server := httptestServerForRelay(t, relay)
 	conn := dialRelay(t, server, "pressure-once", RoleServer, 1, "")
 	defer conn.CloseNow()
@@ -78,7 +78,7 @@ func TestMemoryPressureShedsOnlyOncePerCrossing(t *testing.T) {
 
 func TestMemoryPressureHoldsUntilUsageFallsBelowRecoveryThreshold(t *testing.T) {
 	watermark := 2 * MaximumMessagePayloadBytes
-	relay := NewRelay(pressureConfig(watermark))
+	relay := mustNewRelay(t, pressureConfig(watermark))
 	relay.sampleMemoryPressure(uint64(watermark))
 
 	// Just under the watermark is not enough; pressure holds until the node has
@@ -97,7 +97,7 @@ func TestMemoryPressureHoldsUntilUsageFallsBelowRecoveryThreshold(t *testing.T) 
 // TestMemoryPressureShedsInBatchesAcrossSamples covers the gradual shedding
 // contract: one crossing does not disconnect every socket on the node.
 func TestMemoryPressureShedsInBatchesAcrossSamples(t *testing.T) {
-	relay := NewRelay(pressureConfig(1_000))
+	relay := mustNewRelay(t, pressureConfig(1_000))
 	server := httptestServerForRelay(t, relay)
 	sockets := initialShedBatch + 4
 	for i := 0; i < sockets; i++ {
@@ -119,7 +119,7 @@ func TestMemoryPressureShedsInBatchesAcrossSamples(t *testing.T) {
 }
 
 func TestMemoryPressureReadmitsAfterRelief(t *testing.T) {
-	relay := NewRelay(pressureConfig(1_000))
+	relay := mustNewRelay(t, pressureConfig(1_000))
 	server := httptestServerForRelay(t, relay)
 	relay.sampleMemoryPressure(1_000)
 	relay.sampleMemoryPressure(0)
@@ -132,7 +132,7 @@ func TestMemoryPressureReadmitsAfterRelief(t *testing.T) {
 }
 
 func TestMemoryPressureDisabledByZeroWatermark(t *testing.T) {
-	relay := NewRelay(pressureConfig(0))
+	relay := mustNewRelay(t, pressureConfig(0))
 	server := httptestServerForRelay(t, relay)
 	conn := dialRelay(t, server, "pressure-disabled", RoleServer, 1, "")
 	defer conn.CloseNow()
@@ -153,7 +153,7 @@ func TestMemoryPressureDisabledByZeroWatermark(t *testing.T) {
 // TestMemoryPressureSamplerRunsFromStart covers the wiring the unit cases skip:
 // the sampler goroutine reading real memory use against the watermark.
 func TestMemoryPressureSamplerRunsFromStart(t *testing.T) {
-	relay := NewRelay(pressureConfig(1))
+	relay := mustNewRelay(t, pressureConfig(1))
 	stop := relay.watchMemoryPressure()
 	defer stop()
 
@@ -173,7 +173,7 @@ func TestHeapInUseReportsNonZero(t *testing.T) {
 func TestMemoryPressureReleasesBufferedFrames(t *testing.T) {
 	config := pressureConfig(1_000)
 	config.DataAttachTimeoutMS = 10_000
-	relay := NewRelay(config)
+	relay := mustNewRelay(t, config)
 	server := httptestServerForRelay(t, relay)
 	serverID := "pressure-buffer"
 

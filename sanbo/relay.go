@@ -157,11 +157,15 @@ func (s *relaySession) dropBufferLocked(connectionID string) int64 {
 	return reserved
 }
 
-// NewRelay constructs a relay with validated runtime configuration.
-func NewRelay(config Config) *Relay {
+// NewRelay constructs a relay with validated runtime configuration. A cluster
+// store this node cannot reach is fatal rather than degraded: a relay whose
+// ownership coordinator is broken answers every upgrade with 503 forever, so
+// failing construction keeps it out of an orchestrator's rotation instead of
+// leaving a healthy-looking node that serves nothing.
+func NewRelay(config Config) (*Relay, error) {
 	ownership, err := newOwnershipCoordinator(config)
 	if err != nil {
-		ownership = &failedOwnershipCoordinator{err: err}
+		return nil, fmt.Errorf("cluster ownership coordinator: %w", err)
 	}
 	relay := &Relay{
 		Config:            config,
@@ -172,7 +176,7 @@ func NewRelay(config Config) *Relay {
 		ownership:         ownership,
 	}
 	relay.draining.Store(config.Drain)
-	return relay
+	return relay, nil
 }
 
 // BeginDrain closes this node to new sessions. Existing sessions are left to

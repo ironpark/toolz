@@ -17,7 +17,7 @@ func TestProductionReadinessBecomesUnavailableAtWebSocketCeiling(t *testing.T) {
 	config := DefaultConfig()
 	config.Acceptors = 1
 	config.ConnectionsPerAcceptor = 1
-	relay := NewRelay(config)
+	relay := mustNewRelay(t, config)
 	server := httptestServerForRelay(t, relay)
 	_ = dialRelay(t, server, "ready-capacity", RoleServer, 1, "")
 
@@ -53,7 +53,7 @@ func TestProductionMetricsExposeCompleteStableSurface(t *testing.T) {
 }
 
 func TestProductionMetricsTrackActiveSessionsAndRemoveThemOnClose(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	conn := dialRelay(t, server, "metrics-session", RoleServer, 1, "")
 	if got := metricValue(t, relayMetrics(t, server), "paseo_relay_active_sessions"); got != 1 {
@@ -72,7 +72,7 @@ func TestProductionMetricsTrackActiveSessionsAndRemoveThemOnClose(t *testing.T) 
 }
 
 func TestProductionMetricsCountForwardedBytes(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	daemon := dialRelay(t, server, "byte-metric", RoleServer, 1, "")
 	client := dialRelay(t, server, "byte-metric", RoleClient, 1, "")
@@ -87,7 +87,7 @@ func TestProductionMetricsCountForwardedBytes(t *testing.T) {
 }
 
 func TestProductionMetricsCountAcceptedAndRejectedHandshakes(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	daemon := dialRelay(t, server, "handshake-metric", RoleServer, 1, "")
 	accepted := dialRelay(t, server, "handshake-metric", RoleClient, 1, "")
@@ -121,7 +121,7 @@ func TestProductionHandshakeValidationAppliesOnlyToClientFrames(t *testing.T) {
 func TestProductionV2MissingDataRouteExpiresAndReleasesBuffer(t *testing.T) {
 	config := DefaultConfig()
 	config.DataAttachTimeoutMS = 50
-	relay := NewRelay(config)
+	relay := mustNewRelay(t, config)
 	server := httptestServerForRelay(t, relay)
 	client := dialRelay(t, server, "missing-data", RoleClient, 2, "missing")
 	writeRelayMessage(t, client, websocket.MessageBinary, []byte("retained"))
@@ -139,7 +139,7 @@ func TestProductionBufferedMessagesCannotExceedWeightedIngressBudget(t *testing.
 	config.IngressBudgetBytes = 8
 	config.IngressWeight = 1
 	config.DataAttachTimeoutMS = 5_000
-	relay := NewRelay(config)
+	relay := mustNewRelay(t, config)
 	server := httptestServerForRelay(t, relay)
 	client := dialRelay(t, server, "bounded-buffer", RoleClient, 2, "waiting")
 	writeRelayMessage(t, client, websocket.MessageBinary, []byte("12345678"))
@@ -155,7 +155,7 @@ func TestProductionBufferedMessagesCannotExceedWeightedIngressBudget(t *testing.
 }
 
 func TestProductionClosingV2ClientDropsUndeliveredFrames(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	client := dialRelay(t, server, "buffer-cleanup", RoleClient, 2, "gone")
 	writeRelayMessage(t, client, websocket.MessageText, []byte("must-not-survive"))
@@ -171,7 +171,7 @@ func TestProductionClosingV2ClientDropsUndeliveredFrames(t *testing.T) {
 }
 
 func TestProductionEmptySessionStateIsReclaimed(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	conn := dialRelay(t, server, "reclaim-empty", RoleServer, 1, "")
 	if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil {
@@ -184,7 +184,7 @@ func TestProductionConnectionRejectionIncrementsMetricWithoutCreatingSession(t *
 	config := DefaultConfig()
 	config.Acceptors = 1
 	config.ConnectionsPerAcceptor = 1
-	relay := NewRelay(config)
+	relay := mustNewRelay(t, config)
 	server := httptestServerForRelay(t, relay)
 	_ = dialRelay(t, server, "capacity-held", RoleServer, 1, "")
 
@@ -201,14 +201,14 @@ func TestProductionCapacityRejectionReleasesNewOwnershipClaim(t *testing.T) {
 	config := DefaultConfig()
 	config.Acceptors = 1
 	config.ConnectionsPerAcceptor = 1
-	firstRelay := NewRelay(config)
+	firstRelay := mustNewRelay(t, config)
 	firstServer := httptestServerForRelay(t, firstRelay)
 	_ = dialRelay(t, firstServer, "capacity-claim-held", RoleServer, 1, "")
 	dialRelayExpectingStatus(t, firstServer, "capacity-claim-rejected", RoleServer, 1, "", http.StatusServiceUnavailable)
 
 	secondConfig := DefaultConfig()
 	secondConfig.OwnershipTarget = "other-node"
-	secondRelay := NewRelay(secondConfig)
+	secondRelay := mustNewRelay(t, secondConfig)
 	secondServer := httptestServerForRelay(t, secondRelay)
 	_ = dialRelay(t, secondServer, "capacity-claim-rejected", RoleServer, 1, "")
 }

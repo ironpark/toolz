@@ -46,7 +46,7 @@ func TestControlAttachReplacesPreviousControlSocket(t *testing.T) {
 
 // A replaced socket must not tear down the state its replacement now holds.
 func TestReplacedControlSocketDoesNotDetachItsReplacement(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	first := dialRelay(t, server, "control-replace-detach", RoleServer, 2, "")
 	assertControlMessage(t, first, map[string]any{"type": "sync"})
@@ -120,7 +120,7 @@ func controlPeer(t *testing.T, relay *Relay, serverID string) *relayPeer {
 func TestControlQueueOverflowClosesDestinationAsSlowConsumer(t *testing.T) {
 	config := DefaultConfig()
 	config.ControlQueueBytes = 64
-	relay := NewRelay(config)
+	relay := mustNewRelay(t, config)
 	server := httptestServerForRelay(t, relay)
 	control := dialRelay(t, server, "control-queue-overflow", RoleServer, 2, "")
 	defer control.CloseNow()
@@ -146,7 +146,7 @@ func TestControlQueueOverflowClosesDestinationAsSlowConsumer(t *testing.T) {
 func TestControlFrameQueuesBehindAnInFlightWrite(t *testing.T) {
 	config := DefaultConfig()
 	config.ControlQueueBytes = 1024
-	relay := NewRelay(config)
+	relay := mustNewRelay(t, config)
 	server := httptestServerForRelay(t, relay)
 	control := dialRelay(t, server, "control-queue-order", RoleServer, 2, "")
 	defer control.CloseNow()
@@ -172,7 +172,7 @@ func TestControlFrameQueuesBehindAnInFlightWrite(t *testing.T) {
 // --- capacity.ex:158-236, 527-563 — admission and delivery under pressure ---
 
 func TestMemoryPressureRefusesInboundFramesFromAttachedSockets(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	client := dialRelay(t, server, "pressure-inbound", RoleClient, 1, "")
 	defer client.CloseNow()
@@ -184,7 +184,7 @@ func TestMemoryPressureRefusesInboundFramesFromAttachedSockets(t *testing.T) {
 }
 
 func TestShedSocketRefusesFurtherFrames(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	client := dialRelay(t, server, "shed-inbound", RoleClient, 1, "")
 	defer client.CloseNow()
@@ -207,7 +207,7 @@ func TestShedSocketRefusesFurtherFrames(t *testing.T) {
 // Pressure that engages between admission and delivery is reported with the
 // delivery-stage reason rather than the ingress one.
 func TestMemoryPressureAtDeliveryStartClosesWithPressureReason(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	client := dialRelay(t, server, "pressure-delivery", RoleClient, 1, "")
 	defer client.CloseNow()
@@ -236,7 +236,7 @@ func relayV1ClientPeer(t *testing.T, relay *Relay, serverID string) *relayPeer {
 // --- capacity.ex:519-563 — victim order ---
 
 func TestShedPicksLongestBlockedSourceBeforeNewestActiveSocket(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	oldBlocked, newBlocked := newRelayPeer(nil), newRelayPeer(nil)
 	oldActive, newActive := newRelayPeer(nil), newRelayPeer(nil)
 	for _, peer := range []*relayPeer{oldBlocked, newBlocked, oldActive, newActive} {
@@ -262,7 +262,7 @@ func TestShedPicksLongestBlockedSourceBeforeNewestActiveSocket(t *testing.T) {
 }
 
 func TestShedSkipsSocketsAlreadyChosen(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	already, next := newRelayPeer(nil), newRelayPeer(nil)
 	already.shed.Store(true)
 	next.attachSeq.Store(relay.nextSeq())
@@ -283,7 +283,7 @@ func TestShedSkipsSocketsAlreadyChosen(t *testing.T) {
 // --- drain.ex + operations.ex:63-70 + ownership.ex:58-63 — runtime drain ---
 
 func TestDrainBeginsAndCancelsAtRuntime(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	if status, _, _ := getResponse(t, server.URL+"/ready"); status != http.StatusOK {
 		t.Fatalf("readiness before drain = %d, want 200", status)
@@ -311,7 +311,7 @@ func TestDrainBeginsAndCancelsAtRuntime(t *testing.T) {
 }
 
 func TestDrainRefusesNewSessionClaimsWith503Draining(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	relay.BeginDrain()
 
@@ -335,7 +335,7 @@ func TestDrainRefusesNewSessionClaimsWith503Draining(t *testing.T) {
 // A drain empties the node gradually: sessions it already owns keep accepting
 // sockets so their traffic can finish.
 func TestDrainKeepsServingSessionsThisNodeAlreadyOwns(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	existing := dialRelay(t, server, "drain-existing", RoleServer, 1, "")
 	defer existing.CloseNow()
@@ -390,7 +390,7 @@ func TestSocketHeapFuseAdmitsFramesWithinTheCeiling(t *testing.T) {
 func TestSocketHeapChargeIsRetiredAfterRouting(t *testing.T) {
 	config := DefaultConfig()
 	config.WebsocketMaxHeapWords = 4
-	relay := NewRelay(config)
+	relay := mustNewRelay(t, config)
 	server := httptestServerForRelay(t, relay)
 	daemon := dialRelay(t, server, "heap-release", RoleServer, 1, "")
 	defer daemon.CloseNow()

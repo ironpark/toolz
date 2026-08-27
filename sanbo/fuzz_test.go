@@ -122,7 +122,7 @@ func FuzzValidHandshake(f *testing.F) {
 	f.Add([]byte("\xff\xff\xff\xff"))
 	f.Add([]byte(`[]`))
 
-	r := NewRelay(DefaultConfig())
+	r := mustNewRelay(f, DefaultConfig())
 	f.Fuzz(func(t *testing.T, payload []byte) {
 		accepted := r.validateHandshake(1, payload)
 		if accepted != r.validateHandshake(1, payload) {
@@ -159,7 +159,7 @@ func FuzzValidHandshakeKey(f *testing.F) {
 	f.Add(true, allOnes)
 	f.Add(true, []byte(nil))
 
-	r := NewRelay(DefaultConfig())
+	r := mustNewRelay(f, DefaultConfig())
 	f.Fuzz(func(t *testing.T, e2ee bool, key []byte) {
 		kind := "hello"
 		if e2ee {

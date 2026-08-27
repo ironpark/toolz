@@ -9,7 +9,7 @@ import (
 )
 
 func TestCapacityReconcileReleasesOrphanedReservation(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	epoch := relay.capacityEpoch.Load()
 	// A reservation no buffer and no live route accounts for: the shape left
 	// behind when a teardown path loses its release.
@@ -29,7 +29,7 @@ func TestCapacityReconcileReleasesOrphanedReservation(t *testing.T) {
 }
 
 func TestCapacityReconcileLeavesInFlightReservationsAlone(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	epoch := relay.capacityEpoch.Load()
 	// Mid-route: reserved and published as in-flight, not yet buffered.
 	relay.ingressInFlight.Add(4_096)
@@ -48,7 +48,7 @@ func TestCapacityReconcileLeavesInFlightReservationsAlone(t *testing.T) {
 func TestCapacityReconcileLeavesBufferedFramesAlone(t *testing.T) {
 	config := DefaultConfig()
 	config.DataAttachTimeoutMS = 10_000
-	relay := NewRelay(config)
+	relay := mustNewRelay(t, config)
 	server := httptestServerForRelay(t, relay)
 	serverID := "reconcile-buffered"
 
@@ -77,7 +77,7 @@ func TestCapacityReconcileLeavesBufferedFramesAlone(t *testing.T) {
 // TestCapacityLedgersBalanceAfterRouting is the invariant the reconciler rests
 // on: ordinary forwarding leaves neither ledger holding anything.
 func TestCapacityLedgersBalanceAfterRouting(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	serverID := "reconcile-balance"
 
@@ -106,7 +106,7 @@ func TestCapacityLedgersBalanceAfterRouting(t *testing.T) {
 func TestReserveIngressDoesNotLeakInFlightOnRejection(t *testing.T) {
 	config := DefaultConfig()
 	config.IngressBudgetBytes = 1_024
-	relay := NewRelay(config)
+	relay := mustNewRelay(t, config)
 
 	if relay.reserveIngress(2_048) {
 		t.Fatal("reserved beyond the ingress budget")
@@ -124,7 +124,7 @@ func TestReserveIngressDoesNotLeakInFlightOnRejection(t *testing.T) {
 func TestCapacityReconcilerRunsOnItsInterval(t *testing.T) {
 	config := DefaultConfig()
 	config.CapacityMutationTimeoutMS = 20
-	relay := NewRelay(config)
+	relay := mustNewRelay(t, config)
 	relay.ingressReserved.Add(8_192)
 
 	stop := relay.watchCapacity()

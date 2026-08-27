@@ -31,7 +31,7 @@ func TestMultiNodeRelayProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := NewRelay(config).Start(); err != nil {
+	if err := mustNewRelay(t, config).Start(); err != nil {
 		t.Fatal(err)
 	}
 }

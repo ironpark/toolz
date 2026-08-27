@@ -86,22 +86,6 @@ func (*localOwnershipCoordinator) close() error                           { retu
 
 var localOwnership ownershipCoordinator = &localOwnershipCoordinator{}
 
-type failedOwnershipCoordinator struct{ err error }
-
-func (*failedOwnershipCoordinator) identity() string { return "" }
-func (c *failedOwnershipCoordinator) lookup(string) (ownershipRecord, bool, error) {
-	return ownershipRecord{}, false, c.err
-}
-func (c *failedOwnershipCoordinator) claim(string, *Relay) (ownershipRecord, bool, error) {
-	return ownershipRecord{}, false, c.err
-}
-func (c *failedOwnershipCoordinator) release(string, *Relay) error { return c.err }
-func (c *failedOwnershipCoordinator) ownedServers() (map[string]bool, error) {
-	return nil, c.err
-}
-func (c *failedOwnershipCoordinator) members() (int, error) { return 0, c.err }
-func (*failedOwnershipCoordinator) close() error            { return nil }
-
 type clusterMember struct {
 	ID        string `json:"id"`
 	Heartbeat int64  `json:"heartbeat"`

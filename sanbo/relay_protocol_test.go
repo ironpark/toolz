@@ -149,7 +149,7 @@ func slowConsumerConfig() Config {
 }
 
 func TestRelayV2SlowClientDoesNotBreakFanOutForTheOthers(t *testing.T) {
-	relay := NewRelay(slowConsumerConfig())
+	relay := mustNewRelay(t, slowConsumerConfig())
 	server := httptestServerForRelay(t, relay)
 	serverID := "v2-fanout-slow"
 	blocked := dialRelay(t, server, serverID, RoleClient, 2, "shared")
@@ -170,7 +170,7 @@ func TestRelayV2SlowClientDoesNotBreakFanOutForTheOthers(t *testing.T) {
 }
 
 func TestRelayV2ClosesSourceOnlyWhenEveryDestinationFails(t *testing.T) {
-	relay := NewRelay(slowConsumerConfig())
+	relay := mustNewRelay(t, slowConsumerConfig())
 	server := httptestServerForRelay(t, relay)
 	serverID := "v2-fanout-stuck"
 	_ = dialRelay(t, server, serverID, RoleClient, 2, "shared")
@@ -204,7 +204,7 @@ func TestRelayV2PayloadDeliveryDoesNotUseNodeWideRegistry(t *testing.T) {
 }
 
 func TestRelayV2SocketsFailClosedWhenSessionOwnerExits(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	serverID := "v2-owner-exit"
 	control := dialRelay(t, server, serverID, RoleServer, 2, "")
@@ -216,7 +216,7 @@ func TestRelayV2SocketsFailClosedWhenSessionOwnerExits(t *testing.T) {
 }
 
 func TestRelayV2SocketInitializationFailsClosedWhenOwnerMoves(t *testing.T) {
-	relay := NewRelay(DefaultConfig())
+	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
 	serverID := "v2-owner-moved"
 	control := dialRelay(t, server, serverID, RoleServer, 2, "")

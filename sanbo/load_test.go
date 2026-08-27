@@ -7,7 +7,7 @@ import "testing"
 // invariants are unchanged.
 func loadScenario(t *testing.T, name string) relayScenarioResult {
 	t.Helper()
-	return requireRelayScenario(t, NewRelay(DefaultConfig()), "load/"+name)
+	return requireRelayScenario(t, mustNewRelay(t, DefaultConfig()), "load/"+name)
 }
 
 func TestLoadClientDocumentsGenericV2WebSocketRoles(t *testing.T) {

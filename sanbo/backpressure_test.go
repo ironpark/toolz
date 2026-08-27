@@ -12,7 +12,7 @@ import (
 // same-package scenario controller and assert the externally visible result.
 func backpressureScenario(t *testing.T, name string) relayScenarioResult {
 	t.Helper()
-	return requireRelayScenario(t, NewRelay(DefaultConfig()), "backpressure/"+name)
+	return requireRelayScenario(t, mustNewRelay(t, DefaultConfig()), "backpressure/"+name)
 }
 
 func requireClose(t *testing.T, result relayScenarioResult, code websocket.StatusCode, reason string) {

@@ -66,14 +66,14 @@ func TestRouterHealthIsLiveWhileReadinessBlocksOwnership(t *testing.T) {
 func TestRouterReturnsOpaqueRerouteBeforeWebSocketNegotiation(t *testing.T) {
 	config := DefaultConfig()
 	config.OwnershipTarget = "opaque-owner"
-	r := requireRelayScenario(t, NewRelay(config), "router/remote-reroute-before-upgrade")
+	r := requireRelayScenario(t, mustNewRelay(t, config), "router/remote-reroute-before-upgrade")
 	if r.OwnerTarget != "opaque-owner" || r.OpenedSockets != 0 {
 		t.Fatalf("reroute negotiated a websocket or lost target: %#v", r)
 	}
 }
 
 func TestRouterLocalPressureDoesNotSuppressRemoteReroute(t *testing.T) {
-	r := requireRelayScenario(t, NewRelay(DefaultConfig()), "router/pressure-preserves-reroute")
+	r := requireRelayScenario(t, mustNewRelay(t, DefaultConfig()), "router/pressure-preserves-reroute")
 	if r.OwnerTarget == "" || r.OpenedSockets != 0 || r.ConnectionRejections != 0 {
 		t.Fatalf("local pressure suppressed remote reroute: %#v", r)
 	}

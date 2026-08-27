@@ -27,7 +27,7 @@ func lookupOwner(serverID string) (ownershipRecord, bool) {
 }
 
 func TestScenarioDriverDoesNotFabricateCompatibilityResults(t *testing.T) {
-	result, err := NewRelay(DefaultConfig()).testRunScenario("ownership/claim-local")
+	result, err := mustNewRelay(t, DefaultConfig()).testRunScenario("ownership/claim-local")
 	if err == nil {
 		t.Fatalf("scenario driver fabricated a successful result: %#v", result)
 	}
@@ -800,7 +800,10 @@ func (r *Relay) runOwnershipScenario(name string) (relayScenarioResult, error) {
 	case "concurrent-claim", "partition-heal":
 		otherConfig := DefaultConfig()
 		otherConfig.OwnershipTarget = "opaque-node-b"
-		other := NewRelay(otherConfig)
+		other, err := NewRelay(otherConfig)
+		if err != nil {
+			return result, err
+		}
 		otherHarness := newScenarioHarness(other)
 		defer otherHarness.close()
 		otherHarness.ids = append(otherHarness.ids, id)
@@ -831,7 +834,10 @@ func (r *Relay) runOwnershipScenario(name string) (relayScenarioResult, error) {
 		}
 		otherConfig := DefaultConfig()
 		otherConfig.OwnershipTarget = "opaque-node-b"
-		other := NewRelay(otherConfig)
+		other, err := NewRelay(otherConfig)
+		if err != nil {
+			return result, err
+		}
 		otherHarness := newScenarioHarness(other)
 		defer otherHarness.close()
 		otherHarness.ids = append(otherHarness.ids, id)
@@ -847,7 +853,11 @@ func (r *Relay) runOwnershipScenario(name string) (relayScenarioResult, error) {
 		}
 		otherConfig := DefaultConfig()
 		otherConfig.OwnershipTarget = "opaque-node-b"
-		otherHarness := newScenarioHarness(NewRelay(otherConfig))
+		otherRelay, err := NewRelay(otherConfig)
+		if err != nil {
+			return result, err
+		}
+		otherHarness := newScenarioHarness(otherRelay)
 		defer otherHarness.close()
 		otherHarness.ids = append(otherHarness.ids, id)
 		if _, err := dialOwner(otherHarness, id); err == nil {
@@ -894,14 +904,21 @@ func (r *Relay) runRouterScenario(name string) (relayScenarioResult, error) {
 	if ownerConfig.OwnershipTarget == "local" {
 		ownerConfig.OwnershipTarget = "opaque-owner"
 	}
-	ownerHarness := newScenarioHarness(NewRelay(ownerConfig))
+	ownerRelay, err := NewRelay(ownerConfig)
+	if err != nil {
+		return relayScenarioResult{}, err
+	}
+	ownerHarness := newScenarioHarness(ownerRelay)
 	defer ownerHarness.close()
 	ownerHarness.ids = append(ownerHarness.ids, id)
 	if _, err := ownerHarness.dial(id, RoleServer, 1, ""); err != nil {
 		return relayScenarioResult{}, err
 	}
 
-	requestRelay := NewRelay(DefaultConfig())
+	requestRelay, err := NewRelay(DefaultConfig())
+	if err != nil {
+		return relayScenarioResult{}, err
+	}
 	if name == "pressure-preserves-reroute" {
 		requestRelay.memoryPressure.Store(true)
 	}

@@ -10,7 +10,7 @@ import (
 // Ported from test/paseo_relay/listener_test.exs.
 func listenerScenario(t *testing.T, name string) relayScenarioResult {
 	t.Helper()
-	return requireRelayScenario(t, NewRelay(DefaultConfig()), "listener/"+name)
+	return requireRelayScenario(t, mustNewRelay(t, DefaultConfig()), "listener/"+name)
 }
 
 func TestListenerNativeHTTPServerServesRelayOperations(t *testing.T) {
@@ -31,7 +31,7 @@ func TestListenerStalledHTTPBodyReleasesSlotWithoutExpiringWebSockets(t *testing
 func TestListenerActiveWebSocketCeilingRejectsExactlyAtCapacityAndReleases(t *testing.T) {
 	config := DefaultConfig()
 	config.Acceptors, config.ConnectionsPerAcceptor = 1, 2
-	relay := NewRelay(config)
+	relay := mustNewRelay(t, config)
 	server := httptestServerForRelay(t, relay)
 	first := dialRelay(t, server, "ceiling-1", RoleServer, 1, "")
 	second := dialRelay(t, server, "ceiling-2", RoleServer, 1, "")

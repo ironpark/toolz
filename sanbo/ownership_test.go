@@ -8,7 +8,7 @@ func ownershipScenario(t *testing.T, name string) relayScenarioResult {
 	t.Helper()
 	config := DefaultConfig()
 	config.OwnershipTarget = "opaque-node-a"
-	return requireRelayScenario(t, NewRelay(config), "ownership/"+name)
+	return requireRelayScenario(t, mustNewRelay(t, config), "ownership/"+name)
 }
 
 func TestOwnershipClaimsUnownedServerLocally(t *testing.T) {

@@ -20,7 +20,7 @@ const relayTestTimeout = 300 * time.Millisecond
 
 func newRelayTestServer(t *testing.T, config Config) *httptest.Server {
 	t.Helper()
-	return httptestServerForRelay(t, NewRelay(config))
+	return httptestServerForRelay(t, mustNewRelay(t, config))
 }
 
 // newControlWatchdogTestServer serves a relay whose control watchdog runs on
@@ -28,7 +28,7 @@ func newRelayTestServer(t *testing.T, config Config) *httptest.Server {
 // behavior is observable within a test timeout.
 func newControlWatchdogTestServer(t *testing.T, config Config, sync, close time.Duration) *httptest.Server {
 	t.Helper()
-	relay := NewRelay(config)
+	relay := mustNewRelay(t, config)
 	relay.controlSyncDelay = sync
 	relay.controlCloseDelay = close
 	return httptestServerForRelay(t, relay)
@@ -246,4 +246,15 @@ func relayClientPeers(relay *Relay, serverID, connectionID string) []*relayPeer 
 		return nil
 	}
 	return append([]*relayPeer(nil), s.clients[connectionID]...)
+}
+
+// mustNewRelay constructs a relay or fails the test. Construction only fails
+// when the configured cluster store is unreachable, which no test intends.
+func mustNewRelay(t testing.TB, config Config) *Relay {
+	t.Helper()
+	relay, err := NewRelay(config)
+	if err != nil {
+		t.Fatalf("new relay: %v", err)
+	}
+	return relay
 }
