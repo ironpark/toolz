@@ -8,3 +8,5 @@ require (
 )
 
 require github.com/expr-lang/expr v1.17.8
+
+require github.com/modelcontextprotocol/go-sdk v1.7.0 // indirect

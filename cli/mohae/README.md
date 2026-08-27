@@ -192,7 +192,7 @@ prompts:
 ## 사용법
 
 ```sh
-mohae init --with-scripts --with-agent-md   # 템플릿 생성
+mohae init --all                            # 템플릿 생성
 mohae verify --check-scripts                # 실행 전 점검
 mohae run                                   # 실행과 리포트
 ```
@@ -278,11 +278,18 @@ mohae verify --check-scripts --check-agent-md --strict
 
 ```sh
 mohae init                                   # ./mohae.config.yaml
+mohae init --all                             # 설정이 참조하는 파일까지 전부
 mohae init trials/kvstore --template cli-skill --with-scripts
 ```
 
 템플릿은 `basic`, `mcp-server`, `cli-skill`, `multi-agent`입니다. 무엇을 테스트 대상으로
 두는지만 다르고, 격리·프롬프트·검증이라는 흐름은 모두 같습니다.
+
+설정 파일만 만들면 그 설정이 가리키는 파일들은 아직 없으므로 `mohae verify`가
+실패합니다. `--all`은 선택한 템플릿의 설정이 참조하는 파일을 모두 만들어 곧바로
+검증이 통과하는 프로젝트를 남깁니다. 개별로는 `--with-scripts`(`init.sh`,
+`verify.sh`), `--with-agent-md`, `--with-prompt`(`PROMPT.md`),
+`--with-fixture`(`fixture/`), `--with-mcp`(`mcp.json`)로 고를 수 있습니다.
 
 테스트 대상 CLI는 `workspace.init_script`에서 빌드해 `PATH`에 올립니다. 격리된
 워크스페이스 안에서 빌드하므로 머신에 설치된 것이 아니라 현재 소스가 평가됩니다.
@@ -301,7 +308,7 @@ mohae init trials/kvstore --template cli-skill --with-scripts
 
 | 명령      | 상태                                              |
 | --------- | ------------------------------------------------- |
-| `init`    | 동작 — 설정·스크립트·`AGENTS.md` 템플릿 생성      |
+| `init`    | 동작 — 설정과 참조 파일 일체 생성 (`--all`)       |
 | `verify`  | 동작 — 경로·스크립트·`AGENTS.md` 검사 (MCP는 예정) |
 | `run`     | 설정 로딩과 오버라이드까지 동작, 실행은 구현 중   |
 | `compare` | 인자 검증까지 동작                                |

@@ -93,6 +93,27 @@ func TestInitTemplateIsAValidConfiguration(t *testing.T) {
 	}
 }
 
+func TestInitAllWritesAProjectThatVerifies(t *testing.T) {
+	// The template's configuration names files init can write. If --all leaves
+	// any of them out, `mohae init && mohae verify` fails on mohae's own output.
+	for _, template := range Templates {
+		t.Run(template, func(t *testing.T) {
+			directory := chdir(t)
+			if err := run(t, "init", "--all", "--template", template); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{DefaultConfigName, "init.sh", "verify.sh", "AGENTS.md", "PROMPT.md", filepath.Join("fixture", "README.md")} {
+				if _, err := os.Stat(filepath.Join(directory, name)); err != nil {
+					t.Errorf("%s was not created: %v", name, err)
+				}
+			}
+			if err := run(t, "verify", "--check-scripts", "--check-agent-md"); err != nil {
+				t.Fatalf("verify = %v, want success", err)
+			}
+		})
+	}
+}
+
 func TestInitRejectsAnUnknownTemplate(t *testing.T) {
 	chdir(t)
 	if err := run(t, "init", "--template", "nonesuch"); err == nil {
