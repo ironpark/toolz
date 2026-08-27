@@ -40,8 +40,9 @@ type ownershipCoordinator interface {
 	close() error
 }
 
-// ownershipTable preserves the original in-process behavior for local/default
-// configurations and for the compatibility scenario harness.
+// ownershipTable is the local/default backend. It is deliberately process-local;
+// the file backend below is selected only when all host-cluster settings are
+// present.
 var ownershipTable = struct {
 	sync.Mutex
 	owners map[string]ownershipRecord
@@ -97,9 +98,10 @@ type clusterOwner struct {
 	Target   string `json:"target"`
 }
 
-// fileOwnershipCoordinator is a host-level lease registry. File locking makes
+// fileOwnershipCoordinator is a same-host lease registry. File locking makes
 // claims atomic across independent OS processes, while heartbeat leases make
-// membership and ownership recover after an ungraceful process exit.
+// membership and ownership recover after an ungraceful process exit. It is not
+// a network discovery or cross-host clustering backend.
 type fileOwnershipCoordinator struct {
 	dir       string
 	memberID  string
@@ -268,15 +270,21 @@ func (coordinator *fileOwnershipCoordinator) memberFile(memberID string) string 
 
 func (coordinator *fileOwnershipCoordinator) readOwnerLocked(serverID string) (clusterOwner, bool, error) {
 	var owner clusterOwner
-	err := readJSONFile(coordinator.ownerFile(serverID), &owner)
+	path := coordinator.ownerFile(serverID)
+	err := readJSONFile(path, &owner)
 	if errors.Is(err, os.ErrNotExist) {
 		return clusterOwner{}, false, nil
 	}
 	if err != nil {
+		if invalidJSONRecord(err) {
+			_ = os.Remove(path)
+			return clusterOwner{}, false, nil
+		}
 		return clusterOwner{}, false, err
 	}
 	if owner.ServerID != serverID {
-		return clusterOwner{}, false, fmt.Errorf("cluster owner record does not match server ID")
+		_ = os.Remove(path)
+		return clusterOwner{}, false, nil
 	}
 	return owner, true, nil
 }
@@ -291,7 +299,10 @@ func (coordinator *fileOwnershipCoordinator) eachOwnedLocked(visit func(path str
 		path := filepath.Join(coordinator.dir, "owners", entry.Name())
 		var owner clusterOwner
 		if err := readJSONFile(path, &owner); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+			if errors.Is(err, os.ErrNotExist) || invalidJSONRecord(err) {
+				if invalidJSONRecord(err) {
+					_ = os.Remove(path)
+				}
 				continue
 			}
 			return err
@@ -334,6 +345,10 @@ func (coordinator *fileOwnershipCoordinator) memberAliveLocked(memberID string, 
 		return false, nil
 	}
 	if err != nil {
+		if invalidJSONRecord(err) {
+			_ = os.Remove(coordinator.memberFile(memberID))
+			return false, nil
+		}
 		return false, err
 	}
 	return member.ID == memberID && now.Sub(time.Unix(0, member.Heartbeat)) <= clusterLeaseDuration, nil
@@ -351,7 +366,10 @@ func (coordinator *fileOwnershipCoordinator) sweepMembersLocked(now time.Time) (
 		path := filepath.Join(coordinator.dir, "members", entry.Name())
 		var member clusterMember
 		if err := readJSONFile(path, &member); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+			if errors.Is(err, os.ErrNotExist) || invalidJSONRecord(err) {
+				if invalidJSONRecord(err) {
+					_ = os.Remove(path)
+				}
 				continue
 			}
 			return 0, err
@@ -382,7 +400,37 @@ func writeJSONFile(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, payload, 0o600)
+	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
+	if err != nil {
+		return err
+	}
+	temporaryName := temporary.Name()
+	removeTemporary := true
+	defer func() {
+		if removeTemporary {
+			_ = os.Remove(temporaryName)
+		}
+	}()
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(payload); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(temporaryName, path); err != nil {
+		return err
+	}
+	removeTemporary = false
+	return nil
 }
 
 func readJSONFile(path string, value any) error {
@@ -391,4 +439,10 @@ func readJSONFile(path string, value any) error {
 		return err
 	}
 	return json.Unmarshal(payload, value)
+}
+
+func invalidJSONRecord(err error) bool {
+	var syntaxError *json.SyntaxError
+	var typeError *json.UnmarshalTypeError
+	return errors.As(err, &syntaxError) || errors.As(err, &typeError)
 }

@@ -7,7 +7,7 @@ Sanbo는 [`getpaseo/paseo-relay`](https://github.com/getpaseo/paseo-relay)의
 `3fc41c96c8c63f3a7109e832899cc57d473c4531`입니다.
 
 > Fly 배포 어댑터를 제외한 provider-neutral 계약을 구현했습니다. v1/v2 프레임
-> 중계, 독립 relay 프로세스 사이의 lease 기반 소유권과 opaque reroute, Capacity,
+> 중계, 동일 호스트의 독립 relay 프로세스 사이의 lease 기반 소유권과 opaque reroute, Capacity,
 > bounded delivery/backpressure, handshake 및 운영 메트릭을 실제 HTTP/WebSocket과
 > 다중 프로세스 테스트로 검증합니다.
 
@@ -106,7 +106,7 @@ v2 client에서 `connectionId`를 생략하면 relay가 `conn_` 접두사의 ID�
 | `PASEO_RELAY_DRAIN` | `false` | 시작 시 신규 작업을 받지 않는 drain 모드 |
 | `PASEO_RELAY_OWNERSHIP_TARGET` | `local` | 다른 노드에 광고하는 opaque 소유권 대상 |
 | `PASEO_RELAY_REROUTE_HEADER` | `x-reroute-target` | 배포 어댑터가 읽는 reroute 응답 헤더 |
-| `PASEO_RELAY_CLUSTER_QUERY` | 빈 값 | 클러스터 namespace를 구분하는 호환 query |
+| `PASEO_RELAY_CLUSTER_QUERY` | 빈 값 | 동일 호스트 file-lease registry의 namespace 구성요소. DNS discovery query가 아님 |
 | `PASEO_RELAY_MIN_CLUSTER_SIZE` | `1` | 신규 세션 수락에 필요한 최소 노드 수 |
 | `PASEO_RELAY_ACCEPTORS` | `100` | listener acceptor 수 |
 | `PASEO_RELAY_CONNECTIONS_PER_ACCEPTOR` | `200` | acceptor당 연결 수; 기본 WebSocket ceiling은 20,000 |
@@ -121,8 +121,8 @@ v2 client에서 `connectionId`를 생략하면 relay가 `conn_` 접두사의 ID�
 | `PASEO_RELAY_TCP_RECEIVE_BUFFER_BYTES` | `65536` | 소켓별 TCP 수신 버퍼 |
 | `PASEO_RELAY_WEBSOCKET_MAX_HEAP_WORDS` | `33554432` | 호환 설정으로 유지하는 WebSocket heap fuse 값 |
 | `PASEO_RELAY_MEMORY_WATERMARK_BYTES` | `0` | 메모리 pressure watermark, `0`은 비활성화 |
-| `RELEASE_NODE` | 빈 값 | 분산 노드 식별자 호환 설정 |
-| `RELEASE_COOKIE` | 빈 값 | 분산 노드 인증 cookie 호환 설정 |
+| `RELEASE_NODE` | 빈 값 | 동일 호스트 file-lease registry의 member 식별자 |
+| `RELEASE_COOKIE` | 빈 값 | 동일 호스트 file-lease registry namespace 구성요소 |
 
 ### 메모리 pressure
 
@@ -203,8 +203,8 @@ go vet ./...
 - client-originated handshake만 검증하는 role boundary와 outcome counter
 - 가중 ingress reservation, source-blocking data-route attach wait 및 reservation 정리
 - 전달 deadline, slow-consumer fail-closed 처리 및 capacity reconciliation
-- 단일 프로세스 내 다중 relay node ownership, 원자적 claim 및 opaque reroute
-- query와 release cookie로 격리된 host-level 다중 프로세스 lease registry
+- 로컬 프로세스 내 ownership, 원자적 claim 및 opaque reroute
+- query와 release cookie로 격리된 동일 호스트 다중 프로세스 lease registry
 - 실제 member heartbeat 수를 사용하는 minimum-cluster readiness
 - process 종료 후 lease 만료와 remote ownership reclaim
 - WebSocket upgrade 후 원자적 claim과 소유권 상실 시 WebSocket `1012` 수렴
@@ -215,12 +215,18 @@ go vet ./...
 - 정상 종료를 위한 `Shutdown`
 
 클러스터 설정(`PASEO_RELAY_CLUSTER_QUERY`, `RELEASE_NODE`, `RELEASE_COOKIE`)이 모두
-있으면 OS 임시 디렉터리의 locked lease registry를 사용합니다. cluster query와
-cookie 조합이 namespace이며, 100ms heartbeat와 750ms lease로 실제 membership과
-owner liveness를 판단합니다. 설정이 없으면 개발 및 단일 프로세스 호환을 위해
-기존 in-process registry를 사용합니다. 이 backend는 동일 호스트 또는 공유
-파일시스템을 사용하는 프로세스를 대상으로 하며, 공유 저장소가 없는 서로 다른
-호스트의 DNS transport는 현재 범위에 포함되지 않습니다.
+있으면 OS 임시 디렉터리의 locked lease registry를 사용합니다. query와 cookie의
+조합으로 registry 디렉터리를 정하고, `RELEASE_NODE`와 임시 token으로 member를
+식별합니다. 100ms heartbeat와 750ms lease로 실제 membership과 owner liveness를
+판단하며, 레코드는 원자적으로 교체합니다. 설정이 없으면 개발 및 단일 프로세스
+호환을 위해 process-local registry를 사용합니다.
+
+이 backend는 Syn distributed registry나 DNSCluster peer discovery를 구현하지
+않습니다. 따라서 `PASEO_RELAY_CLUSTER_QUERY`는 DNS query가 아니라 같은 호스트
+프로세스 사이의 lease namespace 구성요소입니다. 서로 다른 호스트 사이의
+membership, ownership, reroute 수렴은 구현되지 않은 알려진 제한입니다.
+reference는 Syn scope(`:paseo_relay_owners`)와 DNSCluster로 이 범위를 넘어
+peer를 발견하고 ownership을 분산합니다.
 
 `multinode_integration_test.go`는 실제 relay subprocess 2~3개로 join/leave,
 동시 claim, opaque reroute, owner failover, 격리와 ownership surge를 검증합니다.

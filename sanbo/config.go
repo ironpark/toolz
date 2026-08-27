@@ -46,7 +46,7 @@ var environmentVariables = []EnvironmentVariable{
 	{Name: "PASEO_RELAY_DRAIN", Default: "false", Description: "Start unready while existing sessions drain."},
 	{Name: "PASEO_RELAY_OWNERSHIP_TARGET", Default: "local", Description: "Opaque target advertised to relay peers."},
 	{Name: "PASEO_RELAY_REROUTE_HEADER", Default: "x-reroute-target", Description: "Response header used by the deployment adapter."},
-	{Name: "PASEO_RELAY_CLUSTER_QUERY", Default: "", Description: "Optional DNS query used to discover relay peers."},
+	{Name: "PASEO_RELAY_CLUSTER_QUERY", Default: "", Description: "Namespace component for the optional same-host file lease registry; not DNS discovery."},
 	{Name: "PASEO_RELAY_MIN_CLUSTER_SIZE", Default: "1", Description: "Minimum cluster size before accepting unowned sessions."},
 	{Name: "PASEO_RELAY_ACCEPTORS", Default: "100", Description: "Listener acceptor processes."},
 	{Name: "PASEO_RELAY_CONNECTIONS_PER_ACCEPTOR", Default: "200", Description: "Live connections allowed per acceptor."},
@@ -61,8 +61,8 @@ var environmentVariables = []EnvironmentVariable{
 	{Name: "PASEO_RELAY_TCP_RECEIVE_BUFFER_BYTES", Default: "65536", Description: "Per-socket TCP receive buffer."},
 	{Name: "PASEO_RELAY_WEBSOCKET_MAX_HEAP_WORDS", Default: "33554432", Description: "Per-WebSocket heap fuse."},
 	{Name: "PASEO_RELAY_MEMORY_WATERMARK_BYTES", Default: "0", Description: "Optional BEAM memory watermark; zero disables it."},
-	{Name: "RELEASE_NODE", Default: "", Description: "Distributed release node identity."},
-	{Name: "RELEASE_COOKIE", Default: "", Description: "Distributed release cookie."},
+	{Name: "RELEASE_NODE", Default: "", Description: "Member identity for the optional same-host file lease registry."},
+	{Name: "RELEASE_COOKIE", Default: "", Description: "Namespace component for the optional same-host file lease registry."},
 }
 
 // EnvironmentVariables returns a copy of the supported environment variable list.

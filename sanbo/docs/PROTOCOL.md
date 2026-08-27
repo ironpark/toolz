@@ -313,9 +313,18 @@ session owner에 대한 내부 호출은 5초 타임아웃이며, 초과하면 o
 강제 종료한다. 그 결과 그 세션에 붙어 있던 모든 소켓이
 `1012 Session owner moved`를 받는다.
 
-소유권은 클러스터 registry로 관리된다. 네트워크 분할 중 동일 `serverId`의 owner가
-양쪽에 잠시 생길 수 있으며, registry가 수렴하면 진 쪽의 소켓은 `1012`로 닫혀
-재연결이 필요하다. 기존 WebSocket의 투명한 노드 간 migration/forwarding은 없다.
+reference의 소유권은 Syn registry scope와 DNSCluster가 관리한다. 네트워크 분할 중
+동일 `serverId`의 owner가 양쪽에 잠시 생길 수 있으며, registry가 수렴하면 진 쪽의
+소켓은 `1012`로 닫혀 재연결이 필요하다. 기존 WebSocket의 투명한 노드 간
+migration/forwarding은 없다.
+
+sanbo의 ownership backend는 이 분산 registry를 구현하지 않는다.
+`PASEO_RELAY_CLUSTER_QUERY`, `RELEASE_NODE`, `RELEASE_COOKIE`가 모두 설정된 경우에만
+query+cookie로 정한 OS 임시 디렉터리의 locked file-lease registry를 사용하고,
+100ms heartbeat와 750ms lease로 동일 호스트 프로세스의 member/owner liveness를
+판단한다. 설정이 빠지면 process-local registry를 사용한다. 따라서 cluster query는
+DNS 조회가 아니며, 서로 다른 호스트 사이의 reference peer discovery, 분산
+membership, cross-host ownership convergence는 알려진 미지원 범위다.
 
 ## 비목표와 구현 주의점
 
@@ -338,6 +347,7 @@ Go 소스 또는 실제 실행으로 확인한 것이다.
 | --- | --- | --- |
 | `connectionId`당 client roster | map key 순서 | `sync`의 `connectionIds`를 정렬해 보낸다. 계약이 순서를 보장하지 않으므로 호환 범위 안이다 |
 | 소켓별 힙 상한 | BEAM 소켓 프로세스의 `max_heap_size` (`kill: true`) | 소켓별 **메모리 회계**로 등가 구현. 아래 참고 |
+| ownership registry | Syn scope + DNSCluster peer discovery | process-local registry 또는 동일 호스트/shared filesystem file-lease registry. cross-host distributed clustering은 미지원 |
 | 503 본문 | 위 표의 7종 | `draining`, `cluster ownership unavailable`, `relay capacity unavailable` 3종 |
 
 client fan-out, control 초기 `sync` roster, 10초/5초 control watchdog, handshake
