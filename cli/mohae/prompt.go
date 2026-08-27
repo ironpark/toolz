@@ -29,6 +29,14 @@ type Prompt struct {
 	Text string `yaml:"text,omitempty"`
 	File string `yaml:"file,omitempty"`
 	When string `yaml:"when,omitempty"`
+	// ID names this prompt so later ones can depend on it. Optional: a prompt
+	// nothing refers to does not need a name.
+	ID string `yaml:"id,omitempty"`
+	// DependsOn lists the IDs of earlier prompts this one requires. The prompt
+	// is skipped unless every named prompt was actually sent, so a follow-up
+	// to a conditional turn silently disappears with it instead of arriving
+	// without its context.
+	DependsOn []string `yaml:"depends_on,omitempty"`
 	// TimeoutSeconds bounds this turn alone: the clock starts when the prompt
 	// is sent, and the turn is cancelled once it runs out. Zero means the turn
 	// has no limit of its own and only the trial-wide timeout applies.
@@ -82,6 +90,17 @@ func (p *Prompt) Validate(field string) error {
 	}
 	p.program = program
 	return nil
+}
+
+// DependenciesMet reports whether every prompt this one depends on was sent.
+// sent maps a prompt ID to whether that turn actually ran.
+func (p Prompt) DependenciesMet(sent map[string]bool) bool {
+	for _, id := range p.DependsOn {
+		if !sent[id] {
+			return false
+		}
+	}
+	return true
 }
 
 // ShouldSend reports whether this prompt's condition holds. An unconditional
@@ -183,6 +202,12 @@ func (p Prompt) Describe() string {
 	source := "file " + p.File
 	if p.File == "" {
 		source = fmt.Sprintf("text %q", truncate(p.Text, 40))
+	}
+	if p.ID != "" {
+		source = p.ID + ": " + source
+	}
+	if len(p.DependsOn) > 0 {
+		source += " after " + strings.Join(p.DependsOn, ", ")
 	}
 	if p.When != "" {
 		source += " when " + p.When

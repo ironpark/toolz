@@ -88,6 +88,54 @@ func TestPromptConditionsAreCheckedAtLoadTime(t *testing.T) {
 	}
 }
 
+func TestPromptDependenciesGateOnEarlierTurns(t *testing.T) {
+	config, err := LoadConfig(writeConfig(t, `name: sample
+agent:
+  type: codex
+workspace:
+  source: ./fixture
+prompts:
+  - id: build
+    text: make it build
+    when: sh("true") != 0
+  - id: fix
+    text: now fix the tests
+    depends_on: [build]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	follow := config.Prompts[1]
+	// A follow-up to a turn that never ran must disappear with it: sending it
+	// anyway would deliver an instruction whose context the agent never saw.
+	if follow.DependenciesMet(map[string]bool{}) {
+		t.Error("dependencies reported met before the build prompt was sent")
+	}
+	if !follow.DependenciesMet(map[string]bool{"build": true}) {
+		t.Error("dependencies reported unmet after the build prompt was sent")
+	}
+}
+
+func TestPromptIDsAndDependenciesAreValidatedAtLoadTime(t *testing.T) {
+	base := `name: sample
+agent:
+  type: codex
+workspace:
+  source: ./fixture
+prompts:
+`
+	for name, prompts := range map[string]string{
+		"duplicate id":      "  - id: a\n    text: one\n  - id: a\n    text: two\n",
+		"forward reference": "  - text: one\n    depends_on: [later]\n  - id: later\n    text: two\n",
+		"self reference":    "  - id: self\n    text: one\n    depends_on: [self]\n",
+		"unknown id":        "  - id: a\n    text: one\n  - text: two\n    depends_on: [missing]\n",
+	} {
+		if _, err := LoadConfig(writeConfig(t, base+prompts)); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}
+
 func TestPromptTimeoutsAreReadAndValidated(t *testing.T) {
 	config, err := LoadConfig(writeConfig(t, `name: sample
 agent:

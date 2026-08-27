@@ -176,9 +176,25 @@ func (c *Config) Validate() error {
 	if len(c.Prompts) == 0 {
 		return fmt.Errorf("prompts is required and must list at least one prompt")
 	}
+	// Dependencies may only name prompts defined earlier: the conversation is
+	// sent in order, so a forward or self reference could never be satisfied
+	// and would silently skip the prompt on every run.
+	ids := map[string]int{}
 	for index := range c.Prompts {
-		if err := c.Prompts[index].Validate(fmt.Sprintf("prompts[%d]", index)); err != nil {
+		field := fmt.Sprintf("prompts[%d]", index)
+		if err := c.Prompts[index].Validate(field); err != nil {
 			return err
+		}
+		for _, id := range c.Prompts[index].DependsOn {
+			if _, ok := ids[id]; !ok {
+				return fmt.Errorf("%s.depends_on: %q does not name an earlier prompt's id", field, id)
+			}
+		}
+		if id := c.Prompts[index].ID; id != "" {
+			if previous, ok := ids[id]; ok {
+				return fmt.Errorf("%s.id: %q is already used by prompts[%d]", field, id, previous)
+			}
+			ids[id] = index
 		}
 	}
 	for index, skill := range c.Skills {
