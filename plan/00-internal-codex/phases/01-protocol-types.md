@@ -1,6 +1,7 @@
 ---
+completed_at: "2026-08-27T20:20:47Z"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: All documented example payloads in scope decode into typed values without
 > NEXT: none

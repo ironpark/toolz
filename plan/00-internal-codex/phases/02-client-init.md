@@ -3,7 +3,7 @@ depends_on:
 - "00-internal-codex#0"
 - "00-internal-codex#1"
 perf_phase: false
-status: planned
+status: in-progress
 ---
 > DONE-WHEN: Tests prove: successful handshake yields a usable client; initialize error
 > NEXT: none

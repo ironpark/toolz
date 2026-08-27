@@ -187,6 +187,10 @@ func (t *transport) Close() error {
 		if t.cfg.release != nil {
 			releaseErr = t.cfg.release()
 		}
+		// Unblock the reader even when no release hook was supplied.
+		if closer, ok := t.cfg.in.(io.Closer); ok {
+			_ = closer.Close()
+		}
 	})
 	t.reader.Wait()
 	t.handler.Wait()
