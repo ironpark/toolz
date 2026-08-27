@@ -7,7 +7,7 @@
 
 - [설치](#설치)
 - [빠른 시작](#빠른-시작)
-- [명령](#명령) — [plan 등록](#plan-등록), [조회](#조회), [설정 확인과 진단](#설정-확인과-진단), [phase 관리](#phase-관리)
+- [명령](#명령) — [plan 등록](#plan-등록), [조회](#조회), [설정 확인과 진단](#설정-확인과-진단), [phase 관리](#phase-관리), [plan 보관](#plan-보관)
 - [설정](#설정) — [plan 저장 위치](#plan-저장-위치), [문서 언어](#문서-언어), [훅](#훅)
 - [저장 구조](#저장-구조)
 - [초안 규격](#초안-규격) — [frontmatter](#frontmatter), [섹션](#섹션), [PHASE 블록](#phase-블록), [의존성](#의존성)
@@ -62,17 +62,22 @@ planr phase done checkout-v2 1
 | --- | --- |
 | `planr new <plan-name>` | 규격 초안 파일을 생성합니다 |
 | `planr add <draft-file>` | 초안을 검증하고 plan 디렉터리로 등록합니다 |
-| `planr config` | 실제 적용된 설정 파일과 effective 설정값을 출력합니다 |
-| `planr doctor [--fix]` | 설정·저장소·등록된 plan 문서의 정합성을 진단합니다 |
+| `planr config [--json]` | 실제 적용된 설정 파일과 effective 설정값을 출력합니다 |
+| `planr doctor [--fix] [--json]` | 설정·저장소·등록된 plan 문서의 정합성을 진단합니다 |
 | `planr status [plan-name] [--json]` | 남은 phase와 대기 중인 의존성을 자세히 출력합니다 |
+| `planr show <plan-name> [phase-number] [--json]` | 현재 또는 지정한 phase 문서의 핵심 내용을 출력합니다 |
 | `planr overview [plan-name] [--json]` | 모든 plan의 진행률을 한 줄씩 요약합니다 |
 | `planr phase add <plan-name> <title>` | 열린 plan에 phase를 추가합니다 |
 | `planr phase set <plan-name> <number> --status <status>` | phase 상태를 지정한 값으로 변경합니다 |
 | `planr phase start\|done\|reset <plan-name> <number>` | phase 상태 변경 단축 명령입니다 |
-| `planr notes [plan-name] [--json]` | 커밋에 연결된 완료 기록을 조회합니다 |
+| `planr phase rm <plan-name> <number> [--force]` | phase 문서와 PLAN.md 체크리스트 항목을 함께 삭제합니다 |
+| `planr archive <plan-name>` | 완료된 plan을 마지막 `plans_dirs` 경로로 이동합니다 |
+| `planr notes [plan-name] [--json]` | 커밋에 연결된 plan/phase 이벤트 기록을 조회합니다 |
 | `planr --version` | 설치된 버전을 출력합니다 |
 
 plan 이름을 받는 모든 명령은 `checkout-v2`와 `00-checkout-v2`를 모두 인식합니다.
+모든 명령에서 사용할 수 있는 `--no-hooks`는 해당 호출의 `before`·`after` 훅을 모두
+건너뜁니다.
 
 ### plan 등록
 
@@ -105,12 +110,17 @@ planr status
 # 특정 plan 조회 (완료된 plan 포함)
 planr status platform-refresh
 
+# 다음에 작업할 phase 문서 확인 (기본값은 첫 번째 미완료 phase)
+planr show checkout-v2
+planr show checkout-v2 2
+
 # 전체 plan 간단 요약 (완료된 plan 포함)
 planr overview
 planr overview checkout-v2
 
 # 스크립트/에이전트용 JSON 출력
 planr status --json
+planr show checkout-v2 --json
 planr overview --json
 planr notes --json
 ```
@@ -138,18 +148,26 @@ snake_case로 고정됩니다. plan이 없거나 완료 기록이 없을 때도 
 `done_phases`, `total_phases`, `next_phase`, `wait`를 가집니다. `next_phase`는 다음
 미완료 phase 제목이며 없으면 빈 문자열입니다.
 
+`show`는 지정한 phase 파일에서 `phase_number`, `slug`, `title`, `status`,
+`planned_work`, `done_when`, `depends_on`, `file`을 반환합니다. `file`은 절대 경로이고,
+`planned_work`와 `done_when`은 Markdown 본문을 문자열로 보존합니다. plan 이름과 numbered
+`directory`도 함께 반환하므로 추가로 경로를 추론할 필요가 없습니다. phase 번호를 생략하면
+status가 `done`이 아닌 첫 phase를 선택합니다.
+
 `notes --json`의 최상위 필드는 `notes`이며 각 항목은 `completed_at`, `plan`, `event`,
-`phase`, `commit`, `short_commit`, `subject`를 가집니다. plan 단위 기록의 `phase`는
-빈 문자열입니다.
+`phase`, `commit`, `short_commit`, `subject`를 가집니다. `event`가 `start`인 항목의
+`completed_at`은 시작 기록 시각이며, plan 단위 기록의 `phase`는 빈 문자열입니다.
 
 ### 설정 확인과 진단
 
 ```sh
 # 현재 명령에 실제 적용된 설정 확인
 planr config
+planr config --json
 
 # 읽기 전용 정합성 진단
 planr doctor
+planr doctor --json
 
 # PLAN.md 체크리스트와 phase 파일의 불일치까지 복구
 planr doctor --fix
@@ -168,6 +186,12 @@ non-zero로 종료합니다. 기본 동작은 읽기 전용이며, `--fix`를 �
 phase 파일을 기준으로 체크리스트를 다시 씁니다. frontmatter 오류나 의존성 오류는
 자동으로 변경하지 않습니다.
 
+`config --json`은 같은 effective 값을 `config_file`, `repository_root`, `agent`,
+`language`, `plans_dirs`, `ignore`, `hooks`로 반환합니다. 설정 파일이 없으면
+`config_file`은 `null`입니다. `doctor --json`은 `issues` 배열의 각 항목에 `location`과
+`message`를 담으며, 문제가 없어도 `{"issues":[]}`를 출력합니다. 문제가 있으면 JSON을
+출력한 뒤 텍스트 모드와 동일하게 non-zero로 종료합니다.
+
 ### phase 관리
 
 ```sh
@@ -184,6 +208,10 @@ planr phase add checkout-v2 "Cache Warmup" \
   --work "캐시 워밍업 경로를 추가한다." \
   --done-when "캐시 적중률 검증이 통과한다." \
   --depends-on 1
+
+# 잘못 추가한 phase 제거 (의존하는 phase가 있으면 --force 필요)
+planr phase rm checkout-v2 2
+planr phase rm checkout-v2 2 --force
 ```
 
 | 단축 명령 | 변경되는 상태 |
@@ -196,6 +224,11 @@ planr phase add checkout-v2 "Cache Warmup" \
 번호 다음으로 자동 지정되고, `--depends-on`에는 같은 plan의 기존 phase 번호를 하나
 이상 지정할 수 있습니다. 새 phase 문서와 `PLAN.md` 체크리스트가 함께 생성되며,
 완료된 plan에는 phase를 추가할 수 없습니다.
+
+`phase rm`은 phase 문서와 `PLAN.md`의 해당 checklist 줄만 제거합니다. 남은 phase의 번호,
+파일명, 링크, `depends_on`과 git note의 `phase=` 값은 다시 번호를 매기지 않습니다. 따라서
+번호에 빈칸이 생기는 것이 정상입니다. 다른 phase가 제거 대상에 의존하면 기본적으로 거부하며,
+의존성까지 직접 정리할 때만 `--force`를 사용합니다.
 
 #### 진행 전 검사
 
@@ -219,6 +252,54 @@ finish them first or use --force
 두 검사 모두 `--force`로 한 번에 우회합니다. 의도적으로 순서를 벗어나거나 커밋하지
 않은 변경을 포함해야 할 때만 사용합니다. `phase reset`처럼 상태를 되돌리는 방향은
 검사하지 않습니다.
+
+### plan 보관
+
+```sh
+planr archive checkout-v2
+```
+
+`archive`의 목적지는 `.planr.yaml`의 `plans_dirs` **마지막 항목**입니다. 첫 번째 경로에
+등록된 완료 plan을 마지막 경로로 이동하며, 아직 `plan_status: done`이 아닌 plan은 거부합니다.
+번호가 붙은 plan 디렉터리 자체를 이동하므로 번호는 바뀌지 않습니다. 이후 `add`는 모든
+`plans_dirs`를 스캔해 가장 큰 번호 다음을 사용하므로 보관 전후의 순번도 이어집니다.
+`plans_dirs`가 하나뿐이거나 이미 마지막 경로에 있는 plan은 보관할 수 없습니다.
+
+### 공통 옵션과 셸 자동 완성
+
+`--no-hooks`는 전역 옵션입니다. 기본값은 훅을 실행하는 것이며, 저장소의 훅이 일시적으로
+고장 난 한 번의 호출에서만 다음처럼 사용합니다. `before`와 `after` 훅을 모두 건너뛰며
+설정 파일 자체는 바꾸지 않습니다.
+
+```sh
+planr phase done checkout-v2 2 --no-hooks
+```
+
+plan 상태를 바꾸는 명령은 같은 plan 디렉터리의 `.planr.lock`을 짧은 대기 시간 동안
+획득합니다. 다른 `planr` 프로세스가 먼저 변경 중이면 명확한 오류와 함께 중단되며, `status`,
+`show`, `overview`, `notes`, `config`, `doctor` 같은 읽기 명령은 이 잠금을 획득하지 않습니다.
+새 plan을 등록하는 `add`는 plan이 아직 없으므로 첫 번째 `plans_dirs`의 `.planr.lock`을
+사용해 전체 번호 검색과 등록을 직렬화합니다.
+
+쉘 자동 완성 스크립트는 cli v3가 제공하는 `completion` 하위 명령으로 설치합니다.
+
+```sh
+# bash
+echo 'source <(planr completion bash)' >> ~/.bashrc
+
+# zsh
+echo 'source <(planr completion zsh)' >> ~/.zshrc
+
+# fish
+mkdir -p ~/.config/fish/completions
+planr completion fish > ~/.config/fish/completions/planr.fish
+
+# PowerShell
+planr completion pwsh > planr_completion.ps1
+```
+
+새 셸을 시작하거나 설정 파일을 다시 읽으면 됩니다. plan 이름을 받는 명령에서는 현재
+저장소의 모든 `plans_dirs`를 조회해 plan 이름도 동적으로 완성합니다.
 
 ## 설정
 
@@ -250,7 +331,8 @@ hooks:
 ### plan 저장 위치
 
 - `plans_dirs` — 새 plan은 **첫 번째 경로**에 등록되고, 조회는 모든 경로를 대상으로
-  합니다. 기존 `plans_dir` 단일 설정도 지원하며, 설정이 없으면 `plan/`을 사용합니다.
+  합니다. `archive`는 마지막 경로를 목적지로 사용합니다. 기존 `plans_dir` 단일 설정도
+  지원하며, 설정이 없으면 `plan/`을 사용합니다.
 - `ignore` — 리포지토리 루트 기준 glob 패턴으로, `phase done`의 미커밋 소스 검사에서
   제외할 경로를 지정합니다.
 
@@ -342,7 +424,8 @@ plans-active/
 
 ## 완료 기록
 
-phase나 plan이 `done`이 되면 두 가지가 자동으로 기록됩니다.
+phase나 plan이 `done`이 되면 두 가지가 자동으로 기록됩니다. 또한 `phase start`는 시작
+시각을 같은 git note 형식의 `event=start` 기록으로 남깁니다.
 
 **1. `completed_at` frontmatter** — 완료 시각(UTC RFC3339)이 해당 phase 문서와,
 plan 전체가 끝난 경우 `PLAN.md`에 기록됩니다. phase를 다시 열면 두 값 모두 지워지므로
@@ -353,11 +436,13 @@ plan 전체가 끝난 경우 `PLAN.md`에 기록됩니다. phase를 다시 열�
 히스토리를 다시 쓰지 않습니다.
 
 ```text
+planr plan=00-checkout-v2 event=start phase=01 at=2026-08-27T02:00:00Z
 planr plan=00-checkout-v2 event=done phase=01 at=2026-08-27T02:11:40Z
 planr plan=00-checkout-v2 event=plan_done at=2026-08-27T02:11:40Z
 ```
 
-기록된 내용은 `planr notes`로 조회합니다.
+기록된 내용은 `planr notes`로 조회합니다. `notes`의 `COMPLETED` 열은 기존 출력 형식을
+유지하며, 시작 기록은 `EVENT` 열에 `start NN`으로 표시됩니다.
 
 ```sh
 # 전체 완료 기록
