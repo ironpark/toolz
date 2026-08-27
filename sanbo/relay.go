@@ -408,11 +408,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 	defer conn.CloseNow()
 	defer r.activeWebSockets.Add(-1)
 
-	readLimit := int64(MaximumFrameWireBytes)
-	if connection.isControl() {
-		readLimit = MaximumControlPayloadBytes + 1
-	}
-	conn.SetReadLimit(readLimit)
+	conn.SetReadLimit(readLimit(connection))
 	peer := newRelayPeer(conn)
 	r.mu.Lock()
 	peer.attachSeq.Store(r.nextSeq())
@@ -454,7 +450,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		r.armControlWatchdogLocked(s, control)
 		r.mu.Unlock()
 		if control != nil {
-			_ = r.sendControl(control, []byte(`{"type":"connected","connectionId":"`+connection.ConnectionID+`"}`))
+			_ = r.sendControl(control, connectedFrame(connection.ConnectionID))
 		}
 	case peerV2Data:
 		replaced := s.data[connection.ConnectionID]
@@ -480,11 +476,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		if err != nil {
 			return
 		}
-		payloadLimit := MaximumMessagePayloadBytes
-		if connection.isControl() {
-			payloadLimit = MaximumControlPayloadBytes
-		}
-		if len(payload) > payloadLimit {
+		if len(payload) > payloadLimit(connection) {
 			_ = conn.Close(websocket.StatusMessageTooBig, "Message too big")
 			return
 		}
@@ -500,14 +492,9 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 			_ = conn.Close(websocket.StatusPolicyViolation, "Invalid handshake key")
 			return
 		}
-		if connection.isControl() && typ == websocket.MessageText {
-			var ping struct {
-				Type string `json:"type"`
-			}
-			if json.Unmarshal(payload, &ping) == nil && ping.Type == "ping" {
-				_ = r.forward(peer, websocket.MessageText, []byte(`{"type":"pong","ts":`+strconv.FormatInt(time.Now().UnixMilli(), 10)+`}`))
-				continue
-			}
+		if connection.isControl() && typ == websocket.MessageText && controlPing(payload) {
+			_ = r.forward(peer, websocket.MessageText, pongFrame(time.Now()))
+			continue
 		}
 		r.route(connection, peer, typ, payload)
 	}
@@ -527,11 +514,7 @@ func clientRouteIDsLocked(s *relaySession) []string {
 
 // sendSync publishes a client roster to the control socket.
 func (r *Relay) sendSync(control *relayPeer, ids []string) {
-	b, _ := json.Marshal(struct {
-		Type          string   `json:"type"`
-		ConnectionIDs []string `json:"connectionIds"`
-	}{Type: "sync", ConnectionIDs: ids})
-	_ = r.sendControl(control, b)
+	_ = r.sendControl(control, syncFrame(ids))
 }
 
 func waitingForDataLocked(s *relaySession) bool {
@@ -711,11 +694,6 @@ func closeReplaced(replaced *relayPeer) {
 // close frame, and neither delivery nor shedding may stall on one socket.
 func closeAsync(conn *websocket.Conn, code websocket.StatusCode, reason string) {
 	go func() { _ = conn.Close(code, reason) }()
-}
-
-type handshakeFrame struct {
-	Type string          `json:"type"`
-	Key  json.RawMessage `json:"key"`
 }
 
 // handshakeKind classifies a decoded frame, reporting false when the frame is
@@ -978,7 +956,7 @@ func (r *Relay) removePeer(c Connection, p *relayPeer) {
 				_ = data.conn.Close(websocket.StatusGoingAway, "Client disconnected")
 			}
 			if control != nil {
-				_ = r.sendControl(control, []byte(`{"type":"disconnected","connectionId":"`+c.ConnectionID+`"}`))
+				_ = r.sendControl(control, disconnectedFrame(c.ConnectionID))
 			}
 			return
 		}
