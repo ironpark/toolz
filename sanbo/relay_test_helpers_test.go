@@ -23,12 +23,14 @@ func newRelayTestServer(t *testing.T, config Config) *httptest.Server {
 	return httptestServerForRelay(t, NewRelay(config))
 }
 
-// newSyncControlTestServer serves a relay with the compatibility sync/watchdog
-// path enabled, which production configurations leave off.
-func newSyncControlTestServer(t *testing.T, config Config) *httptest.Server {
+// newControlWatchdogTestServer serves a relay whose control watchdog runs on
+// millisecond stages instead of the production 10s/5s, so the always-on
+// behavior is observable within a test timeout.
+func newControlWatchdogTestServer(t *testing.T, config Config, sync, close time.Duration) *httptest.Server {
 	t.Helper()
 	relay := NewRelay(config)
-	relay.testSyncControl = true
+	relay.controlSyncDelay = sync
+	relay.controlCloseDelay = close
 	return httptestServerForRelay(t, relay)
 }
 
@@ -232,4 +234,16 @@ func requireRelayScenario(t *testing.T, relay *Relay, name string) relayScenario
 		t.Fatalf("run relay scenario %q: %v", name, err)
 	}
 	return result
+}
+
+// relayClientPeers returns every client peer attached to a v2 route, which the
+// fan-out cases need in order to block one destination at a time.
+func relayClientPeers(relay *Relay, serverID, connectionID string) []*relayPeer {
+	relay.mu.Lock()
+	defer relay.mu.Unlock()
+	s := relay.sessions[serverID]
+	if s == nil {
+		return nil
+	}
+	return append([]*relayPeer(nil), s.clients[connectionID]...)
 }

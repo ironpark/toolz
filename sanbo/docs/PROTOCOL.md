@@ -316,16 +316,14 @@ Go 소스 또는 실제 실행으로 확인한 것이다.
 
 | 항목 | 참조(Elixir) | sanbo(Go) |
 | --- | --- | --- |
-| `connectionId`당 client 수 | 여러 개, data → client는 fan-out | **1개.** 같은 ID로 두 번째 client가 붙으면 기존 client가 `1008 Replaced by new connection`으로 교체된다 |
-| control 접속 시 `sync` | 그 시점의 route ID 목록 | **항상 빈 배열**(`{"type":"sync","connectionIds":[]}`) |
-| 10초 `sync` 재전송, `1011 Control unresponsive` | 항상 동작 | `PASEO_RELAY_DATA_ATTACH_TIMEOUT_MS <= 100`일 때만 동작하므로 **기본 설정에서는 일어나지 않는다** |
-| handshake key 좌표 검사 | `coordinate < 2^255 - 19` | 최상위 bit만 확인 + X25519 연산. `2^255-19 + 2` 이상의 비정규 좌표를 **수용한다**(예: `EFFF…7F`, `FFFF…7F`) |
-| 메모리 pressure shedding | batch 단위 점진 shedding, recovery threshold | watermark 도달 시 **일괄** shedding, watermark의 90% 아래로 내려가야 해제 |
+| `connectionId`당 client roster | map key 순서 | `sync`의 `connectionIds`를 정렬해 보낸다. 계약이 순서를 보장하지 않으므로 호환 범위 안이다 |
 | 소켓별 힙 상한 | `websocket_max_heap_words`로 강제 종료 | 미구현. 설정값은 호환을 위해 파싱만 한다 |
 | 503 본문 | 위 표의 7종 | `cluster ownership unavailable`, `relay capacity unavailable` 2종 |
 
-fan-out 부재와 control watchdog 비활성화는 계약 차이가 관찰 가능한 수준이므로,
-두 구현을 섞어 쓰는 클라이언트는 이 두 가지를 먼저 확인해야 한다.
+client fan-out, control 초기 `sync` roster, 10초/5초 control watchdog, handshake
+좌표 범위 검사, batch 단위 메모리 pressure shedding은 계약대로 동작한다. 남은 두
+항목은 관찰 가능한 wire 동작이 아니라 운영 세부(힙 상한)와 진단 문자열(503 본문)의
+차이다.
 
 ## 소스 근거
 

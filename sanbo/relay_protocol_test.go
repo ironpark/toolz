@@ -73,12 +73,10 @@ func TestRelayV2ControlFailsClosedWhenOwnerStallsDuringPing(t *testing.T) {
 }
 
 func TestRelayV2ResetsUnresponsiveControlAfterNudgingDataAttachment(t *testing.T) {
-	config := DefaultConfig()
-	config.DataAttachTimeoutMS = 50
-	server := newSyncControlTestServer(t, config)
+	server := newControlWatchdogTestServer(t, DefaultConfig(), 20*time.Millisecond, 20*time.Millisecond)
 	serverID := "v2-control-watchdog"
 	control := dialRelay(t, server, serverID, RoleServer, 2, "")
-	assertControlMessage(t, control, map[string]any{"type": "sync"})
+	assertControlMessage(t, control, map[string]any{"type": "sync", "connectionIds": []string{}})
 	_ = dialRelay(t, server, serverID, RoleClient, 2, "waiting")
 	assertControlMessage(t, control, map[string]any{"type": "connected", "connectionId": "waiting"})
 	assertControlMessage(t, control, map[string]any{"type": "sync", "connectionIds": []string{"waiting"}})
@@ -86,9 +84,7 @@ func TestRelayV2ResetsUnresponsiveControlAfterNudgingDataAttachment(t *testing.T
 }
 
 func TestRelayV2ControlWatchdogStopsAfterDataAttachment(t *testing.T) {
-	config := DefaultConfig()
-	config.DataAttachTimeoutMS = 50
-	server := newSyncControlTestServer(t, config)
+	server := newControlWatchdogTestServer(t, DefaultConfig(), 20*time.Millisecond, 20*time.Millisecond)
 	serverID := "v2-control-watchdog-attach"
 	control := dialRelay(t, server, serverID, RoleServer, 2, "")
 	assertControlMessage(t, control, map[string]any{"type": "sync"})
@@ -96,27 +92,116 @@ func TestRelayV2ControlWatchdogStopsAfterDataAttachment(t *testing.T) {
 	assertControlMessage(t, control, map[string]any{"type": "connected", "connectionId": "attached"})
 	assertControlMessage(t, control, map[string]any{"type": "sync", "connectionIds": []string{"attached"}})
 	_ = dialRelay(t, server, serverID, RoleServer, 2, "attached")
-	assertControlMessage(t, control, map[string]any{"type": "sync", "connectionIds": []string{"attached"}})
 
-	time.Sleep(time.Duration(2*config.DataAttachTimeoutMS) * time.Millisecond)
+	// The close stage re-checks attachment, so the control socket survives it.
+	time.Sleep(100 * time.Millisecond)
 	writeRelayMessage(t, control, websocket.MessageText, []byte(`{"type":"ping"}`))
 	assertControlMessage(t, control, map[string]any{"type": "pong"})
 }
 
-func TestRelayV2ShortAttachTimeoutDoesNotEnableControlWatchdogByDefault(t *testing.T) {
-	config := DefaultConfig()
-	config.DataAttachTimeoutMS = 50
-	relay := NewRelay(config)
-	server := httptestServerForRelay(t, relay)
-	serverID := "v2-control-watchdog-disabled"
+// TestRelayV2ControlWatchdogSkipsSyncWhenDataAttachesFirst covers the first
+// stage's re-check: data attached before the nudge means no nudge at all.
+func TestRelayV2ControlWatchdogSkipsSyncWhenDataAttachesFirst(t *testing.T) {
+	server := newControlWatchdogTestServer(t, DefaultConfig(), 150*time.Millisecond, 20*time.Millisecond)
+	serverID := "v2-control-watchdog-early"
 	control := dialRelay(t, server, serverID, RoleServer, 2, "")
 	assertControlMessage(t, control, map[string]any{"type": "sync"})
-	_ = dialRelay(t, server, serverID, RoleClient, 2, "waiting")
-	assertControlMessage(t, control, map[string]any{"type": "connected", "connectionId": "waiting"})
+	_ = dialRelay(t, server, serverID, RoleClient, 2, "early")
+	assertControlMessage(t, control, map[string]any{"type": "connected", "connectionId": "early"})
+	_ = dialRelay(t, server, serverID, RoleServer, 2, "early")
 
-	time.Sleep(time.Duration(2*config.DataAttachTimeoutMS) * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 	writeRelayMessage(t, control, websocket.MessageText, []byte(`{"type":"ping"}`))
 	assertControlMessage(t, control, map[string]any{"type": "pong"})
+}
+
+// TestRelayV2ControlSyncListsExistingClientRoutes covers a daemon whose control
+// socket attaches after its clients: the roster is not empty for it.
+func TestRelayV2ControlSyncListsExistingClientRoutes(t *testing.T) {
+	server := newRelayTestServer(t, DefaultConfig())
+	serverID := "v2-sync-roster"
+	_ = dialRelay(t, server, serverID, RoleClient, 2, "route-a")
+	_ = dialRelay(t, server, serverID, RoleClient, 2, "route-b")
+	control := dialRelay(t, server, serverID, RoleServer, 2, "")
+	assertControlMessage(t, control, map[string]any{"type": "sync", "connectionIds": []string{"route-a", "route-b"}})
+}
+
+func TestRelayV2FansOutDataToEveryClientOnTheRoute(t *testing.T) {
+	server := newRelayTestServer(t, DefaultConfig())
+	serverID := "v2-fanout"
+	control := dialRelay(t, server, serverID, RoleServer, 2, "")
+	assertControlMessage(t, control, map[string]any{"type": "sync"})
+	first := dialRelay(t, server, serverID, RoleClient, 2, "shared")
+	assertControlMessage(t, control, map[string]any{"type": "connected", "connectionId": "shared"})
+	second := dialRelay(t, server, serverID, RoleClient, 2, "shared")
+	// connected is per attach, so the same ID announces itself twice.
+	assertControlMessage(t, control, map[string]any{"type": "connected", "connectionId": "shared"})
+	data := dialRelay(t, server, serverID, RoleServer, 2, "shared")
+
+	writeRelayMessage(t, data, websocket.MessageText, []byte("broadcast"))
+	assertRelayMessage(t, first, websocket.MessageText, []byte("broadcast"))
+	assertRelayMessage(t, second, websocket.MessageText, []byte("broadcast"))
+
+	if err := first.Close(websocket.StatusNormalClosure, ""); err != nil {
+		t.Fatal(err)
+	}
+	writeRelayMessage(t, data, websocket.MessageText, []byte("still-routed"))
+	assertRelayMessage(t, second, websocket.MessageText, []byte("still-routed"))
+
+	if err := second.Close(websocket.StatusNormalClosure, ""); err != nil {
+		t.Fatal(err)
+	}
+	assertRelayClose(t, data, websocket.StatusGoingAway, "Client disconnected")
+	assertControlMessage(t, control, map[string]any{"type": "disconnected", "connectionId": "shared"})
+}
+
+// slowConsumerConfig keeps the delivery deadline short so a blocked
+// destination fails within a test timeout.
+func slowConsumerConfig() Config {
+	config := DefaultConfig()
+	config.DeliveryTimeoutMS = 50
+	return config
+}
+
+func TestRelayV2SlowClientDoesNotBreakFanOutForTheOthers(t *testing.T) {
+	relay := NewRelay(slowConsumerConfig())
+	server := httptestServerForRelay(t, relay)
+	serverID := "v2-fanout-slow"
+	blocked := dialRelay(t, server, serverID, RoleClient, 2, "shared")
+	healthy := dialRelay(t, server, serverID, RoleClient, 2, "shared")
+	data := dialRelay(t, server, serverID, RoleServer, 2, "shared")
+	eventually(t, relayTestTimeout, func() bool { return len(relayClientPeers(relay, serverID, "shared")) == 2 })
+	peers := relayClientPeers(relay, serverID, "shared")
+
+	peers[0].writeSlot <- struct{}{}
+	writeRelayMessage(t, data, websocket.MessageText, []byte("fan-out"))
+	assertRelayMessage(t, healthy, websocket.MessageText, []byte("fan-out"))
+	assertRelayClose(t, blocked, websocket.StatusTryAgainLater, "Slow consumer")
+	<-peers[0].writeSlot
+
+	// The source stays open because one destination took the frame.
+	writeRelayMessage(t, data, websocket.MessageText, []byte("after"))
+	assertRelayMessage(t, healthy, websocket.MessageText, []byte("after"))
+}
+
+func TestRelayV2ClosesSourceOnlyWhenEveryDestinationFails(t *testing.T) {
+	relay := NewRelay(slowConsumerConfig())
+	server := httptestServerForRelay(t, relay)
+	serverID := "v2-fanout-stuck"
+	_ = dialRelay(t, server, serverID, RoleClient, 2, "shared")
+	_ = dialRelay(t, server, serverID, RoleClient, 2, "shared")
+	data := dialRelay(t, server, serverID, RoleServer, 2, "shared")
+	eventually(t, relayTestTimeout, func() bool { return len(relayClientPeers(relay, serverID, "shared")) == 2 })
+	peers := relayClientPeers(relay, serverID, "shared")
+
+	for _, peer := range peers {
+		peer.writeSlot <- struct{}{}
+	}
+	writeRelayMessage(t, data, websocket.MessageText, []byte("nowhere"))
+	assertRelayClose(t, data, websocket.StatusTryAgainLater, "Delivery unavailable")
+	for _, peer := range peers {
+		<-peer.writeSlot
+	}
 }
 
 func TestRelayV2PayloadDeliveryDoesNotUseNodeWideRegistry(t *testing.T) {

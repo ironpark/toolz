@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -151,6 +152,10 @@ func FuzzValidHandshakeKey(f *testing.F) {
 	f.Add(false, valid.PublicKey().Bytes())
 	f.Add(true, make([]byte, 32))
 	f.Add(true, make([]byte, 31))
+	fieldOrder, _ := hex.DecodeString("EDFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F")
+	allOnes, _ := hex.DecodeString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F")
+	f.Add(true, fieldOrder)
+	f.Add(true, allOnes)
 	f.Add(true, []byte(nil))
 
 	f.Fuzz(func(t *testing.T, e2ee bool, key []byte) {
@@ -161,7 +166,7 @@ func FuzzValidHandshakeKey(f *testing.F) {
 		payload := []byte(fmt.Sprintf(`{"type":%q,"key":%q,"capabilities":{}}`, kind, base64.StdEncoding.EncodeToString(key)))
 		accepted := validHandshake(payload)
 
-		want := len(key) == 32 && key[31]&0x80 == 0
+		want := len(key) == 32 && canonicalCoordinate(key)
 		if want {
 			public, err := ecdh.X25519().NewPublicKey(key)
 			if err != nil {

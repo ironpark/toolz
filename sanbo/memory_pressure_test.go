@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -75,20 +76,45 @@ func TestMemoryPressureShedsOnlyOncePerCrossing(t *testing.T) {
 	}
 }
 
-func TestMemoryPressureHoldsUntilUsageFallsBelowReleaseThreshold(t *testing.T) {
-	relay := NewRelay(pressureConfig(1_000))
-	relay.sampleMemoryPressure(1_000)
+func TestMemoryPressureHoldsUntilUsageFallsBelowRecoveryThreshold(t *testing.T) {
+	watermark := 2 * MaximumMessagePayloadBytes
+	relay := NewRelay(pressureConfig(watermark))
+	relay.sampleMemoryPressure(uint64(watermark))
 
-	// Just under the watermark is not enough; hysteresis keeps pressure on so a
-	// heap sitting at the line cannot flap admission.
-	relay.sampleMemoryPressure(950)
+	// Just under the watermark is not enough; pressure holds until the node has
+	// room for one more maximum-size message.
+	relay.sampleMemoryPressure(uint64(watermark) - 1)
 	if !relay.memoryPressure.Load() {
-		t.Fatal("pressure released at 95% of the watermark, want it held")
+		t.Fatal("pressure released one byte below the watermark, want it held")
 	}
 
-	relay.sampleMemoryPressure(800)
+	relay.sampleMemoryPressure(uint64(watermark - MaximumMessagePayloadBytes))
 	if relay.memoryPressure.Load() {
-		t.Fatal("pressure did not release at 80% of the watermark")
+		t.Fatal("pressure did not release at the recovery threshold")
+	}
+}
+
+// TestMemoryPressureShedsInBatchesAcrossSamples covers the gradual shedding
+// contract: one crossing does not disconnect every socket on the node.
+func TestMemoryPressureShedsInBatchesAcrossSamples(t *testing.T) {
+	relay := NewRelay(pressureConfig(1_000))
+	server := httptestServerForRelay(t, relay)
+	sockets := initialShedBatch + 4
+	for i := 0; i < sockets; i++ {
+		conn := dialRelay(t, server, "pressure-batch-"+strconv.Itoa(i), RoleServer, 1, "")
+		defer conn.CloseNow()
+	}
+	eventually(t, relayTestTimeout, func() bool { return relay.activeWebSockets.Load() == int64(sockets) })
+
+	relay.sampleMemoryPressure(1_000)
+	if got := relay.memoryPressureDisconnects.Load(); got != int64(initialShedBatch) {
+		t.Fatalf("first batch shed %d sockets, want %d", got, initialShedBatch)
+	}
+
+	// Reclaiming nothing doubles the batch, so the rest goes on the next tick.
+	relay.sampleMemoryPressure(1_000)
+	if got := relay.memoryPressureDisconnects.Load(); got != int64(sockets) {
+		t.Fatalf("shed %d sockets across two samples, want %d", got, sockets)
 	}
 }
 
@@ -170,7 +196,7 @@ func TestMemoryPressureReleasesBufferedFrames(t *testing.T) {
 	if !waitScenario(func() bool { return relay.ingressReserved.Load() == 0 }, relayTestTimeout) {
 		t.Fatalf("buffered bytes not released by shedding: %d", relay.ingressReserved.Load())
 	}
-	// Shedding closes every peer, so the emptied session is reclaimed too.
+	// Shedding closed this session's only peers, so it is reclaimed too.
 	if !waitScenario(func() bool { return !relayHasSession(relay, serverID) }, relayTestTimeout) {
 		relay.mu.Lock()
 		buffered := len(relay.sessions[serverID].buffer)

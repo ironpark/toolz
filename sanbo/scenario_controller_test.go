@@ -200,7 +200,10 @@ func (r *Relay) testPeer(serverID string, role Role, version int, connectionID s
 		return s.v1Client
 	}
 	if role == RoleClient {
-		return s.clients[connectionID]
+		if peers := s.clients[connectionID]; len(peers) > 0 {
+			return peers[0]
+		}
+		return nil
 	}
 	if connectionID == "" {
 		return s.control
@@ -630,7 +633,6 @@ func (r *Relay) runBackpressureScenario(name string) (relayScenarioResult, error
 
 	case "missing-data-route":
 		r.Config.DataAttachTimeoutMS = 20
-		r.testSyncControl = true
 		client, err := h.dial(id, RoleClient, 2, "missing")
 		if err != nil {
 			return result, err
