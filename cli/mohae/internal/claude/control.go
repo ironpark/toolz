@@ -134,6 +134,39 @@ func (e *engine) Messages() iter.Seq2[Message, error] {
 	}
 }
 
+// messagesWithContext is Messages with cancellation: a cancelled ctx ends the
+// sequence with its error.
+func (e *engine) messagesWithContext(ctx context.Context) iter.Seq2[Message, error] {
+	return func(yield func(Message, error) bool) {
+		for {
+			select {
+			case item, ok := <-e.messages:
+				if !ok {
+					return
+				}
+				if !yield(item.msg, item.err) {
+					return
+				}
+				if item.err != nil {
+					return
+				}
+			case <-ctx.Done():
+				yield(nil, ctx.Err())
+				return
+			}
+		}
+	}
+}
+
+// marshalFrame encodes one outgoing stream-json frame.
+func marshalFrame(frame map[string]any) ([]byte, error) {
+	payload, err := json.Marshal(frame)
+	if err != nil {
+		return nil, fmt.Errorf("claude: encoding user message: %w", err)
+	}
+	return payload, nil
+}
+
 // ---------------------------------------------------------------------------
 // Reader
 // ---------------------------------------------------------------------------

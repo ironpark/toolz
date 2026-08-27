@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T20:29:45Z"
 depends_on:
 - "01-internal-claude#3"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: Tests against the fake transport: string prompt yields expected typed
 > NEXT: none
