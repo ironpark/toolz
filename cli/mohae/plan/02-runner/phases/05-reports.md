@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T21:59:14Z"
 depends_on:
 - "02-runner#4"
 perf_phase: false
-status: planned
+status: done
 ---
 > DONE-WHEN: Unit tests cover each renderer's content and the files written into the
 > NEXT: none

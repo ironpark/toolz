@@ -1,6 +1,7 @@
 ---
+completed_at: "2026-08-27T21:47:37Z"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: `mohae init --all` writes a project that `mohae verify --check-scripts
 > NEXT: none

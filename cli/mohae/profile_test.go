@@ -82,10 +82,10 @@ func TestRunAppliesProfilesBeforeFlagOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := newRunCommand()
+	command := flagsOnly(newRunCommand())
 	arguments := []string{"run", "--profile", "claude", "--timeout", "42"}
-	if err := command.Run(t.Context(), arguments); err == nil {
-		t.Fatal("expected the unimplemented runner to report itself")
+	if err := command.Run(t.Context(), arguments); err != nil {
+		t.Fatal(err)
 	}
 	if err := applyRunOverrides(command, []*Config{config}); err != nil {
 		t.Fatal(err)

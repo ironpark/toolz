@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T21:49:08Z"
 depends_on:
 - "02-runner#0"
 perf_phase: false
-status: planned
+status: done
 ---
 > DONE-WHEN: Unit tests cover the copy (modes, nesting, .git exclusion), the init script
 > NEXT: none

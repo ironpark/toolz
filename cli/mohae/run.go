@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"github.com/urfave/cli/v3"
 )
@@ -50,7 +53,7 @@ func newRunCommand() *cli.Command {
 	}
 }
 
-func runAction(_ context.Context, cmd *cli.Command) error {
+func runAction(ctx context.Context, cmd *cli.Command) error {
 	configs, err := loadConfigs(cmd.Args().Slice())
 	if err != nil {
 		return err
@@ -58,19 +61,169 @@ func runAction(_ context.Context, cmd *cli.Command) error {
 	if err := applyRunOverrides(cmd, configs); err != nil {
 		return err
 	}
-	if !contains(KnownFormats, cmd.String("output")) {
-		return fmt.Errorf("unknown output format %q", cmd.String("output"))
+	output := cmd.String("output")
+	if !contains(KnownFormats, output) {
+		return fmt.Errorf("unknown output format %q", output)
 	}
-	if cmd.Int("concurrency") < 1 {
+	concurrency := cmd.Int("concurrency")
+	if concurrency < 1 {
 		return fmt.Errorf("concurrency must be at least 1")
 	}
-	for _, config := range configs {
-		fmt.Printf("%s  agent=%s workspace=%s turns=%d\n", config.Name, config.Agent.Type, config.Workspace.Source, len(config.Prompts))
-		for index, prompt := range config.Prompts {
-			fmt.Printf("  %d. %s\n", index+1, prompt.Describe())
+	if cmd.Bool("web") {
+		// Failing here beats running the whole benchmark and only then
+		// admitting the dashboard the caller asked for does not exist.
+		return notImplemented("run --web")
+	}
+
+	reportOptions := ReportOptions{
+		DetailedTokens: cmd.Bool("detailed-tokens"),
+		ShowDialogue:   cmd.Bool("show-dialogue"),
+	}
+	trialOptions := TrialOptions{
+		ShowDialogue: cmd.Bool("show-dialogue"),
+		// Serialized: with --concurrency the trials write at the same time, and
+		// unsynchronised writes would tear each other's lines apart.
+		Out: newLockedWriter(cmd.Writer),
+	}
+
+	results := runTrials(ctx, configs, concurrency, cmd.Bool("fail-fast"), trialOptions)
+
+	rendered, err := RenderReport(output, results, reportOptions)
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(cmd.Writer, rendered)
+	if err := writeRunReports(configs, results, output, reportOptions, cmd.Writer); err != nil {
+		return err
+	}
+
+	failed := 0
+	for _, result := range results {
+		if !result.Passed {
+			failed++
 		}
 	}
-	return notImplemented("run")
+	if failed > 0 {
+		// The exit status is what a CI job reads; a benchmark that exited 0 on
+		// a failed trial would be a green build for work that did not happen.
+		return fmt.Errorf("%d of %d trial(s) failed", failed, len(results))
+	}
+	return nil
+}
+
+// runTrials runs every configuration, up to concurrency of them at a time, and
+// returns the results in the order the configurations were given — a report
+// whose order depended on which trial happened to finish first would be a
+// different document on every run.
+//
+// With --fail-fast the first failure cancels the trials still running and stops
+// the ones not yet started: the point of the flag is not to spend tokens on a
+// run whose verdict is already known.
+func runTrials(ctx context.Context, configs []*Config, concurrency int, failFast bool, options TrialOptions) []TrialResult {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	results := make([]TrialResult, len(configs))
+	ran := make([]bool, len(configs))
+	slots := make(chan struct{}, concurrency)
+	var wait sync.WaitGroup
+	var mutex sync.Mutex
+	stopped := false
+
+	for index, config := range configs {
+		mutex.Lock()
+		alreadyStopped := stopped
+		mutex.Unlock()
+		if alreadyStopped {
+			break
+		}
+		slots <- struct{}{}
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			defer func() { <-slots }()
+			// Checked again here, not only before the slot was taken: waiting
+			// for a slot is exactly when an earlier trial fails, and a
+			// fail-fast run that started the next trial anyway would spend
+			// tokens on a verdict already decided.
+			mutex.Lock()
+			abandoned := stopped
+			mutex.Unlock()
+			if abandoned {
+				return
+			}
+			result := RunTrial(ctx, config, options)
+			mutex.Lock()
+			defer mutex.Unlock()
+			results[index] = result
+			ran[index] = true
+			if failFast && !result.Passed {
+				stopped = true
+				cancel()
+			}
+		}()
+	}
+	wait.Wait()
+
+	// Only the trials that ran are reported. A configuration fail-fast never
+	// reached did not pass and did not fail; recording it either way would be
+	// a verdict nobody measured.
+	reported := make([]TrialResult, 0, len(results))
+	for index, result := range results {
+		if ran[index] {
+			reported = append(reported, result)
+		}
+	}
+	return reported
+}
+
+// writeRunReports writes each trial's report into the directory its own
+// configuration named, in the formats that configuration asked for. Reports
+// live beside the configuration that produced them, so a trial's history stays
+// with the trial rather than in one directory shared by everything.
+func writeRunReports(configs []*Config, results []TrialResult, output string, options ReportOptions, out io.Writer) error {
+	byPath := map[string]*Config{}
+	for _, config := range configs {
+		byPath[config.Path] = config
+	}
+	for _, result := range results {
+		config, ok := byPath[result.ConfigPath]
+		if !ok {
+			continue
+		}
+		// --output is written too, so `-o markdown` leaves the document it
+		// printed on disk rather than only on the terminal.
+		formats := append(append([]string{}, config.Report.Formats...), output)
+		written, err := WriteReports(config.Report.Dir, formats, []TrialResult{result}, options)
+		if err != nil {
+			return err
+		}
+		for _, path := range written {
+			fmt.Fprintf(out, "report %s\n", path)
+		}
+	}
+	return nil
+}
+
+// lockedWriter serializes the writes of trials running at the same time. The
+// dialogue of a parallel run is still interleaved trial by trial — nothing can
+// unpick that — but no single line is torn in half by another trial's.
+type lockedWriter struct {
+	mutex  sync.Mutex
+	writer io.Writer
+}
+
+func newLockedWriter(writer io.Writer) io.Writer {
+	if writer == nil {
+		writer = os.Stdout
+	}
+	return &lockedWriter{writer: writer}
+}
+
+func (w *lockedWriter) Write(data []byte) (int, error) {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+	return w.writer.Write(data)
 }
 
 // applyRunOverrides folds the command line into every selected configuration,

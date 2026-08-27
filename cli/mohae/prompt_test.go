@@ -187,7 +187,7 @@ func TestRunReplacesTheWholeConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := newRunCommand()
+	command := flagsOnly(newRunCommand())
 	arguments := []string{
 		"run",
 		"--prompt", "first",
@@ -195,8 +195,8 @@ func TestRunReplacesTheWholeConversation(t *testing.T) {
 		"--prompt-when", "",
 		"--prompt-when", "turn == 2",
 	}
-	if err := command.Run(t.Context(), arguments); err == nil {
-		t.Fatal("expected the unimplemented runner to report itself")
+	if err := command.Run(t.Context(), arguments); err != nil {
+		t.Fatal(err)
 	}
 	configs := []*Config{config}
 	if err := applyRunOverrides(command, configs); err != nil {

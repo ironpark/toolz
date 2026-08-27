@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T21:51:49Z"
 depends_on:
 - "02-runner#1"
 perf_phase: false
-status: planned
+status: done
 ---
 > DONE-WHEN: Tests drive a shell-stub executable through the custom-cli driver, covering a
 > NEXT: none

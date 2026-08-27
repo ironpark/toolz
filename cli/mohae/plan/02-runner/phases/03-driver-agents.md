@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T21:54:56Z"
 depends_on:
 - "02-runner#2"
 perf_phase: false
-status: planned
+status: done
 ---
 > DONE-WHEN: The MCP configuration parsing is unit tested against a config file, with no
 > NEXT: none

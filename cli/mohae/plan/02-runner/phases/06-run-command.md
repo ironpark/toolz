@@ -2,7 +2,7 @@
 depends_on:
 - "02-runner#5"
 perf_phase: false
-status: planned
+status: in-progress
 ---
 > DONE-WHEN: An end-to-end test runs `mohae run` on a custom-cli configuration with a
 > NEXT: none

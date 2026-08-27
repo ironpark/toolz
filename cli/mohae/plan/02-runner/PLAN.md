@@ -7,12 +7,12 @@ registered_at: "2026-08-27T21:46:21Z"
 
 # Phases
 
-- [ ] [Phase 00: Init scaffolding](phases/00-init-scaffolding.md)
-- [ ] [Phase 01: Workspace preparation](phases/01-workspace.md)
-- [ ] [Phase 02: Driver interface and custom-cli](phases/02-driver-custom.md)
-- [ ] [Phase 03: claude-code and codex drivers with MCP](phases/03-driver-agents.md)
-- [ ] [Phase 04: Trial runner](phases/04-trial.md)
-- [ ] [Phase 05: Reports](phases/05-reports.md)
+- [x] [Phase 00: Init scaffolding](phases/00-init-scaffolding.md)
+- [x] [Phase 01: Workspace preparation](phases/01-workspace.md)
+- [x] [Phase 02: Driver interface and custom-cli](phases/02-driver-custom.md)
+- [x] [Phase 03: claude-code and codex drivers with MCP](phases/03-driver-agents.md)
+- [x] [Phase 04: Trial runner](phases/04-trial.md)
+- [x] [Phase 05: Reports](phases/05-reports.md)
 - [ ] [Phase 06: Run command wiring](phases/06-run-command.md)
 
 # Shared Verification

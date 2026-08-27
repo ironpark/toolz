@@ -196,9 +196,11 @@ func TestRunOverridesReachEveryConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	configs := []*Config{config}
-	command := newRunCommand()
-	if err := command.Run(context.Background(), []string{"run", "--agent", "claude-code", "--prompt", "inline", "--timeout", "42"}); !errors.Is(err, errNotImplemented) {
-		t.Fatalf("run = %v, want a not-implemented error", err)
+	// The action is replaced so the flags are parsed without a trial actually
+	// running: what is under test here is that an override reaches every config.
+	command := flagsOnly(newRunCommand())
+	if err := command.Run(context.Background(), []string{"run", "--agent", "claude-code", "--prompt", "inline", "--timeout", "42"}); err != nil {
+		t.Fatal(err)
 	}
 	if err := applyRunOverrides(command, configs); err != nil {
 		t.Fatal(err)
@@ -275,7 +277,6 @@ func TestUnimplementedCommandsFailLoudly(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, arguments := range [][]string{
-		{"run"},
 		{"compare", "--a", "a.yaml", "--b", "b.yaml"},
 		{"report"},
 	} {

@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T21:57:27Z"
 depends_on:
 - "02-runner#3"
 perf_phase: false
-status: planned
+status: done
 ---
 > DONE-WHEN: Tests run whole trials with the custom-cli driver: a passing trial, a failing
 > NEXT: none
