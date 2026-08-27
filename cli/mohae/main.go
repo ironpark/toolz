@@ -1,18 +1,60 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
+	"runtime/debug"
+
+	"github.com/urfave/cli/v3"
 )
 
-const version = "dev"
+// version is overridable at link time (-ldflags "-X main.version=v1.2.3") for
+// release builds. Installs made with `go install ...@latest` leave it unset and
+// fall back to the module version the binary was built from.
+var version = ""
+
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info.Main.Version == "" {
+		return "unknown"
+	}
+	return info.Main.Version
+}
 
 func main() {
-	if len(os.Args) == 2 && os.Args[1] == "--version" {
-		fmt.Printf("mohae %s\n", version)
-		return
+	if err := newRootCommand().Run(context.Background(), os.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "mohae: %v\n", err)
+		os.Exit(1)
 	}
+}
 
-	fmt.Println("mohae — reproducible trials for agent tools")
-	fmt.Println("usage: mohae [--version]")
+func newRootCommand() *cli.Command {
+	return &cli.Command{
+		Name:                  "mohae",
+		Usage:                 "automated evaluation and benchmark CLI for AI agents, MCP servers, and CLI skills",
+		Version:               buildVersion(),
+		EnableShellCompletion: true,
+		Commands: []*cli.Command{
+			newRunCommand(),
+			newCompareCommand(),
+			newWebCommand(),
+			newInitCommand(),
+			newVerifyCommand(),
+			newReportCommand(),
+		},
+	}
+}
+
+// errNotImplemented marks a command whose flags and configuration handling are
+// in place but whose execution is not written yet. It is a distinct error so
+// the skeleton fails loudly instead of exiting 0 on work it never did.
+var errNotImplemented = errors.New("not implemented yet")
+
+func notImplemented(what string) error {
+	return fmt.Errorf("%s: %w", what, errNotImplemented)
 }
