@@ -75,6 +75,11 @@ type Relay struct {
 	controlSyncDelay  time.Duration
 	controlCloseDelay time.Duration
 	ownerCallTimeout  time.Duration
+	// connectionLimit is the capacity namespace's first observed limit. A
+	// later limit change is the Go equivalent of the reference capacity
+	// registry's configuration-mismatch response.
+	connectionLimit      int64
+	connectionLimitValid bool
 	// shedBatch and shedHeapBefore carry memory-pressure shedding state between
 	// sampler ticks and are only touched from the sampling path.
 	shedBatch      int
@@ -189,6 +194,7 @@ func NewRelay(config Config) (*Relay, error) {
 		ownerCallTimeout:  ownerCallTimeout,
 		ownership:         ownership,
 	}
+	relay.connectionLimit, relay.connectionLimitValid = connectionCapacityLimit(config)
 	relay.draining.Store(config.Drain)
 	return relay, nil
 }
@@ -430,31 +436,21 @@ func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connec
 		http.Error(writer, err.Error(), http.StatusBadRequest)
 		return Connection{}, nil, nil, false
 	}
-	// A route owned elsewhere must reroute even while this node is under local
-	// pressure, so ownership is consulted before any capacity rejection. When
-	// this node cannot admit anyway, a read-only lookup answers that question
-	// without paying claim/release write traffic on the overload path.
-	if !r.readyForAdmission() {
-		if owner, ok, err := r.ownership.lookup(connection.ServerID); err == nil && ok && !owner.ownedBy(r) {
-			r.rerouteResponses.Add(1)
-			writer.Header().Set(r.Config.RerouteHeader, owner.target)
-			writer.WriteHeader(http.StatusConflict)
-			return Connection{}, nil, nil, false
-		}
-		r.connectionRejections.Add(1)
-		http.Error(writer, "relay capacity unavailable", http.StatusServiceUnavailable)
-		return Connection{}, nil, nil, false
-	}
 	owner, found, err := r.ownership.lookup(connection.ServerID)
 	if err != nil {
 		r.connectionRejections.Add(1)
-		http.Error(writer, "cluster ownership unavailable", http.StatusServiceUnavailable)
+		writeText(writer, http.StatusServiceUnavailable, "owner")
 		return Connection{}, nil, nil, false
 	}
 	if found && !owner.ownedBy(r) {
 		r.rerouteResponses.Add(1)
 		writer.Header().Set(r.Config.RerouteHeader, owner.target)
 		writer.WriteHeader(http.StatusConflict)
+		return Connection{}, nil, nil, false
+	}
+	if reason := r.capacityAdmissionReason(); reason != "" {
+		r.connectionRejections.Add(1)
+		writeText(writer, http.StatusServiceUnavailable, reason)
 		return Connection{}, nil, nil, false
 	}
 	if r.sessionOwnerClosed(connection.ServerID) {
@@ -464,9 +460,21 @@ func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connec
 	}
 	// A drain refuses to claim a session this node does not already own;
 	// sockets joining an existing local session continue below.
-	if r.Draining() && (!found || !owner.ownedBy(r)) {
+	if r.Draining() && !found {
 		writeText(writer, http.StatusServiceUnavailable, "draining")
 		return Connection{}, nil, nil, false
+	}
+	if !found {
+		members, err := r.ownership.members()
+		if err != nil {
+			r.connectionRejections.Add(1)
+			writeText(writer, http.StatusServiceUnavailable, "owner")
+			return Connection{}, nil, nil, false
+		}
+		if members < r.Config.MinimumClusterSize {
+			writeText(writer, http.StatusServiceUnavailable, "cluster")
+			return Connection{}, nil, nil, false
+		}
 	}
 
 	// The reservation is rolled back if the HTTP/WebSocket handshake or the
@@ -483,7 +491,11 @@ func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connec
 	}()
 	if !r.reserveWebSocket() {
 		r.connectionRejections.Add(1)
-		http.Error(writer, "relay capacity unavailable", http.StatusServiceUnavailable)
+		reason := r.capacityAdmissionReason()
+		if reason == "" {
+			reason = "Relay connection capacity"
+		}
+		writeText(writer, http.StatusServiceUnavailable, reason)
 		return Connection{}, nil, nil, false
 	}
 	reserved = true
@@ -1417,14 +1429,55 @@ func (r *Relay) reclaimSessionLocked(serverID string, s *relaySession) {
 }
 
 func (r *Relay) ready() bool {
-	return !r.Draining() && r.readyForAdmission() && r.activeWebSockets.Load() < int64(r.Config.Acceptors*r.Config.ConnectionsPerAcceptor)
+	limit, valid := connectionCapacityLimit(r.Config)
+	return !r.Draining() && r.readyForAdmission() && valid && r.activeWebSockets.Load() < limit
 }
 
 // readyForAdmission excludes drain: a drain only refuses new session claims,
 // so sockets joining a session this node already owns are still admitted.
 func (r *Relay) readyForAdmission() bool {
 	members, err := r.ownership.members()
-	return err == nil && members >= r.Config.MinimumClusterSize && !r.capacityUnavailable.Load() && !r.memoryPressure.Load()
+	return err == nil && members >= r.Config.MinimumClusterSize &&
+		!r.capacityConfigurationMismatch() && !r.capacityUnavailable.Load() && !r.memoryPressure.Load()
+}
+
+// capacityAdmissionReason returns the exact reference body for a local
+// capacity rejection. Ownership is checked before this function so a remote
+// owner still receives a 409 reroute during local pressure.
+func (r *Relay) capacityAdmissionReason() string {
+	if r.memoryPressure.Load() {
+		return "Relay memory pressure"
+	}
+	if r.capacityConfigurationMismatch() {
+		return "Relay capacity configuration"
+	}
+	if limit, valid := connectionCapacityLimit(r.Config); !valid {
+		return "Relay capacity configuration"
+	} else if r.activeWebSockets.Load() >= limit {
+		return "Relay connection capacity"
+	}
+	if r.capacityUnavailable.Load() {
+		return "Relay capacity unavailable"
+	}
+	return ""
+}
+
+func (r *Relay) capacityConfigurationMismatch() bool {
+	limit, valid := connectionCapacityLimit(r.Config)
+	return !valid || !r.connectionLimitValid || limit != r.connectionLimit
+}
+
+func connectionCapacityLimit(config Config) (int64, bool) {
+	if config.Acceptors <= 0 || config.ConnectionsPerAcceptor <= 0 {
+		return 0, false
+	}
+	acceptors := int64(config.Acceptors)
+	connections := int64(config.ConnectionsPerAcceptor)
+	maxInt64 := int64(^uint64(0) >> 1)
+	if acceptors > maxInt64/connections {
+		return 0, false
+	}
+	return acceptors * connections, true
 }
 
 // startTicker runs tick on interval until the returned stop is called, which
@@ -1759,7 +1812,8 @@ func sessionPeers(session *relaySession) []*relayPeer {
 }
 
 func (r *Relay) reserveWebSocket() bool {
-	return reserveCounter(&r.activeWebSockets, 1, int64(r.Config.Acceptors*r.Config.ConnectionsPerAcceptor))
+	limit, valid := connectionCapacityLimit(r.Config)
+	return valid && !r.capacityConfigurationMismatch() && reserveCounter(&r.activeWebSockets, 1, limit)
 }
 
 // reserveCounter adds amount to counter unless that would exceed limit. A

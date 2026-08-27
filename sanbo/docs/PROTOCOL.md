@@ -347,8 +347,8 @@ Go 소스 또는 실제 실행으로 확인한 것이다.
 | --- | --- | --- |
 | `connectionId`당 client roster | map key 순서 | `sync`의 `connectionIds`를 정렬해 보낸다. 계약이 순서를 보장하지 않으므로 호환 범위 안이다 |
 | 소켓별 힙 상한 | BEAM 소켓 프로세스의 `max_heap_size` (`kill: true`) | 소켓별 **메모리 회계**로 등가 구현. 아래 참고 |
-| ownership registry | Syn scope + DNSCluster peer discovery | process-local registry 또는 동일 호스트/shared filesystem file-lease registry. cross-host distributed clustering은 미지원 |
-| 503 본문 | 위 표의 7종 | `draining`, `cluster ownership unavailable`, `relay capacity unavailable` 3종 |
+| ownership registry | Syn scope + DNSCluster peer discovery | process-local registry 또는 동일 호스트 file-lease registry. cross-host distributed clustering은 미지원 |
+| 503 본문 | 위 표의 7종 | 위 표의 7종을 동일 문자열로 반환하며, 로컬 backend의 admission 상태에 매핑 |
 
 client fan-out, control 초기 `sync` roster, 10초/5초 control watchdog, handshake
 좌표 범위 검사, batch 단위 메모리 pressure shedding, 단일 보유 role의 소켓 교체,

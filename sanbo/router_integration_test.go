@@ -148,6 +148,88 @@ func TestRouterLocalPressureDoesNotSuppressRemoteReroute(t *testing.T) {
 	}
 }
 
+func TestRouterMatchesReference503ReasonBodies(t *testing.T) {
+	tests := []struct {
+		name   string
+		setup  func(*Relay)
+		want   string
+		member int
+	}{
+		{name: "draining", setup: func(relay *Relay) { relay.BeginDrain() }, want: "draining", member: 1},
+		{name: "cluster", setup: func(*Relay) {}, want: "cluster", member: 0},
+		{name: "owner", setup: func(relay *Relay) {
+			relay.ownership = &admissionOwnershipStub{lookupErr: errors.New("owner lookup failed"), memberCount: 1}
+		}, want: "owner", member: 1},
+		{name: "connection capacity", setup: func(relay *Relay) {
+			relay.activeWebSockets.Store(20_000)
+		}, want: "Relay connection capacity", member: 1},
+		{name: "memory pressure", setup: func(relay *Relay) {
+			relay.memoryPressure.Store(true)
+		}, want: "Relay memory pressure", member: 1},
+		{name: "capacity configuration", setup: func(relay *Relay) {
+			relay.Config.ConnectionsPerAcceptor++
+		}, want: "Relay capacity configuration", member: 1},
+		{name: "capacity unavailable", setup: func(relay *Relay) {
+			relay.capacityUnavailable.Store(true)
+		}, want: "Relay capacity unavailable", member: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			relay := mustNewRelay(t, DefaultConfig())
+			relay.ownership = &admissionOwnershipStub{memberCount: test.member}
+			test.setup(relay)
+			serverID := "503-" + strings.ReplaceAll(test.name, " ", "-")
+			if got := admission503Body(t, relay, serverID); got != test.want {
+				t.Fatalf("503 body = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+type admissionOwnershipStub struct {
+	lookupErr   error
+	memberErr   error
+	memberCount int
+}
+
+func (*admissionOwnershipStub) identity() string { return "" }
+
+func (stub *admissionOwnershipStub) lookup(string) (ownershipRecord, bool, error) {
+	return ownershipRecord{}, false, stub.lookupErr
+}
+
+func (*admissionOwnershipStub) claim(string, *Relay) (ownershipRecord, bool, error) {
+	return ownershipRecord{}, false, nil
+}
+
+func (*admissionOwnershipStub) release(string, *Relay) error { return nil }
+
+func (*admissionOwnershipStub) ownedServers() (map[string]bool, error) { return nil, nil }
+
+func (stub *admissionOwnershipStub) members() (int, error) {
+	return stub.memberCount, stub.memberErr
+}
+
+func (*admissionOwnershipStub) close() error { return nil }
+
+func admission503Body(t *testing.T, relay *Relay, serverID string) string {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "http://relay.test/ws?serverId="+serverID+"&role=server", nil)
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	request.Header.Set("Sec-WebSocket-Version", "13")
+	request.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	writer := httptest.NewRecorder()
+	_, _, _, ok := relay.admit(writer, request)
+	if ok {
+		t.Fatal("admission unexpectedly upgraded a rejected request")
+	}
+	if writer.Code != http.StatusServiceUnavailable {
+		t.Fatalf("admission status = %d, want 503", writer.Code)
+	}
+	return writer.Body.String()
+}
+
 func TestRouterMetricsExposeLocalNamesAndValues(t *testing.T) {
 	server := newRelayTestServer(t, DefaultConfig())
 	status, _, body := getResponse(t, server.URL+"/metrics")
