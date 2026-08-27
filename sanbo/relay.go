@@ -152,9 +152,10 @@ type relaySession struct {
 	// ownerDone closes when the session owner has been killed by the owner-call
 	// watchdog. peers is published after every topology mutation so the watchdog
 	// never needs to take Relay.mu before closing attached sockets.
-	ownerDone   chan struct{}
-	ownerClosed atomic.Bool
-	peers       atomic.Value // stores []*relayPeer
+	ownerDone     chan struct{}
+	ownerClosed   atomic.Bool
+	ownerTimedOut atomic.Bool
+	peers         atomic.Value // stores []*relayPeer
 }
 
 type relayDataWaiter struct {
@@ -438,7 +439,6 @@ func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connec
 	}
 	owner, found, err := r.ownership.lookup(connection.ServerID)
 	if err != nil {
-		r.connectionRejections.Add(1)
 		writeText(writer, http.StatusServiceUnavailable, "owner")
 		return Connection{}, nil, nil, false
 	}
@@ -449,12 +449,13 @@ func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connec
 		return Connection{}, nil, nil, false
 	}
 	if reason := r.capacityAdmissionReason(); reason != "" {
-		r.connectionRejections.Add(1)
+		if reason == "Relay connection capacity" || reason == "Relay memory pressure" {
+			r.connectionRejections.Add(1)
+		}
 		writeText(writer, http.StatusServiceUnavailable, reason)
 		return Connection{}, nil, nil, false
 	}
 	if r.sessionOwnerClosed(connection.ServerID) {
-		r.connectionRejections.Add(1)
 		writeText(writer, http.StatusServiceUnavailable, "owner")
 		return Connection{}, nil, nil, false
 	}
@@ -467,7 +468,6 @@ func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connec
 	if !found {
 		members, err := r.ownership.members()
 		if err != nil {
-			r.connectionRejections.Add(1)
 			writeText(writer, http.StatusServiceUnavailable, "owner")
 			return Connection{}, nil, nil, false
 		}
@@ -490,10 +490,12 @@ func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connec
 		}
 	}()
 	if !r.reserveWebSocket() {
-		r.connectionRejections.Add(1)
 		reason := r.capacityAdmissionReason()
 		if reason == "" {
 			reason = "Relay connection capacity"
+		}
+		if reason == "Relay connection capacity" || reason == "Relay memory pressure" {
+			r.connectionRejections.Add(1)
 		}
 		writeText(writer, http.StatusServiceUnavailable, reason)
 		return Connection{}, nil, nil, false
@@ -924,7 +926,13 @@ func (r *Relay) timeoutSessionOwner(serverID string, expected *relaySession) {
 		}
 		session, _ = value.(*relaySession)
 	}
-	if session == nil || !session.markOwnerClosed() {
+	if session == nil || !session.ownerTimedOut.CompareAndSwap(false, true) {
+		return
+	}
+	if !session.markOwnerClosed() {
+		// A cluster-reconciler close won the race. Its normal detach cleanup owns
+		// the session, so do not leave the timeout-only reclaim guard behind.
+		session.ownerTimedOut.Store(false)
 		return
 	}
 	for _, peer := range session.peerSnapshot() {
@@ -1418,6 +1426,9 @@ func detachClientLocked(s *relaySession, connectionID string, p *relayPeer) (rem
 }
 
 func (r *Relay) reclaimSessionLocked(serverID string, s *relaySession) {
+	if s.ownerTimedOut.Load() {
+		return
+	}
 	if s.v1 == nil && s.v1Client == nil && s.control == nil && len(s.clients) == 0 && len(s.data) == 0 && len(s.waiting) == 0 {
 		delete(r.sessions, serverID)
 		if value, ok := r.ownerSessions.Load(serverID); ok && value == s {
