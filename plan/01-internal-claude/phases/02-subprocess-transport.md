@@ -2,7 +2,7 @@
 depends_on:
 - "01-internal-claude#0"
 perf_phase: false
-status: planned
+status: in-progress
 ---
 > DONE-WHEN: Unit tests (no real CLI) cover: command-line construction per option, CLI
 > NEXT: none

@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T20:16:11Z"
 depends_on:
 - "01-internal-claude#0"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: Table-driven tests using real fixture lines (taken from the Python SDK's
 > NEXT: none
