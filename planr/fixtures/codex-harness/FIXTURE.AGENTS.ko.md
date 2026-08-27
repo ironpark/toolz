@@ -3,54 +3,61 @@
 작업은 `planr`로 계획을 세우고 그 계획을 따라 진행합니다. `planr`는 이미 `PATH`에
 설치되어 있습니다.
 
-`planr`는 하나의 작업을 여러 phase로 나눠 Markdown 문서로 관리하는 CLI입니다. 무엇을
-어떤 순서로 할지 먼저 적어 두고, 각 phase를 시작·완료할 때마다 상태를 갱신해 진행
-상황이 문서에 남게 합니다.
+`planr`는 하나의 작업을 여러 phase로 나누어 Markdown 문서로 관리합니다. 가능한 경우
+JSON과 stdin/stdout 인터페이스를 사용해 메모리에서 처리하고, plan 문서나 `.planr.yaml`을
+직접 열지 않습니다.
 
 ## 명령
 
 ```sh
-planr new <kebab-name> --description "200 글자 이내 짧은 설명" # 계획 초안 파일 생성
-planr add <draft-file> # 초안을 검증하고 plan으로 등록
-planr overview # 모든 plan의 진행률 요약
-planr status # 남은 phase와 대기 중인 의존성 상세
+planr schema --json # 문서 계약·상태·의존성 규칙
+planr new <kebab-name> --description "200 글자 이내 짧은 설명" --json
+planr apply --stdin # 완성한 Markdown을 표준 입력으로 적용
+planr overview --json # 모든 plan 진행률
+planr status --json # 남은 phase와 대기 중인 의존성
+planr show <plan-name> --all --json # plan 전체 문서와 phase 정보
+planr edit <plan-name>#<number> --json # phase 하나를 메모리로 checkout
+planr edit <plan-name> --section plan --json # 편집할 plan section checkout
+planr new <plan-name>#<title> --json # 새 phase 초안 생성
 planr phase start <plan-name> <number> # phase 착수
 planr phase done <plan-name> <number> # phase 완료
-planr phase add <plan-name> <title> --work "..." --done-when "..." # 진행 중 plan에 phase 추가
 ```
 
-`planr new`가 만든 초안에는 `GOALS`, `SCOPE`, `CONTEXT`, `PHASES`, `VERIFICATION`,
-`ORDERING`, `NEXT` 섹션이 순서대로 있습니다. 각 phase는 제목 뒤 YAML 펜스에 `phase`,
-`slug`, `status`, `depends_on`을 적고, 그 아래 두 소제목(계획된 작업과 완료 조건)을
-초안에 적힌 제목 그대로 채웁니다. 초안 파일의 기존 구조를 그대로 따르면 되고,
-형식이 어긋나면 `planr add`가 무엇이 잘못됐는지 알려 주며 등록을 거부합니다.
+`new --json`은 selector와 `template` 문자열을 반환합니다. 모든 `TODO(planr)` 표시를
+실제 내용으로 바꾼 뒤 그 문자열을 `planr apply --stdin`으로 보냅니다. phase 초안에는
+작업, 완료 조건, `depends_on`, `status`, `entry_condition`, `perf_phase`, 편집 가능한
+slug가 들어가며, phase 번호는 기존 최대 번호 다음으로 `apply`가 지정합니다.
 
-초안에는 `TODO(planr)` 표시가 들어 있습니다. 전부 실제 내용으로 바꿔야 등록되며,
-`planr add`는 남아 있는 표시를 줄 번호와 함께 한 번에 모두 알려 줍니다. phase의
-`depends_on`에는 같은 plan 안의 phase를 번호나 slug로 적습니다(`[0]`, `[initial-work]`,
-혼용 모두 가능). 초안 맨 위 주석에 각 필드 규칙이 정리돼 있습니다.
+`edit --json`은 checkout 문서와 `planr_base` hash를 반환합니다. frontmatter의 식별
+필드를 보존하고 수정한 `document`를 `planr apply --stdin`으로 보냅니다. 그동안 다른
+명령이 대상 문서를 바꿨으면 적용이 거부되므로 다시 checkout합니다. phase 상태 변경은
+`phase start`, `phase done`, `phase reset`, `phase set`만 사용합니다.
+
+plan 초안에는 `GOALS`, `SCOPE`, `CONTEXT`, `PHASES`, `VERIFICATION`, `ORDERING`, `NEXT`가
+순서대로 있습니다. 각 phase는 제목 뒤 YAML 펜스에 `phase`, `slug`, `status`,
+`depends_on`을 적고, 초안에 있는 제목 아래 작업과 완료 조건을 채웁니다. `new`가 반환한
+구조를 따르며, `apply --json`은 규칙·section·phase·줄 번호가 있는 검증 오류를
+반환합니다.
 
 ## 작업 흐름
 
-1. 요청과 기존 코드·테스트를 먼저 읽고 무엇이 필요한지 파악합니다.
-2. 코드를 고치기 전에 `planr new`로 초안을 만들고, 목표·검증 방법·phase를 실제 작업에
-   맞게 채운 뒤 `planr add`로 등록합니다. phase는 각각 독립적으로 검증할 수 있는
-   단위로 나눕니다.
-3. `planr overview`로 등록 결과를 확인합니다.
-4. phase마다 다음을 반복합니다.
-   `planr phase start` → 구현 → 검증(테스트) → **변경 사항 커밋** → `planr phase done`
-5. 진행 중 계획이 어긋나면 `planr phase add`로 phase를 추가하거나 계획 문서를 고쳐
-   실제 작업과 맞춥니다.
-6. 모든 phase가 끝나면 `planr overview`로 전부 `done`인지 확인합니다.
+1. 요청과 기존 코드·테스트를 먼저 읽고 필요한 일을 파악합니다.
+2. `new --json`으로 plan을 만들고 template을 채운 뒤 stdin으로 적용합니다. 각 phase를
+   독립적으로 검증할 수 있는 단위로 나눕니다.
+3. `overview --json`, `status --json`, `show --all --json`으로 결과를 확인합니다.
+4. phase마다 `planr phase start` → 구현 → 검증(테스트) → **변경 사항 커밋** →
+   `planr phase done`을 반복합니다.
+5. 계획이 실제 작업과 달라지면 `new plan#title`로 phase 초안을 만들거나, `edit`로 해당
+   phase/section을 checkout해 수정하고 적용합니다.
+6. 모든 phase가 끝나면 `overview --json`으로 모두 `done`인지 확인합니다.
 
 ## 규칙
 
-- `planr phase done`은 커밋되지 않은 소스 변경이 있으면 실패합니다. 먼저 커밋하세요.
-  `--force`로 이 검사를 우회하지 않습니다. `planr`가 만든 초안 파일과 plan 디렉터리는
-  소스 변경으로 세지 않으므로 커밋하지 않아도 됩니다.
-- `planr phase start`와 `planr phase done`은 선행 phase가 아직 `done`이 아니면
-  실패합니다. 계획한 순서대로 진행하고, `--force`로 우회하지 않습니다.
-- 계획 문서와 코드·테스트를 함께 최신 상태로 유지합니다. 계획만 갱신하고 구현이
-  없거나, 구현만 하고 phase 상태가 그대로면 안 됩니다.
-- plan 문서와 `.planr.yaml`은 `planr` 명령으로 갱신합니다. 상태를 손으로 고쳐 맞추지
-  않습니다.
+- `planr phase done`은 커밋되지 않은 소스 변경이 있으면 실패합니다. 먼저 커밋하고
+  `--force`로 우회하지 않습니다.
+- `planr phase start`와 `planr phase done`은 선행 phase가 `done`이 아니면 실패합니다.
+  계획한 순서대로 작업하고 `--force`로 우회하지 않습니다.
+- plan 문서와 코드·테스트를 함께 최신 상태로 유지합니다. plan만 고치거나 구현만 하고
+  phase 상태를 옮기지 않는 것은 허용되지 않습니다.
+- phase checklist와 `plan_status`는 derived 값입니다. section checkout의 checklist는
+  보호된 marker로 나타나므로 marker를 바꾸지 않습니다.

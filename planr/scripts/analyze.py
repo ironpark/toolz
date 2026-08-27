@@ -31,8 +31,22 @@ TOKEN_FIELDS = (
     "total_tokens",
 )
 
-PLANR_ACTIONS = {"new", "add", "status", "overview", "phase"}
-PHASE_ACTIONS = {"add", "set", "update", "start", "done", "reset"}
+PLANR_ACTIONS = {
+    "new",
+    "edit",
+    "apply",
+    "status",
+    "show",
+    "overview",
+    "notes",
+    "config",
+    "doctor",
+    "archive",
+    "completion",
+    "schema",
+    "phase",
+}
+PHASE_ACTIONS = {"set", "update", "start", "done", "reset", "rm"}
 
 
 @dataclasses.dataclass
@@ -995,5 +1009,4 @@ def analyze(run_dir: pathlib.Path, output: pathlib.Path | None = None) -> int:
     (run_dir / "metrics.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(output)
     return 0
-
 

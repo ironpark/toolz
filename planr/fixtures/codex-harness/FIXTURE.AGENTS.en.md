@@ -3,65 +3,71 @@
 Plan the work with `planr` and follow that plan. `planr` is already installed
 on `PATH`.
 
-`planr` is a CLI that splits one piece of work into phases and keeps them as
-Markdown documents. You write down what to do and in what order first, then
-update each phase as you start and finish it, so the progress stays recorded in
-the documents.
+`planr` splits one piece of work into phases and keeps the plan as Markdown
+documents. Use its JSON and stdin/stdout interfaces when an operation can stay
+in memory; do not open plan documents or `.planr.yaml` directly.
 
 ## Commands
 
 ```sh
-planr new <kebab-name> --description "short description, 200 characters or fewer" # create a plan draft
-planr add <draft-file> # validate the draft and register it as a plan
-planr overview # progress summary for every plan
-planr status # remaining phases and pending dependencies in detail
+planr schema --json # document contract and valid status/dependency values
+planr new <kebab-name> --description "short description, 200 characters or fewer" --json
+planr apply --stdin # apply the completed Markdown sent on stdin
+planr overview --json # progress summary for every plan
+planr status --json # remaining phases and pending dependencies
+planr show <plan-name> --all --json # all plan documents and phase data
+planr edit <plan-name>#<number> --json # check out one phase into memory
+planr edit <plan-name> --section plan --json # check out an editable plan section
+planr new <plan-name>#<title> --json # produce a new phase draft
 planr phase start <plan-name> <number> # begin a phase
 planr phase done <plan-name> <number> # complete a phase
-planr phase add <plan-name> <title> --work "..." --done-when "..." # add a phase to an open plan
 ```
 
-The draft `planr new` creates has the sections `GOALS`, `SCOPE`, `CONTEXT`,
-`PHASES`, `VERIFICATION`, `ORDERING` and `NEXT`, in that order. Each phase puts
-`phase`, `slug`, `status` and `depends_on` in the YAML fence after its title,
-and fills in the two subsections below it (planned work and completion
-conditions) under exactly the headings the draft uses. Follow the structure the
-draft already has; if the format is wrong, `planr add` says what is wrong and
-refuses to register it.
+`new --json` returns a selector and a `template` string. Fill every
+`TODO(planr)` marker, then send that string to `planr apply --stdin`. A phase
+draft contains its work, done-when, `depends_on`, `status`,
+`entry_condition`, `perf_phase`, and editable slug; `apply` assigns the phase
+number as the next number after the largest existing one.
 
-The draft contains `TODO(planr)` markers. Every one of them must be replaced
-with real content before it registers, and `planr add` reports all remaining
-markers at once with their line numbers. A phase's `depends_on` lists other
-phases in the same plan, by number or by slug (`[0]`, `[initial-work]`, or a
-mix). The comment at the top of the draft summarizes the rules for each field.
+`edit --json` returns the checkout document and its `planr_base` hash. Preserve
+the frontmatter identity fields and send the edited `document` to
+`planr apply --stdin`. If another command changed the target meanwhile,
+application is refused; check it out again. Phase status changes belong only
+to `phase start`, `phase done`, `phase reset`, or `phase set`.
+
+The plan draft has `GOALS`, `SCOPE`, `CONTEXT`, `PHASES`, `VERIFICATION`,
+`ORDERING` and `NEXT`, in that order. Each phase puts `phase`, `slug`, `status`
+and `depends_on` in the YAML fence after its title, and fills in planned work
+and completion conditions under the headings already present. Follow the
+structure returned by `new`; `apply --json` reports validation failures with
+rules, sections, phases, and line numbers.
 
 ## Workflow
 
-1. Read the request and the existing code and tests first, and work out what is
+1. Read the request and existing code and tests first, and work out what is
    needed.
-2. Before changing any code, create a draft with `planr new`, fill in the
-   goals, verification method and phases to match the actual work, and register
-   it with `planr add`. Split phases into units that can each be verified
-   independently.
-3. Check the result with `planr overview`.
+2. Create a plan with `new --json`, fill its template, and apply it through
+   stdin. Split phases into units that can each be verified independently.
+3. Check the result with `overview --json`, `status --json`, and
+   `show --all --json`.
 4. For each phase, repeat:
    `planr phase start` → implement → verify (tests) → **commit the changes** →
-   `planr phase done`
-5. If the plan diverges from reality as you go, add a phase with
-   `planr phase add` or correct the plan documents so they match the real work.
-6. When every phase is finished, confirm with `planr overview` that they are
+   `planr phase done`.
+5. If the plan diverges, create a phase draft with `new plan#title`, or check
+   out and apply the relevant section or phase with `edit`.
+6. When every phase is finished, confirm with `overview --json` that they are
    all `done`.
 
 ## Rules
 
 - `planr phase done` fails when there are uncommitted source changes. Commit
-  first. Do not bypass this check with `--force`. Drafts and plan directories
-  created by `planr` do not count as source changes, so they need not be
-  committed.
+  first. Do not bypass this check with `--force`.
 - `planr phase start` and `planr phase done` fail when a prerequisite phase is
   not `done` yet. Work in the order you planned, and do not bypass it with
   `--force`.
 - Keep the plan documents and the code and tests up to date together. Updating
   only the plan with no implementation, or implementing without moving the
   phase status, is not acceptable.
-- Update plan documents and `.planr.yaml` through `planr` commands. Do not
-  hand-edit them to fix up state.
+- Treat the phase checklist and `plan_status` as derived. A plan section
+  checkout exposes the checklist as a protected marker; leave that marker
+  unchanged.

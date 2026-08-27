@@ -106,7 +106,7 @@ class FailedCommandTest(SessionReadingTest):
         self.write_events(
             [
                 command_event("a", "echo ok", "fine", 0, "completed"),
-                command_event("b", "planr add draft.md", "2026/08/27 01:17:19 boom", 1, "completed"),
+                command_event("b", "planr apply draft.md", "2026/08/27 01:17:19 boom", 1, "completed"),
             ]
         )
         failures = failed_executions(read_session(self.run_dir))
@@ -114,7 +114,7 @@ class FailedCommandTest(SessionReadingTest):
         self.assertEqual(failures[0]["exit_code"], 1)
         # Numbered as in the transcript, so the two can be cross-referenced.
         self.assertEqual(failures[0]["index"], 2)
-        self.assertEqual(failures[0]["planr_actions"], ["add"])
+        self.assertEqual(failures[0]["planr_actions"], ["apply"])
 
     def test_shell_failure_is_not_attributed_to_planr(self) -> None:
         self.write_events([command_event("a", "gofmt -w main.go", "boom", 2, "completed")])
@@ -146,15 +146,15 @@ class FailureReportSectionTest(unittest.TestCase):
     def test_planr_and_other_failures_get_separate_headings(self) -> None:
         report = self.render(
             [
-                {"index": 1, "command": "planr add d.md", "exit_code": 1, "planr_actions": ["add"], "error": "boom"},
+                {"index": 1, "command": "planr apply d.md", "exit_code": 1, "planr_actions": ["apply"], "error": "boom"},
                 {"index": 2, "command": "gofmt -w x.go", "exit_code": 2, "planr_actions": [], "error": "bang"},
             ]
         )
         self.assertIn("(`planr` 1건, 기타 1건)", report)
         planr_heading = report.index("### `planr` 명령 실패")
         other_heading = report.index("### 기타 명령 실패")
-        self.assertLess(planr_heading, report.index("planr add d.md"))
-        self.assertLess(report.index("planr add d.md"), other_heading)
+        self.assertLess(planr_heading, report.index("planr apply d.md"))
+        self.assertLess(report.index("planr apply d.md"), other_heading)
         self.assertLess(other_heading, report.index("gofmt -w x.go"))
 
     def test_empty_group_is_marked_rather_than_dropped(self) -> None:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reproduce the checkout release scenario and print status/overview output.
 
-The scenario needs states a single `planr add` cannot produce on its own: a
+The scenario needs states a single `planr apply` cannot produce on its own: a
 finished plan, a plan waiting on another plan's phase, a partially finished
 plan, an unrelated finished plan that `status` hides.  Every one of them is
 produced by shaping planr's *input* -- one draft per plan, with the plan
@@ -115,7 +115,7 @@ def prepare_workspace() -> pathlib.Path:
 def build_scenario(workspace: pathlib.Path) -> None:
     body = draft_body(workspace)
     for plan in PLANS:
-        planr(workspace, "add", str(write_draft(workspace, plan, body).name))
+        planr(workspace, "apply", str(write_draft(workspace, plan, body).name))
 
     # A finished dependency, and an unrelated finished plan that `status` hides.
     complete_phases(workspace, AUTH, PHASE_COUNT)

@@ -313,7 +313,7 @@ class InstalledInstructionsTest(unittest.TestCase):
             for language in SUPPORTED_LANGUAGES:
                 with self.subTest(fixture=fixture, language=language):
                     agents = (fixture_dir(fixture) / agents_file_for(language)).read_text(encoding="utf-8")
-                    for policy in ("planr new", "planr add", "planr overview", "phase done", "--force"):
+                    for policy in ("planr new", "planr apply", "planr edit", "planr overview", "phase done", "--force"):
                         self.assertIn(policy, agents)
 
     def test_is_independent_of_this_repository(self) -> None:

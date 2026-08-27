@@ -7,7 +7,7 @@
 
 - [설치](#설치)
 - [빠른 시작](#빠른-시작)
-- [명령](#명령) — [plan 등록](#plan-등록), [조회](#조회), [설정 확인과 진단](#설정-확인과-진단), [phase 관리](#phase-관리), [plan 보관](#plan-보관)
+- [명령](#명령) — [plan 생성과 적용](#plan-생성과-적용), [조회](#조회), [설정 확인과 진단](#설정-확인과-진단), [phase 관리](#phase-관리), [plan 보관](#plan-보관)
 - [설정](#설정) — [plan 저장 위치](#plan-저장-위치), [문서 언어](#문서-언어), [훅](#훅)
 - [저장 구조](#저장-구조)
 - [초안 규격](#초안-규격) — [frontmatter](#frontmatter), [섹션](#섹션), [PHASE 블록](#phase-블록), [의존성](#의존성)
@@ -17,7 +17,7 @@
 ## 요구 사항
 
 planr의 plan 조회·변경 명령은 git 저장소 안에서 동작합니다. 완료 기록을 git note로
-남기고, phase 완료 시 작업 트리 상태를 확인하기 때문입니다. `config`와 `doctor`는
+남기고, phase 완료 시 작업 트리 상태를 확인하기 때문입니다. `config`, `doctor`, `schema`는
 설정과 저장소 상태를 진단할 수 있도록 저장소 밖에서도 실행되며, `doctor`가 git
 저장소 없음 문제를 non-zero로 보고합니다. 그 밖의 명령을 저장소 밖에서 실행하면
 다음과 같이 중단됩니다.
@@ -45,8 +45,8 @@ planr new checkout-v2 --description "checkout flow refresh"
 
 # 2. 초안 파일을 열어 목표·phase·검증 조건을 채웁니다
 
-# 3. plan으로 등록
-planr add checkout-v2.md
+# 3. 초안을 plan으로 적용
+planr apply checkout-v2.md
 
 # 4. 진행 상태 조회
 planr overview
@@ -60,26 +60,32 @@ planr phase done checkout-v2 1
 
 | 명령 | 설명 |
 | --- | --- |
-| `planr new <plan-name>` | 규격 초안 파일을 생성합니다 |
-| `planr add <draft-file>` | 초안을 검증하고 plan 디렉터리로 등록합니다 |
+| `planr new <plan-name>` | 새 plan 초안 파일을 생성합니다 |
+| `planr new <plan-name>#<phase-name>` | 열린 plan의 새 phase 초안을 생성합니다 |
+| `planr edit <plan-name>#<phase-number>` | 기존 phase를 편집할 수 있도록 checkout합니다 |
+| `planr edit <plan-name> --section goals\|context\|plan` | 기존 plan section을 checkout합니다 |
+| `planr apply <file> [--dry-run] [--json]` | 초안을 검증하고 등록하거나 checkout을 적용합니다 |
+| `planr apply --stdin [--dry-run] [--json]` | 표준 입력의 문서를 검증하고 적용합니다 |
 | `planr config [--json]` | 실제 적용된 설정 파일과 effective 설정값을 출력합니다 |
 | `planr doctor [--fix] [--json]` | 설정·저장소·등록된 plan 문서의 정합성을 진단합니다 |
 | `planr status [plan-name] [--json]` | 남은 phase와 대기 중인 의존성을 자세히 출력합니다 |
 | `planr show <plan-name> [phase-number] [--json]` | 현재 또는 지정한 phase 문서의 핵심 내용을 출력합니다 |
+| `planr show <plan-name> --section goals\|context\|plan [--json]` | plan section 문서를 출력합니다 |
+| `planr show <plan-name> --all --json` | plan 전체 문서를 하나의 JSON으로 출력합니다 |
 | `planr overview [plan-name] [--json]` | 모든 plan의 진행률을 한 줄씩 요약합니다 |
-| `planr phase add <plan-name> <title>` | 열린 plan에 phase를 추가합니다 |
 | `planr phase set <plan-name> <number> --status <status>` | phase 상태를 지정한 값으로 변경합니다 |
 | `planr phase start\|done\|reset <plan-name> <number>` | phase 상태 변경 단축 명령입니다 |
 | `planr phase rm <plan-name> <number> [--force]` | phase 문서와 PLAN.md 체크리스트 항목을 함께 삭제합니다 |
 | `planr archive <plan-name>` | 완료된 plan을 마지막 `plans_dirs` 경로로 이동합니다 |
 | `planr notes [plan-name] [--json]` | 커밋에 연결된 plan/phase 이벤트 기록을 조회합니다 |
+| `planr schema [--json]` | plan·phase 문서의 필수 구조와 적용 규칙을 출력합니다 |
 | `planr --version` | 설치된 버전을 출력합니다 |
 
 plan 이름을 받는 모든 명령은 `checkout-v2`와 `00-checkout-v2`를 모두 인식합니다.
 모든 명령에서 사용할 수 있는 `--no-hooks`는 해당 호출의 `before`·`after` 훅을 모두
 건너뜁니다.
 
-### plan 등록
+### plan 생성과 적용
 
 ```sh
 # 규격 초안 생성
@@ -89,17 +95,52 @@ planr new platform-refresh --description "platform plan refresh"
 planr new checkout-v2 --description "checkout flow refresh" \
   --depends-on platform-refresh --depends-on api-foundation#2
 
-# 초안을 채운 뒤 plan으로 등록
-planr add platform-refresh.md
+# 초안을 채운 뒤 plan으로 적용
+planr apply platform-refresh.md
 ```
 
 | 옵션 | 명령 | 설명 |
 | --- | --- | --- |
 | `--description` | `new` | **필수.** 공백 포함 200자 이내의 짧은 설명을 초안 frontmatter에 기록합니다. plan 이름 뒤의 두 번째 인자로도 지정할 수 있습니다. |
 | `--depends-on` | `new` | 선행 plan 또는 phase를 지정합니다. 옵션을 반복하거나 쉼표로 구분하며, 특정 phase는 `plan-name#phase-number` 형식을 씁니다. |
-| `--name` | `add` | 초안 frontmatter나 파일명 대신 plan 이름을 지정합니다. |
+| `--output` | `new` / `edit` | 초안 또는 checkout을 지정한 경로에 씁니다. 생략하면 `new`는 현재 디렉터리, `edit`는 `.planr/` scratch 디렉터리를 사용합니다. |
+| `--json` | `new` / `edit` / `apply` | `new`/`edit`은 파일 없이 template·checkout을 출력하고, `apply`는 적용 결과 또는 구조화된 오류를 JSON으로 출력합니다. `apply --dry-run`만 파일을 쓰지 않습니다. |
 
 `--depends-on` 정보는 초안과 등록된 `PLAN.md`의 frontmatter에 그대로 보존됩니다.
+
+### new / edit → apply 순환
+
+`new`는 내용을 채우기 전의 문서를 만들고, `apply`가 문서 자체의 frontmatter를 읽어
+plan 등록 또는 phase 추가를 결정합니다. `apply`에는 파일 경로를 주거나 stdin을 사용할
+수 있습니다.
+
+```sh
+# 사람: .planr/에 checkout 파일을 만들고 경로를 출력
+planr new checkout-v2 --description "checkout flow refresh"
+planr apply checkout-v2.md
+
+# 에이전트: 파일을 만들지 않고 JSON의 template/document 문자열을 메모리에서 수정
+planr new checkout-v2 --description "checkout flow refresh" --json
+planr apply --stdin --json
+
+# 기존 phase 또는 section을 checkout
+planr edit checkout-v2#2 --json
+planr edit checkout-v2 --section goals --json
+planr apply --stdin --json
+```
+
+`edit` checkout에는 `planr_edit`, `planr_target`, 필수 `planr_base`가 들어갑니다.
+`apply`는 현재 대상 문서의 SHA-256을 다시 계산하므로 checkout 뒤 문서가 바뀌었으면
+적용하지 않습니다. 다시 `edit`해야 합니다. `apply`는 phase의 `status`를 바꾸지
+않습니다. 상태는 `phase set/start/done/reset`으로만 바꾸며, 이 명령들이 의존성·미커밋
+소스·훅을 검사합니다.
+
+`edit --section plan`에서는 `PLAN.md`의 phase checklist가 보호된 marker로 보입니다.
+marker 자체와 그 derived 영역은 수정하지 마십시오. `apply`는 현재 디스크의 checklist와
+`plan_status`를 유지하고, section의 나머지 내용만 적용합니다.
+
+파일 방식 checkout은 저장소 루트의 `.planr/`에 기본 생성됩니다. 이 디렉터리는 사람의
+임시 작업 공간이므로 저장소의 `.gitignore`에 `/.planr/`를 추가하고 커밋하지 마십시오.
 
 ### 조회
 
@@ -121,8 +162,11 @@ planr overview checkout-v2
 # 스크립트/에이전트용 JSON 출력
 planr status --json
 planr show checkout-v2 --json
+planr show checkout-v2 --section goals --json
+planr show checkout-v2 --all --json
 planr overview --json
 planr notes --json
+planr schema --json
 ```
 
 **`status`** — `phases/*.md`의 현재 frontmatter를 읽어 남은 phase와 `wait` 목록을
@@ -203,11 +247,11 @@ planr phase done checkout-v2 1 --force
 # 기타 상태로 직접 변경
 planr phase set checkout-v2 1 --status conditional
 
-# 진행 중 plan에 phase 추가
-planr phase add checkout-v2 "Cache Warmup" \
-  --work "캐시 워밍업 경로를 추가한다." \
-  --done-when "캐시 적중률 검증이 통과한다." \
-  --depends-on 1
+# 진행 중 plan에 phase 추가 — 초안을 JSON으로 받아 메모리에서 채운다
+planr new checkout-v2#Cache-Warmup --json
+# 반환된 template의 phase_title/slug/depends_on/status/entry_condition/perf_phase와
+# Planned Work/Done When을 채운 뒤
+planr apply --stdin
 
 # 잘못 추가한 phase 제거 (의존하는 phase가 있으면 --force 필요)
 planr phase rm checkout-v2 2
@@ -220,10 +264,12 @@ planr phase rm checkout-v2 2 --force
 | `phase done` | `done` |
 | `phase reset` | `planned` |
 
-`phase add`의 `--work`와 `--done-when`은 필수입니다. 번호는 기존 phase의 가장 큰
-번호 다음으로 자동 지정되고, `--depends-on`에는 같은 plan의 기존 phase 번호를 하나
-이상 지정할 수 있습니다. 새 phase 문서와 `PLAN.md` 체크리스트가 함께 생성되며,
-완료된 plan에는 phase를 추가할 수 없습니다.
+새 phase 초안의 Planned Work와 Done When은 필수입니다. 초안의 `depends_on`에는 같은
+plan의 기존 phase 번호나 slug를 적고, `status`는 `planned` 또는 `conditional`만
+사용합니다. conditional이면 `entry_condition`이 필요합니다. `perf_phase`로 성능
+phase를 표시할 수 있으며, phase 번호는 기존 phase의 가장 큰 번호 다음으로 `apply`가
+자동 지정합니다. 새 phase 문서와 `PLAN.md` checklist가 함께 생성되고, 완료된 plan에는
+phase를 추가할 수 없습니다.
 
 `phase rm`은 phase 문서와 `PLAN.md`의 해당 checklist 줄만 제거합니다. 남은 phase의 번호,
 파일명, 링크, `depends_on`과 git note의 `phase=` 값은 다시 번호를 매기지 않습니다. 따라서
@@ -232,7 +278,7 @@ planr phase rm checkout-v2 2 --force
 
 #### 진행 전 검사
 
-`phase start`와 `phase done`은 계획된 순서를 지키는지 먼저 확인합니다. `add`가
+`phase start`와 `phase done`은 계획된 순서를 지키는지 먼저 확인합니다. `apply`가
 검증한 의존성 그래프를 실행 시점에도 그대로 적용하는 것입니다.
 
 - **의존성** — 해당 phase의 `depends_on`에 있는 phase, 그리고 `PLAN.md`의
@@ -261,7 +307,7 @@ planr archive checkout-v2
 
 `archive`의 목적지는 `.planr.yaml`의 `plans_dirs` **마지막 항목**입니다. 첫 번째 경로에
 등록된 완료 plan을 마지막 경로로 이동하며, 아직 `plan_status: done`이 아닌 plan은 거부합니다.
-번호가 붙은 plan 디렉터리 자체를 이동하므로 번호는 바뀌지 않습니다. 이후 `add`는 모든
+번호가 붙은 plan 디렉터리 자체를 이동하므로 번호는 바뀌지 않습니다. 이후 `apply`는 모든
 `plans_dirs`를 스캔해 가장 큰 번호 다음을 사용하므로 보관 전후의 순번도 이어집니다.
 `plans_dirs`가 하나뿐이거나 이미 마지막 경로에 있는 plan은 보관할 수 없습니다.
 
@@ -277,8 +323,8 @@ planr phase done checkout-v2 2 --no-hooks
 
 plan 상태를 바꾸는 명령은 같은 plan 디렉터리의 `.planr.lock`을 짧은 대기 시간 동안
 획득합니다. 다른 `planr` 프로세스가 먼저 변경 중이면 명확한 오류와 함께 중단되며, `status`,
-`show`, `overview`, `notes`, `config`, `doctor` 같은 읽기 명령은 이 잠금을 획득하지 않습니다.
-새 plan을 등록하는 `add`는 plan이 아직 없으므로 첫 번째 `plans_dirs`의 `.planr.lock`을
+`show`, `overview`, `notes`, `config`, `doctor`, `schema` 같은 읽기 명령은 이 잠금을 획득하지 않습니다.
+새 plan을 등록하는 `apply`는 plan이 아직 없으므로 첫 번째 `plans_dirs`의 `.planr.lock`을
 사용해 전체 번호 검색과 등록을 직렬화합니다.
 
 쉘 자동 완성 스크립트는 cli v3가 제공하는 `completion` 하위 명령으로 설치합니다.
@@ -349,7 +395,7 @@ hooks:
 명령 출력·옵션·오류 메시지는 언어 설정과 무관하게 항상 영어입니다. 훅과 스크립트가
 어느 저장소에서나 같은 문자열을 보게 하기 위해서입니다.
 
-**읽기는 언어를 가리지 않습니다.** `planr add`는 지원하는 모든 언어의 phase 제목을
+**읽기는 언어를 가리지 않습니다.** `planr apply`는 지원하는 모든 언어의 phase 제목을
 인식하므로, `ko`로 설정된 저장소에서도 영어로 작성된 초안을 그대로 등록할 수 있고 그
 반대도 됩니다. 언어 설정은 새로 만드는 문서에만 적용되며, 이미 등록된 plan의 문서를
 다시 쓰지 않습니다.
@@ -415,7 +461,7 @@ plans-active/
 ```
 
 `PLAN.md` frontmatter에는 plan 수준 설명·등록 시각·의존성·상태를 저장합니다.
-`registered_at`은 초안 생성 시각이 아니라 `add`로 plan을 등록한 시각이 UTC RFC3339
+`registered_at`은 초안 생성 시각이 아니라 `apply`로 plan을 등록한 시각이 UTC RFC3339
 형식으로 자동 기록됩니다.
 
 값이 비어 있는 항목은 frontmatter에 쓰지 않습니다. 의존성이 없으면 `depends_on: []`
@@ -495,7 +541,7 @@ phase 목록은 문서 본문의 체크리스트와 링크로 관리됩니다.
 ### frontmatter
 
 초안 파일에는 선택적으로 다음 frontmatter를 둘 수 있습니다. plan 이름은
-`add --name` 옵션, `plan_name` 또는 `name`, 파일명 순으로 결정됩니다.
+`plan_name` 또는 `name`, 파일명 순으로 결정됩니다.
 
 ```yaml
 ---
@@ -569,7 +615,7 @@ plan에 의존하는 phase는 [진행 전 검사](#진행-전-검사)에서 막�
 검사 시점은 세 번입니다.
 
 - **`new`** — plan 의존성의 형식, 중복, 자기 자신에 대한 의존성을 검사합니다.
-- **`add`** — 위 검사를 다시 수행하고, phase가 같은 plan 안에서 다른 phase만
+- **`apply`** — 위 검사를 다시 수행하고, phase가 같은 plan 안에서 다른 phase만
   의존하는지, 참조한 phase가 존재하는지, 의존성 순환이 없는지도 검사합니다.
 - **`phase start` / `phase done`** — 등록된 그래프대로 선행 phase와 선행 plan이 모두
   완료되었는지 검사합니다. `--force`로 우회합니다.
@@ -581,12 +627,12 @@ plan에 의존하는 phase는 [진행 전 검사](#진행-전-검사)에서 막�
 
 1. `planr new <plan-name> --description "짧은 설명"`으로 초안을 생성하고, 목표·phase·검증
    조건을 채웁니다.
-2. `planr add <draft-file>`로 검증된 초안을 번호가 붙은 plan 디렉터리로 등록합니다.
-   등록은 임시 디렉터리에서 준비한 후 이동하므로 파싱 오류가 나면 부분 파일을 남기지
-   않습니다.
-3. 작업을 시작하면 해당 `phases/*.md` frontmatter의 `status`를 `in-progress`로
-   변경하고 구현·검증 결과를 기록합니다.
-4. phase 완료 시 `status: done`으로 변경합니다. 다음 phase가 실측 조건을 만족하면
+2. `planr apply <draft-file>` 또는 `planr apply --stdin`으로 검증된 초안을 번호가 붙은
+   plan 디렉터리로 등록합니다. 등록은 임시 디렉터리에서 준비한 후 이동하므로 파싱
+   오류가 나면 부분 파일을 남기지 않습니다.
+3. 작업을 시작하면 `planr phase start <plan> <number>`로 해당 phase의 `status`를
+   `in-progress`로 변경하고 구현·검증 결과를 기록합니다.
+4. phase 완료 시 `planr phase done`으로 `status: done`으로 변경합니다. 다음 phase가 실측 조건을 만족하면
    `conditional` phase를 `in-progress`로 전환합니다.
 5. 모든 phase를 `phase done`으로 완료하면 `PLAN.md`의 `plan_status: done`이 자동으로
    기록됩니다.

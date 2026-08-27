@@ -9,7 +9,7 @@ fixtures:
     workspace: planr/run/<timestamp>-scenario/
     description: >-
       단순 plan 생성 시나리오. 초안 본문 하나를 plan마다 다른 이름·의존성으로 다시
-      써서 등록하고, 실제 planr phase 명령으로 완료/진행/대기/부분 완료 상태를 만든
+      써서 `apply`로 등록하고, 실제 planr phase 명령으로 완료/진행/대기/부분 완료 상태를 만든
       뒤 status·overview·notes 출력을 눈으로 확인한다. 실행기가 작업공간을 git 저장소로
       초기화한다. Go 프로젝트는 없으며 planr 바이너리만 필요하다.
     contents:
@@ -21,7 +21,7 @@ fixtures:
     workspace: 시스템 임시 디렉터리 (산출물은 planr/run/<timestamp>-codex/)
     description: >-
       Codex 평가용 샘플 저장소. 에이전트가 실제로 작업할 Go 프로젝트와
-      지침 문서를 담고 있으며, 하네스가 이 디렉터리 전체를 격리 작업공간으로
+      새 JSON/stdin planr workflow를 설명하는 지침 문서를 담고 있으며, 하네스가 이 디렉터리 전체를 격리 작업공간으로
       복사한 뒤 git init을 수행한다.
     contents:
       - .planr.yaml: 훅으로 planr 이벤트를 .harness/planr-events.log에 기록
