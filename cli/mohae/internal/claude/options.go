@@ -395,6 +395,11 @@ type Options struct {
 
 	// TaskBudget makes the model aware of a remaining token budget.
 	TaskBudget *TaskBudget
+
+	// Transport replaces the CLI subprocess. It is meant for tests and for
+	// embedding the SDK in a host that already owns the session; when nil,
+	// a subprocess transport is built from these options.
+	Transport Transport
 }
 
 // bufferSize reports the effective stdout line cap.

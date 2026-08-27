@@ -1,9 +1,10 @@
 ---
+completed_at: "2026-08-27T20:27:32Z"
 depends_on:
 - "01-internal-claude#1"
 - "01-internal-claude#2"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: Tests with an in-memory fake Transport verify: request/response ID
 > NEXT: none
