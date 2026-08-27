@@ -56,6 +56,26 @@ chatctl open chatgpt c/<대화ID>
 
 계정을 여러 개 쓸 때는 프로필을 나누면 됩니다.
 
+### 기존 Chrome 프로필 사용
+
+이미 로그인해 둔 Chrome 프로필이 있다면 별도 로그인 없이 그대로 쓸 수 있습니다.
+chatctl 프로필에 저장된 쿠키가 없으면 OS 기본 위치(예: macOS
+`~/Library/Application Support/Google/Chrome`)의 Chrome/Chromium 프로필을 자동
+탐색해 사용하므로, 보통은 아무 플래그 없이 `chatctl list` 만으로 동작합니다.
+
+경로를 직접 지정할 수도 있습니다.
+
+```sh
+chatctl --user-data-dir "$HOME/Library/Application Support/Google/Chrome" list
+```
+
+- 지정: `--user-data-dir <경로>` (`-d`) 또는 `CHATCTL_USER_DATA_DIR` 환경 변수
+- 우선순위: `--user-data-dir` → 쿠키가 저장된 chatctl 프로필 → 자동 탐색된 Chrome 프로필
+- `login` 은 chatctl 프로필에 세션을 만드는 명령이므로 자동 탐색을 하지 않습니다
+- 이 경우 엔진은 항상 chrome 이며, moli 는 사용할 수 없습니다
+- Chrome 은 같은 사용자 데이터 디렉터리를 두 프로세스가 동시에 열 수 없으므로,
+  해당 프로필을 쓰는 Chrome 을 먼저 종료해야 합니다
+
 ## 지연 로딩
 
 세 서비스 모두 대화 목록을 한 번에 내려주지 않습니다.
