@@ -28,6 +28,9 @@
 
 ## CLI
 
+[`cli/`](cli/)에는 구현 언어나 런타임에 관계없이 독립적으로 설치하고 실행할 수 있는
+CLI 프로젝트를 모아 관리합니다. 각 도구는 자체 설정과 README를 갖습니다.
+
 - ![](assets/status/development.svg) **[`chatctl`](cli/chatctl/)** ChatGPT, Gemini, Claude 웹 세션의 대화 목록을 한곳에서 관리합니다.
 - ![](assets/status/initial.svg) **[`mohae`](cli/mohae/)** CLI, MCP 서버, 에이전트 스킬을 재현 가능한 환경에서 실행하고 평가합니다.
 - ![](assets/status/ready.svg) **[`planr`](cli/planr/)** Markdown 계획을 규격화해 저장하고 phase 단위 진행 상태를 관리합니다.
@@ -68,10 +71,8 @@ Codex와 Claude 스킬을 모두 설치합니다.
 > [!TIP]
 > 이곳에서 시작해 독립 프로젝트로 성장한 도구는 별도 저장소에서 계속 개발합니다.
 
-| 도구                                         | 설명                               |
-| -------------------------------------------- | ---------------------------------- |
-| **[zapp](https://github.com/ironpark/zapp)** | macOS 앱을 패키징하고 배포하는 CLI |
-| **[macc](https://github.com/ironpark/macc)** | macOS 시스템 설정을 제어하는 CLI   |
+- **[zapp](https://github.com/ironpark/zapp)** macOS 앱을 패키징하고 배포하는 CLI
+- **[macc](https://github.com/ironpark/macc)** macOS 시스템 설정을 제어하는 CLI
 
 ## 라이선스
 
