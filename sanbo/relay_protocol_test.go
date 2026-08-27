@@ -75,7 +75,7 @@ func TestRelayV2ControlFailsClosedWhenOwnerStallsDuringPing(t *testing.T) {
 func TestRelayV2ResetsUnresponsiveControlAfterNudgingDataAttachment(t *testing.T) {
 	config := DefaultConfig()
 	config.DataAttachTimeoutMS = 50
-	server := newRelayTestServer(t, config)
+	server := newSyncControlTestServer(t, config)
 	serverID := "v2-control-watchdog"
 	control := dialRelay(t, server, serverID, RoleServer, 2, "")
 	assertControlMessage(t, control, map[string]any{"type": "sync"})
@@ -83,6 +83,40 @@ func TestRelayV2ResetsUnresponsiveControlAfterNudgingDataAttachment(t *testing.T
 	assertControlMessage(t, control, map[string]any{"type": "connected", "connectionId": "waiting"})
 	assertControlMessage(t, control, map[string]any{"type": "sync", "connectionIds": []string{"waiting"}})
 	assertRelayClose(t, control, websocket.StatusInternalError, "Control unresponsive")
+}
+
+func TestRelayV2ControlWatchdogStopsAfterDataAttachment(t *testing.T) {
+	config := DefaultConfig()
+	config.DataAttachTimeoutMS = 50
+	server := newSyncControlTestServer(t, config)
+	serverID := "v2-control-watchdog-attach"
+	control := dialRelay(t, server, serverID, RoleServer, 2, "")
+	assertControlMessage(t, control, map[string]any{"type": "sync"})
+	_ = dialRelay(t, server, serverID, RoleClient, 2, "attached")
+	assertControlMessage(t, control, map[string]any{"type": "connected", "connectionId": "attached"})
+	assertControlMessage(t, control, map[string]any{"type": "sync", "connectionIds": []string{"attached"}})
+	_ = dialRelay(t, server, serverID, RoleServer, 2, "attached")
+	assertControlMessage(t, control, map[string]any{"type": "sync", "connectionIds": []string{"attached"}})
+
+	time.Sleep(time.Duration(2*config.DataAttachTimeoutMS) * time.Millisecond)
+	writeRelayMessage(t, control, websocket.MessageText, []byte(`{"type":"ping"}`))
+	assertControlMessage(t, control, map[string]any{"type": "pong"})
+}
+
+func TestRelayV2ShortAttachTimeoutDoesNotEnableControlWatchdogByDefault(t *testing.T) {
+	config := DefaultConfig()
+	config.DataAttachTimeoutMS = 50
+	relay := NewRelay(config)
+	server := httptestServerForRelay(t, relay)
+	serverID := "v2-control-watchdog-disabled"
+	control := dialRelay(t, server, serverID, RoleServer, 2, "")
+	assertControlMessage(t, control, map[string]any{"type": "sync"})
+	_ = dialRelay(t, server, serverID, RoleClient, 2, "waiting")
+	assertControlMessage(t, control, map[string]any{"type": "connected", "connectionId": "waiting"})
+
+	time.Sleep(time.Duration(2*config.DataAttachTimeoutMS) * time.Millisecond)
+	writeRelayMessage(t, control, websocket.MessageText, []byte(`{"type":"ping"}`))
+	assertControlMessage(t, control, map[string]any{"type": "pong"})
 }
 
 func TestRelayV2PayloadDeliveryDoesNotUseNodeWideRegistry(t *testing.T) {

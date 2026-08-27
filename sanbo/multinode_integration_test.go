@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -96,9 +97,8 @@ func (n *multiNodeProcess) get(path string) (int, string) {
 		return 0, ""
 	}
 	defer response.Body.Close()
-	buffer := new(bytes.Buffer)
-	_, _ = buffer.ReadFrom(response.Body)
-	return response.StatusCode, buffer.String()
+	body, _ := io.ReadAll(response.Body)
+	return response.StatusCode, string(body)
 }
 
 func (n *multiNodeProcess) dial(serverID string, role Role, version int, connectionID string) (*websocket.Conn, *http.Response, error) {

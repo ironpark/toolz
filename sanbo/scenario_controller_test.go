@@ -19,6 +19,13 @@ import (
 
 var scenarioSequence atomic.Int64
 
+// lookupOwner reads the in-process ownership table for the production-backed
+// scenario assertions. Relay request handling uses its coordinator directly.
+func lookupOwner(serverID string) (ownershipRecord, bool) {
+	record, ok, _ := localOwnership.lookup(serverID)
+	return record, ok
+}
+
 func TestScenarioDriverDoesNotFabricateCompatibilityResults(t *testing.T) {
 	result, err := NewRelay(DefaultConfig()).testRunScenario("ownership/claim-local")
 	if err == nil {
@@ -288,14 +295,14 @@ func (r *Relay) runBackpressureScenario(name string) (relayScenarioResult, error
 		if peer == nil {
 			return result, fmt.Errorf("daemon peer missing")
 		}
-		peer.mu.Lock()
+		peer.writeSlot <- struct{}{}
 		if err = scenarioWrite(client, websocket.MessageBinary, []byte("blocked")); err != nil {
-			peer.mu.Unlock()
+			<-peer.writeSlot
 			return result, err
 		}
 		result.SourceBlocked = waitScenario(func() bool { return r.backpressuredSources.Load() > 0 }, time.Second)
 		result.IngressReservedBytes = r.ingressReserved.Load()
-		peer.mu.Unlock()
+		<-peer.writeSlot
 		_, _, _ = scenarioRead(daemon)
 
 	case "suspended-source-outbound-live":
@@ -496,11 +503,11 @@ func (r *Relay) runBackpressureScenario(name string) (relayScenarioResult, error
 		if peer == nil {
 			return result, fmt.Errorf("control peer missing")
 		}
-		peer.mu.Lock()
+		peer.writeSlot <- struct{}{}
 		done := make(chan struct{})
 		go func() { _ = r.forward(peer, websocket.MessageText, []byte("control")); close(done) }()
 		<-done
-		peer.mu.Unlock()
+		<-peer.writeSlot
 		result.DestinationClosed = true
 		if name == "unread-control" {
 			result.CloseCode, result.CloseReason, _ = scenarioReadClose(control)
@@ -595,13 +602,13 @@ func (r *Relay) runBackpressureScenario(name string) (relayScenarioResult, error
 		if peer == nil {
 			return result, fmt.Errorf("daemon peer missing")
 		}
-		peer.mu.Lock()
+		peer.writeSlot <- struct{}{}
 		if err = scenarioWrite(client, websocket.MessageText, []byte("timeout")); err != nil {
-			peer.mu.Unlock()
+			<-peer.writeSlot
 			return result, err
 		}
 		_, _, _ = scenarioReadClose(client)
-		peer.mu.Unlock()
+		<-peer.writeSlot
 		_ = daemon.CloseNow()
 		_ = client.CloseNow()
 		waitScenario(func() bool { return r.activeWebSockets.Load() == 0 }, time.Second)
@@ -623,6 +630,7 @@ func (r *Relay) runBackpressureScenario(name string) (relayScenarioResult, error
 
 	case "missing-data-route":
 		r.Config.DataAttachTimeoutMS = 20
+		r.testSyncControl = true
 		client, err := h.dial(id, RoleClient, 2, "missing")
 		if err != nil {
 			return result, err

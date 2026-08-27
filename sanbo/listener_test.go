@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"net/http"
 	"testing"
 
@@ -36,16 +35,7 @@ func TestListenerActiveWebSocketCeilingRejectsExactlyAtCapacityAndReleases(t *te
 	server := httptestServerForRelay(t, relay)
 	first := dialRelay(t, server, "ceiling-1", RoleServer, 1, "")
 	second := dialRelay(t, server, "ceiling-2", RoleServer, 1, "")
-	ctx, cancel := context.WithTimeout(context.Background(), relayTestTimeout)
-	defer cancel()
-	third, response, err := websocket.Dial(ctx, relayWebSocketURL(server, "ceiling-3", RoleServer, 1, ""), nil)
-	if third != nil {
-		_ = third.CloseNow()
-		t.Fatal("third websocket upgraded at the exact capacity ceiling")
-	}
-	if err == nil || response == nil || response.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("capacity response = %#v, err=%v", response, err)
-	}
+	dialRelayExpectingStatus(t, server, "ceiling-3", RoleServer, 1, "", http.StatusServiceUnavailable)
 	_ = first.Close(websocket.StatusNormalClosure, "")
 	eventually(t, relayTestTimeout, func() bool { return relay.activeWebSockets.Load() == 1 })
 	replacement := dialRelay(t, server, "ceiling-3", RoleServer, 1, "")

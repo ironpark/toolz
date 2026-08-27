@@ -188,22 +188,29 @@ func TestProductionConnectionRejectionIncrementsMetricWithoutCreatingSession(t *
 	server := httptestServerForRelay(t, relay)
 	_ = dialRelay(t, server, "capacity-held", RoleServer, 1, "")
 
-	ctx, cancel := context.WithTimeout(context.Background(), relayTestTimeout)
-	defer cancel()
-	conn, response, err := websocket.Dial(ctx, relayWebSocketURL(server, "capacity-rejected", RoleServer, 1, ""), nil)
-	if conn != nil {
-		_ = conn.CloseNow()
-		t.Fatal("connection above capacity upgraded")
-	}
-	if err == nil || response == nil || response.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("capacity rejection response = %#v, err=%v", response, err)
-	}
+	dialRelayExpectingStatus(t, server, "capacity-rejected", RoleServer, 1, "", http.StatusServiceUnavailable)
 	if relayHasSession(relay, "capacity-rejected") {
 		t.Fatal("rejected connection created session state")
 	}
 	if got := metricValue(t, relayMetrics(t, server), "paseo_relay_connection_rejections_total"); got != 1 {
 		t.Fatalf("connection rejections = %v, want 1", got)
 	}
+}
+
+func TestProductionCapacityRejectionReleasesNewOwnershipClaim(t *testing.T) {
+	config := DefaultConfig()
+	config.Acceptors = 1
+	config.ConnectionsPerAcceptor = 1
+	firstRelay := NewRelay(config)
+	firstServer := httptestServerForRelay(t, firstRelay)
+	_ = dialRelay(t, firstServer, "capacity-claim-held", RoleServer, 1, "")
+	dialRelayExpectingStatus(t, firstServer, "capacity-claim-rejected", RoleServer, 1, "", http.StatusServiceUnavailable)
+
+	secondConfig := DefaultConfig()
+	secondConfig.OwnershipTarget = "other-node"
+	secondRelay := NewRelay(secondConfig)
+	secondServer := httptestServerForRelay(t, secondRelay)
+	_ = dialRelay(t, secondServer, "capacity-claim-rejected", RoleServer, 1, "")
 }
 
 func TestProductionControlReadLimitRejectsBeforeJSONHandling(t *testing.T) {

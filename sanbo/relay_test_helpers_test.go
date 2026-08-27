@@ -23,6 +23,15 @@ func newRelayTestServer(t *testing.T, config Config) *httptest.Server {
 	return httptestServerForRelay(t, NewRelay(config))
 }
 
+// newSyncControlTestServer serves a relay with the compatibility sync/watchdog
+// path enabled, which production configurations leave off.
+func newSyncControlTestServer(t *testing.T, config Config) *httptest.Server {
+	t.Helper()
+	relay := NewRelay(config)
+	relay.testSyncControl = true
+	return httptestServerForRelay(t, relay)
+}
+
 func getResponse(t *testing.T, url string) (int, http.Header, string) {
 	t.Helper()
 	response, err := http.Get(url)
@@ -66,6 +75,25 @@ func dialRelay(t *testing.T, server *httptest.Server, serverID string, role Role
 	}
 	t.Cleanup(func() { _ = conn.CloseNow() })
 	return conn
+}
+
+// dialRelayExpectingStatus asserts that a relay upgrade is refused with the
+// given HTTP status.
+func dialRelayExpectingStatus(t *testing.T, server *httptest.Server, serverID string, role Role, version int, connectionID string, want int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), relayTestTimeout)
+	defer cancel()
+	conn, response, err := websocket.Dial(ctx, relayWebSocketURL(server, serverID, role, version, connectionID), nil)
+	if conn != nil {
+		_ = conn.CloseNow()
+		t.Fatalf("dial %s: connection upgraded, want status %d", serverID, want)
+	}
+	if err == nil || response == nil || response.StatusCode != want {
+		t.Fatalf("dial %s: response=%#v err=%v, want status %d", serverID, response, err, want)
+	}
+	if response.Body != nil {
+		_ = response.Body.Close()
+	}
 }
 
 func writeRelayMessage(t *testing.T, conn *websocket.Conn, messageType websocket.MessageType, payload []byte) {

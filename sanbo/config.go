@@ -10,7 +10,6 @@ import (
 // Config is the validated runtime configuration for a relay node.
 type Config struct {
 	Host                      string
-	IP                        net.IP
 	Port                      int
 	Drain                     bool
 	Acceptors                 int
@@ -77,7 +76,6 @@ func EnvironmentVariables() []EnvironmentVariable {
 func DefaultConfig() Config {
 	return Config{
 		Host:                      "127.0.0.1",
-		IP:                        net.ParseIP("127.0.0.1"),
 		Port:                      4000,
 		Acceptors:                 100,
 		ConnectionsPerAcceptor:    200,
@@ -105,13 +103,12 @@ func LoadConfig(environment map[string]string) (Config, error) {
 	}
 
 	host := valueOr(environment, "PASEO_RELAY_HOST", config.Host)
-	ip := net.ParseIP(host)
-	if ip == nil {
+	if net.ParseIP(host) == nil {
 		return Config{}, fmt.Errorf("PASEO_RELAY_HOST must be an IP address")
 	}
 
 	var err error
-	config.Host, config.IP = host, ip
+	config.Host = host
 	if config.Port, err = integer(environment, "PASEO_RELAY_PORT", config.Port, 1, 65_535); err != nil {
 		return Config{}, err
 	}
@@ -220,9 +217,15 @@ func boolean(environment map[string]string, key string, fallback bool) (bool, er
 	}
 }
 
+// disabledOrInteger is integer with zero accepted as "disabled".
 func disabledOrInteger(environment map[string]string, key string, fallback, minimum, maximum int) (int, error) {
-	if value, ok := environment[key]; ok && value == "0" {
-		return 0, nil
+	value, ok := environment[key]
+	if !ok {
+		return fallback, nil
 	}
-	return integer(environment, key, fallback, minimum, maximum)
+	parsed, err := strconv.Atoi(value)
+	if err != nil || (parsed != 0 && (parsed < minimum || parsed > maximum)) {
+		return 0, fmt.Errorf("%s must be an integer between %d and %d", key, minimum, maximum)
+	}
+	return parsed, nil
 }

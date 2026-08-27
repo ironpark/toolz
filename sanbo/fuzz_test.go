@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"testing"
@@ -194,14 +195,14 @@ func FuzzLoadConfig(f *testing.F) {
 		}
 		config, err := LoadConfig(environment)
 		if err != nil {
-			if config.Port != 0 || config.IP != nil {
+			if config.Port != 0 || config.Host != "" {
 				t.Fatal("rejected environment returned a partially populated config")
 			}
 			return
 		}
 
-		if config.IP == nil || config.IP.String() == "" {
-			t.Fatalf("accepted host %q without a parsed IP", host)
+		if net.ParseIP(config.Host) == nil {
+			t.Fatalf("accepted host %q that does not parse as an IP", host)
 		}
 		if config.Port < 1 || config.Port > 65_535 {
 			t.Fatalf("accepted port %d", config.Port)

@@ -86,13 +86,6 @@ func (*localOwnershipCoordinator) close() error                           { retu
 
 var localOwnership ownershipCoordinator = &localOwnershipCoordinator{}
 
-// lookupOwner is retained for the production-backed in-process scenario tests.
-// Relay request handling uses its configured coordinator directly.
-func lookupOwner(serverID string) (ownershipRecord, bool) {
-	record, ok, _ := localOwnership.lookup(serverID)
-	return record, ok
-}
-
 type failedOwnershipCoordinator struct{ err error }
 
 func (*failedOwnershipCoordinator) identity() string { return "" }
@@ -133,6 +126,7 @@ type fileOwnershipCoordinator struct {
 	liveCount atomic.Int64
 	lockMu    sync.Mutex
 	lockFile  *os.File
+	lastSweep time.Time
 }
 
 func newOwnershipCoordinator(config Config) (ownershipCoordinator, error) {
@@ -196,12 +190,18 @@ func (coordinator *fileOwnershipCoordinator) heartbeatLoop() {
 
 func (coordinator *fileOwnershipCoordinator) heartbeat() error {
 	return coordinator.withLock(func() error {
-		member := clusterMember{ID: coordinator.memberID, Heartbeat: time.Now().UnixNano()}
+		now := time.Now()
+		member := clusterMember{ID: coordinator.memberID, Heartbeat: now.UnixNano()}
 		if err := writeJSONFile(coordinator.memberFile(coordinator.memberID), member); err != nil {
 			return err
 		}
-		_, err := coordinator.sweepMembersLocked(time.Now())
-		return err
+		if now.Sub(coordinator.lastSweep) >= clusterLeaseDuration {
+			if _, err := coordinator.sweepMembersLocked(now); err != nil {
+				return err
+			}
+			coordinator.lastSweep = now
+		}
+		return nil
 	})
 }
 

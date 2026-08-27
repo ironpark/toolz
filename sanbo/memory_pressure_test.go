@@ -32,17 +32,7 @@ func TestMemoryPressureEngagesAtWatermarkAndClosesAdmission(t *testing.T) {
 	if status, _, _ := getResponse(t, server.URL+"/ready"); status != http.StatusServiceUnavailable {
 		t.Fatalf("readiness under pressure=%d, want 503", status)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), relayTestTimeout)
-	defer cancel()
-	conn, response, err := websocket.Dial(ctx, relayWebSocketURL(server, "pressure-admission", RoleServer, 1, ""), nil)
-	if conn != nil {
-		_ = conn.CloseNow()
-		t.Fatal("relay admitted a connection while under memory pressure")
-	}
-	if err == nil || response == nil || response.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("admission under pressure response=%v err=%v", response, err)
-	}
-	_ = response.Body.Close()
+	dialRelayExpectingStatus(t, server, "pressure-admission", RoleServer, 1, "", http.StatusServiceUnavailable)
 }
 
 func TestMemoryPressureShedsAttachedPeersAndBuffers(t *testing.T) {

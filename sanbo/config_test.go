@@ -20,8 +20,30 @@ func TestLoadConfigUsesSafeLocalDefaults(t *testing.T) {
 		got.MemoryWatermarkBytes != want.MemoryWatermarkBytes {
 		t.Fatalf("defaults differ: got %#v, want %#v", got, want)
 	}
-	if got.IP.String() != "127.0.0.1" {
-		t.Fatalf("default IP = %q, want 127.0.0.1", got.IP)
+	if got.Host != "127.0.0.1" {
+		t.Fatalf("default host = %q, want 127.0.0.1", got.Host)
+	}
+}
+
+func TestEnvironmentVariableDefaultsMatchLoadConfigDefaults(t *testing.T) {
+	want, err := LoadConfig(nil)
+	if err != nil {
+		t.Fatalf("LoadConfig(nil): %v", err)
+	}
+
+	for _, variable := range environmentVariables {
+		if variable.Default == "" {
+			continue
+		}
+		t.Run(variable.Name, func(t *testing.T) {
+			got, err := LoadConfig(map[string]string{variable.Name: variable.Default})
+			if err != nil {
+				t.Fatalf("LoadConfig(%s=%q): %v", variable.Name, variable.Default, err)
+			}
+			if got != want {
+				t.Fatalf("default differs: got %#v, want %#v", got, want)
+			}
+		})
 	}
 }
 

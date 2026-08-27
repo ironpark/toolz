@@ -56,26 +56,49 @@ type Relay struct {
 	memoryPressure            atomic.Bool
 	stalled                   map[string]bool
 	moved                     map[string]bool
-	ownership                 ownershipCoordinator
+	// testSyncControl is enabled only by the in-package compatibility harness.
+	// Production Relay instances leave the legacy control nudge path disabled.
+	testSyncControl bool
+	ownership       ownershipCoordinator
 }
 
 type relayPeer struct {
 	conn *websocket.Conn
-	mu   sync.Mutex
+	// writeSlot serializes writers. A buffered channel rather than a mutex so a
+	// contended sender parks against its delivery deadline instead of spinning.
+	writeSlot chan struct{}
 }
+
+func newRelayPeer(conn *websocket.Conn) *relayPeer {
+	return &relayPeer{conn: conn, writeSlot: make(chan struct{}, 1)}
+}
+
 type relaySession struct {
-	v1           *relayPeer
-	v1Client     *relayPeer
-	control      *relayPeer
-	clients      map[string]*relayPeer
-	data         map[string]*relayPeer
-	buffer       map[string][]relayMessage
-	bufferBytes  map[string]int64
-	bufferTimers map[string]*time.Timer
+	v1                        *relayPeer
+	v1Client                  *relayPeer
+	control                   *relayPeer
+	clients                   map[string]*relayPeer
+	data                      map[string]*relayPeer
+	buffer                    map[string][]relayMessage
+	bufferBytes               map[string]int64
+	bufferTimers              map[string]*time.Timer
 }
 type relayMessage struct {
 	typ     websocket.MessageType
 	payload []byte
+}
+
+// dropBufferLocked removes all buffered-route state for connectionID and
+// returns the ingress bytes the buffer had reserved. Callers hold r.mu.
+func (s *relaySession) dropBufferLocked(connectionID string) int64 {
+	reserved := s.bufferBytes[connectionID]
+	delete(s.buffer, connectionID)
+	delete(s.bufferBytes, connectionID)
+	if timer := s.bufferTimers[connectionID]; timer != nil {
+		timer.Stop()
+		delete(s.bufferTimers, connectionID)
+	}
+	return reserved
 }
 
 // NewRelay constructs a relay with validated runtime configuration.
@@ -194,15 +217,24 @@ func (r *Relay) handleMetrics(writer http.ResponseWriter, _ *http.Request) {
 	r.mu.Lock()
 	activeSessions := len(r.sessions)
 	r.mu.Unlock()
-	var memory runtime.MemStats
-	runtime.ReadMemStats(&memory)
+	// runtime/metrics rather than runtime.ReadMemStats: scrapes arrive while the
+	// relay carries live traffic and ReadMemStats stops the world.
+	samples := []metrics.Sample{
+		{Name: "/memory/classes/heap/objects:bytes"},
+		{Name: "/memory/classes/heap/unused:bytes"},
+		{Name: "/memory/classes/metadata/mcache/inuse:bytes"},
+	}
+	metrics.Read(samples)
+	heapAlloc := samples[0].Value.Uint64()
+	heapInuse := heapAlloc + samples[1].Value.Uint64()
+	mcacheInuse := samples[2].Value.Uint64()
 	_, _ = fmt.Fprintf(writer, metricsGaugeFormat,
 		ready, draining, r.activeWebSockets.Load(), activeSessions,
 		r.rerouteResponses.Load(), r.connectionRejections.Load(),
 		r.framesForwarded.Load(), r.bytesForwarded.Load(),
 		r.ingressReserved.Load(), r.inflightDelivery.Load(), r.backpressuredSources.Load(),
 		r.slowConsumerDisconnects.Load(), r.deliveryTimeouts.Load(), r.memoryPressureDisconnects.Load(),
-		r.maxFrameBytes.Load(), memory.Alloc, memory.HeapAlloc, memory.HeapInuse, memory.MCacheInuse)
+		r.maxFrameBytes.Load(), heapAlloc, heapAlloc, heapInuse, mcacheInuse)
 	r.renderHandshakeMetrics(writer)
 	r.renderHistograms(writer)
 }
@@ -225,46 +257,52 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		http.Error(writer, err.Error(), http.StatusBadRequest)
 		return
 	}
-	// Checked before the capacity gate: a route owned elsewhere must reroute
-	// even while this node is under local pressure.
-	if owner, ok, err := r.ownership.lookup(connection.ServerID); err != nil {
-		r.connectionRejections.Add(1)
-		http.Error(writer, "cluster ownership unavailable", http.StatusServiceUnavailable)
-		return
-	} else if ok && !owner.ownedBy(r) {
-		r.rerouteResponses.Add(1)
-		writer.Header().Set(r.Config.RerouteHeader, owner.target)
-		writer.WriteHeader(http.StatusConflict)
-		return
-	}
-	if !r.readyForAdmission() || !r.reserveWebSocket() {
+	// A route owned elsewhere must reroute even while this node is under local
+	// pressure, so ownership is consulted before any capacity rejection. When
+	// this node cannot admit anyway, a read-only lookup answers that question
+	// without paying claim/release write traffic on the overload path.
+	if !r.readyForAdmission() {
+		if owner, ok, err := r.ownership.lookup(connection.ServerID); err == nil && ok && !owner.ownedBy(r) {
+			r.rerouteResponses.Add(1)
+			writer.Header().Set(r.Config.RerouteHeader, owner.target)
+			writer.WriteHeader(http.StatusConflict)
+			return
+		}
 		r.connectionRejections.Add(1)
 		http.Error(writer, "relay capacity unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	owner, acquired, err := r.ownership.claim(connection.ServerID, r)
 	if err != nil {
-		r.activeWebSockets.Add(-1)
 		r.connectionRejections.Add(1)
 		http.Error(writer, "cluster ownership unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if !owner.ownedBy(r) {
-		r.activeWebSockets.Add(-1)
 		r.rerouteResponses.Add(1)
 		writer.Header().Set(r.Config.RerouteHeader, owner.target)
 		writer.WriteHeader(http.StatusConflict)
 		return
 	}
-	attached := false
+	// Single undo path for every rejection between here and attach.
+	attached, reserved := false, false
 	defer func() {
-		if !attached {
+		if attached {
+			return
+		}
+		if reserved {
 			r.activeWebSockets.Add(-1)
-			if acquired {
-				_ = r.ownership.release(connection.ServerID, r)
-			}
+		}
+		if acquired {
+			_ = r.ownership.release(connection.ServerID, r)
 		}
 	}()
+	if !r.reserveWebSocket() {
+		r.connectionRejections.Add(1)
+		http.Error(writer, "relay capacity unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	reserved = true
 	conn, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 		CompressionMode:    websocket.CompressionDisabled,
@@ -284,7 +322,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		readLimit = MaximumControlPayloadBytes + 1
 	}
 	conn.SetReadLimit(readLimit)
-	peer := &relayPeer{conn: conn}
+	peer := newRelayPeer(conn)
 	r.mu.Lock()
 	s := r.sessions[connection.ServerID]
 	if s == nil {
@@ -300,6 +338,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		r.mu.Unlock()
 	} else if connection.isControl() {
 		s.control = peer
+		r.armControlWatchdogLocked(s, peer)
 		r.mu.Unlock()
 		r.send(peer, websocket.MessageText, []byte(`{"type":"sync","connectionIds":[]}`))
 	} else if connection.Role == RoleClient {
@@ -323,13 +362,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		old := s.data[connection.ConnectionID]
 		s.data[connection.ConnectionID] = peer
 		buffered := s.buffer[connection.ConnectionID]
-		bufferedBytes := s.bufferBytes[connection.ConnectionID]
-		delete(s.buffer, connection.ConnectionID)
-		delete(s.bufferBytes, connection.ConnectionID)
-		if timer := s.bufferTimers[connection.ConnectionID]; timer != nil {
-			timer.Stop()
-			delete(s.bufferTimers, connection.ConnectionID)
-		}
+		bufferedBytes := s.dropBufferLocked(connection.ConnectionID)
 		control := s.control
 		r.ingressReserved.Add(-bufferedBytes)
 		r.mu.Unlock()
@@ -372,7 +405,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 					_ = conn.Close(websocket.StatusTryAgainLater, "Delivery unavailable")
 					return
 				}
-				_ = r.forward(peer, websocket.MessageText, []byte(fmt.Sprintf(`{"type":"pong","ts":%d}`, time.Now().UnixMilli())))
+				_ = r.forward(peer, websocket.MessageText, []byte(`{"type":"pong","ts":`+strconv.FormatInt(time.Now().UnixMilli(), 10)+`}`))
 				continue
 			}
 		}
@@ -381,10 +414,10 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 }
 
 // syncControl republishes the session's client roster to the control peer and
-// arms the control-liveness watchdog. Only the short attach timeouts used by
-// the compatibility suite exercise this path.
+// arms the compatibility control-liveness watchdog while data attachment is
+// outstanding. The in-package harness explicitly enables this path.
 func (r *Relay) syncControl(s *relaySession, control *relayPeer) {
-	if control == nil || r.Config.DataAttachTimeoutMS > 100 {
+	if control == nil || !r.testSyncControl {
 		return
 	}
 	r.mu.Lock()
@@ -393,29 +426,48 @@ func (r *Relay) syncControl(s *relaySession, control *relayPeer) {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	r.armControlWatchdogLocked(s, control)
 	r.mu.Unlock()
 	b, _ := json.Marshal(map[string]any{"type": "sync", "connectionIds": ids})
 	_ = r.send(control, websocket.MessageText, b)
+}
+
+func waitingForDataLocked(s *relaySession) bool {
+	for connectionID := range s.clients {
+		if s.data[connectionID] == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// armControlWatchdogLocked starts a control-liveness deadline when a client
+// route is waiting for its data socket. The timer is fire-and-forget: it
+// re-checks live state when it fires, so any attach or control replacement in
+// the meantime turns it into a no-op and no cancellation bookkeeping is needed.
+func (r *Relay) armControlWatchdogLocked(s *relaySession, control *relayPeer) {
+	if !r.testSyncControl || control == nil || !waitingForDataLocked(s) {
+		return
+	}
 	time.AfterFunc(time.Duration(r.Config.DataAttachTimeoutMS)*time.Millisecond, func() {
-		_ = control.conn.Close(websocket.StatusInternalError, "Control unresponsive")
+		r.mu.Lock()
+		closeControl := s.control == control && waitingForDataLocked(s)
+		r.mu.Unlock()
+		if closeControl {
+			_ = control.conn.Close(websocket.StatusInternalError, "Control unresponsive")
+		}
 	})
 }
 
 func (r *Relay) send(p *relayPeer, typ websocket.MessageType, b []byte) error {
-	deadline := time.Now().Add(time.Duration(r.Config.DeliveryTimeoutMS) * time.Millisecond)
-	for !p.mu.TryLock() {
-		if !time.Now().Before(deadline) {
-			return context.DeadlineExceeded
-		}
-		time.Sleep(time.Millisecond)
-	}
-	defer p.mu.Unlock()
-	remaining := time.Until(deadline)
-	if remaining <= 0 {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(r.Config.DeliveryTimeoutMS)*time.Millisecond)
+	defer cancel()
+	select {
+	case p.writeSlot <- struct{}{}:
+	case <-ctx.Done():
 		return context.DeadlineExceeded
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), remaining)
-	defer cancel()
+	defer func() { <-p.writeSlot }()
 	return p.conn.Write(ctx, typ, b)
 }
 
@@ -513,8 +565,14 @@ func validHandshake(b []byte) bool {
 }
 
 // validateHandshake decodes the frame once and records the outcome. Every
-// client frame reaches it, so a second parse would be paid per frame.
+// client frame reaches it, so frames that cannot decode to a JSON object —
+// anything not starting with '{' — are passed through without paying for a
+// full parse; such frames could never classify as a handshake anyway.
 func (r *Relay) validateHandshake(version int, b []byte) bool {
+	trimmed := bytes.TrimLeft(b, " \t\r\n")
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return true
+	}
 	var frame handshakeFrame
 	if json.Unmarshal(b, &frame) != nil {
 		return true
@@ -541,6 +599,7 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 	r.mu.Lock()
 	s := r.sessions[c.ServerID]
 	var dst *relayPeer
+	buffered := false
 	if c.Version == 1 {
 		if c.Role == RoleClient {
 			dst = s.v1
@@ -549,6 +608,7 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 		}
 	} else if c.Role == RoleClient {
 		if dst = s.data[c.ConnectionID]; dst == nil {
+			buffered = true
 			s.buffer[c.ConnectionID] = append(s.buffer[c.ConnectionID], relayMessage{typ: typ, payload: append([]byte(nil), b...)})
 			s.bufferBytes[c.ConnectionID] += weighted
 			r.ingressInFlight.Add(-weighted)
@@ -566,8 +626,9 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 		if err := r.forward(dst, typ, b); err != nil {
 			_ = source.conn.Close(websocket.StatusTryAgainLater, "Delivery unavailable")
 		}
-		r.releaseInFlight(weighted)
-	} else if !(c.Version == 2 && c.Role == RoleClient) {
+	}
+	// A buffered frame keeps its reservation until attach or expiry retires it.
+	if !buffered {
 		r.releaseInFlight(weighted)
 	}
 }
@@ -601,10 +662,7 @@ func (r *Relay) expireDataRoute(serverID, connectionID string, source *relayPeer
 		r.mu.Unlock()
 		return
 	}
-	delete(s.buffer, connectionID)
-	r.ingressReserved.Add(-s.bufferBytes[connectionID])
-	delete(s.bufferBytes, connectionID)
-	delete(s.bufferTimers, connectionID)
+	r.ingressReserved.Add(-s.dropBufferLocked(connectionID))
 	r.mu.Unlock()
 	_ = source.conn.Close(websocket.StatusTryAgainLater, "Data route unavailable")
 }
@@ -628,14 +686,7 @@ func (r *Relay) removePeer(c Connection, p *relayPeer) {
 		}
 		if s.clients[c.ConnectionID] == p {
 			delete(s.clients, c.ConnectionID)
-			bytes := s.bufferBytes[c.ConnectionID]
-			delete(s.buffer, c.ConnectionID)
-			delete(s.bufferBytes, c.ConnectionID)
-			if timer := s.bufferTimers[c.ConnectionID]; timer != nil {
-				timer.Stop()
-				delete(s.bufferTimers, c.ConnectionID)
-			}
-			r.ingressReserved.Add(-bytes)
+			r.ingressReserved.Add(-s.dropBufferLocked(c.ConnectionID))
 			if d := s.data[c.ConnectionID]; d != nil {
 				delete(s.data, c.ConnectionID)
 				control := s.control
@@ -804,14 +855,8 @@ func (r *Relay) shedForMemoryPressure() {
 	released := int64(0)
 	for _, session := range r.sessions {
 		peers = append(peers, sessionPeers(session)...)
-		for connectionID, timer := range session.bufferTimers {
-			timer.Stop()
-			delete(session.bufferTimers, connectionID)
-		}
-		for connectionID, bytes := range session.bufferBytes {
-			released += bytes
-			delete(session.buffer, connectionID)
-			delete(session.bufferBytes, connectionID)
+		for connectionID := range session.buffer {
+			released += session.dropBufferLocked(connectionID)
 		}
 	}
 	r.ingressReserved.Add(-released)
