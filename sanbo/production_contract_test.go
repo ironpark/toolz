@@ -118,7 +118,7 @@ func TestProductionHandshakeValidationAppliesOnlyToClientFrames(t *testing.T) {
 	assertRelayMessage(t, client, websocket.MessageBinary, payload)
 }
 
-func TestProductionV2MissingDataRouteExpiresAndReleasesBuffer(t *testing.T) {
+func TestProductionV2MissingDataRouteExpiresAndReleasesDeliveryReservation(t *testing.T) {
 	config := DefaultConfig()
 	config.DataAttachTimeoutMS = 50
 	relay := mustNewRelay(t, config)
@@ -128,46 +128,34 @@ func TestProductionV2MissingDataRouteExpiresAndReleasesBuffer(t *testing.T) {
 	assertRelayClose(t, client, websocket.StatusTryAgainLater, "Data route unavailable")
 
 	eventually(t, relayTestTimeout, func() bool {
-		return relayBufferedMessages(relay, "missing-data", "missing") == 0
+		return relayWaitingMessages(relay, "missing-data", "missing") == 0 && relay.ingressReserved.Load() == 0
 	})
 }
 
-func TestProductionBufferedMessagesCannotExceedWeightedIngressBudget(t *testing.T) {
+func TestProductionV2SourceBlocksBeforeSecondFrameIsAdmitted(t *testing.T) {
 	config := DefaultConfig()
-	// A deliberately tiny direct Config keeps this boundary test cheap. The
-	// production ledger must apply the same accounting regardless of scale.
+	// A deliberately tiny direct Config keeps this boundary test cheap while
+	// making it obvious that the second frame cannot be admitted alongside the
+	// first. It remains in the client's TCP receive path until data attaches.
 	config.IngressBudgetBytes = 8
 	config.IngressWeight = 1
 	config.DataAttachTimeoutMS = 5_000
 	relay := mustNewRelay(t, config)
 	server := httptestServerForRelay(t, relay)
-	client := dialRelay(t, server, "bounded-buffer", RoleClient, 2, "waiting")
+	client := dialRelay(t, server, "blocked-source", RoleClient, 2, "waiting")
 	writeRelayMessage(t, client, websocket.MessageBinary, []byte("12345678"))
 	eventually(t, relayTestTimeout, func() bool {
-		return relayBufferedMessages(relay, "bounded-buffer", "waiting") == 1
+		return relayWaitingMessages(relay, "blocked-source", "waiting") == 1
 	})
 
 	writeRelayMessage(t, client, websocket.MessageBinary, []byte("x"))
-	assertRelayClose(t, client, websocket.StatusTryAgainLater, "Relay ingress capacity")
-	if buffered := relayBufferedMessages(relay, "bounded-buffer", "waiting"); buffered > 1 {
-		t.Fatalf("buffer retained %d messages after budget exhaustion", buffered)
+	if waiting := relayWaitingMessages(relay, "blocked-source", "waiting"); waiting != 1 {
+		t.Fatalf("waiting messages after second frame = %d, want 1", waiting)
 	}
-}
-
-func TestProductionClosingV2ClientDropsUndeliveredFrames(t *testing.T) {
-	relay := mustNewRelay(t, DefaultConfig())
-	server := httptestServerForRelay(t, relay)
-	client := dialRelay(t, server, "buffer-cleanup", RoleClient, 2, "gone")
-	writeRelayMessage(t, client, websocket.MessageText, []byte("must-not-survive"))
-	eventually(t, relayTestTimeout, func() bool {
-		return relayBufferedMessages(relay, "buffer-cleanup", "gone") == 1
-	})
-	if err := client.Close(websocket.StatusNormalClosure, ""); err != nil {
-		t.Fatal(err)
-	}
-	eventually(t, relayTestTimeout, func() bool {
-		return relayBufferedMessages(relay, "buffer-cleanup", "gone") == 0
-	})
+	data := dialRelay(t, server, "blocked-source", RoleServer, 2, "waiting")
+	assertRelayMessage(t, data, websocket.MessageBinary, []byte("12345678"))
+	assertRelayMessage(t, data, websocket.MessageBinary, []byte("x"))
+	eventually(t, relayTestTimeout, func() bool { return relay.ingressReserved.Load() == 0 })
 }
 
 func TestProductionEmptySessionStateIsReclaimed(t *testing.T) {
@@ -234,12 +222,12 @@ func relayHasSession(relay *Relay, serverID string) bool {
 	return ok
 }
 
-func relayBufferedMessages(relay *Relay, serverID, connectionID string) int {
+func relayWaitingMessages(relay *Relay, serverID, connectionID string) int {
 	relay.mu.Lock()
 	defer relay.mu.Unlock()
 	session := relay.sessions[serverID]
 	if session == nil {
 		return 0
 	}
-	return len(session.buffer[connectionID])
+	return len(session.waiting[connectionID])
 }

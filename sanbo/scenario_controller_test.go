@@ -215,20 +215,18 @@ func (r *Relay) testRestartCapacity() {
 	r.capacityUnavailable.Store(true)
 	r.capacityEpoch.Add(1)
 	r.mu.Lock()
-	var released int64
+	var waiting []*relayDataWaiter
 	for _, s := range r.sessions {
-		for id, timer := range s.bufferTimers {
-			timer.Stop()
-			delete(s.bufferTimers, id)
-		}
-		for id, bytes := range s.bufferBytes {
-			released += bytes
-			delete(s.bufferBytes, id)
-			delete(s.buffer, id)
+		for id, routeWaiters := range s.waiting {
+			waiting = append(waiting, routeWaiters...)
+			delete(s.waiting, id)
 		}
 	}
 	r.mu.Unlock()
-	r.ingressReserved.Add(-released)
+	notifyDataWaiters(waiting, relayDataWaitResult{
+		code:   websocket.StatusTryAgainLater,
+		reason: "Relay capacity unavailable",
+	})
 	r.capacityUnavailable.Store(false)
 }
 
@@ -319,8 +317,19 @@ func (r *Relay) runBackpressureScenario(name string) (relayScenarioResult, error
 		if err = scenarioWrite(client, websocket.MessageBinary, []byte("x")); err != nil {
 			return result, err
 		}
-		if err = closeFrom(client); err != nil {
+		data, err := h.dial(id, RoleServer, 2, "budget")
+		if err != nil {
 			return result, err
+		}
+		for range 2 {
+			_, payload, readErr := scenarioRead(data)
+			if readErr != nil {
+				return result, readErr
+			}
+			result.Forwarded = append(result.Forwarded, payload)
+		}
+		if !waitScenario(func() bool { return r.ingressReserved.Load() == 0 }, time.Second) {
+			return result, fmt.Errorf("ingress reservation did not drain")
 		}
 		result.IngressReservedBytes = r.ingressReserved.Load()
 
@@ -504,9 +513,12 @@ func (r *Relay) runBackpressureScenario(name string) (relayScenarioResult, error
 			return result, err
 		}
 		_ = daemon
-		destination := r.testPeer(id, RoleServer, 1, "")
-		source := r.testPeer(id, RoleClient, 1, "")
-		if destination == nil || source == nil {
+		var destination, source *relayPeer
+		if !waitScenario(func() bool {
+			destination = r.testPeer(id, RoleServer, 1, "")
+			source = r.testPeer(id, RoleClient, 1, "")
+			return destination != nil && source != nil
+		}, time.Second) {
 			return result, fmt.Errorf("writer peers missing")
 		}
 		_ = destination.conn.CloseNow()
@@ -608,7 +620,9 @@ func (r *Relay) runBackpressureScenario(name string) (relayScenarioResult, error
 		if err = scenarioWrite(client, websocket.MessageBinary, []byte("retained")); err != nil {
 			return result, err
 		}
-		waitScenario(func() bool { return r.ingressReserved.Load() > 0 }, time.Second)
+		if !waitScenario(func() bool { return relayWaitingMessages(r, id, "restart") == 1 }, time.Second) {
+			return result, fmt.Errorf("delivery did not reach the data-attach wait")
+		}
 		r.testRestartCapacity()
 		waitScenario(func() bool { return r.ingressReserved.Load() == 0 }, time.Second)
 		result.CapacityEpochChanged = r.capacityEpoch.Load() != before

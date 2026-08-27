@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -14,6 +15,29 @@ func TestOperationsHealthIsAlwaysLive(t *testing.T) {
 	status, header, body := getResponse(t, server.URL+"/health")
 	if status != http.StatusOK || header.Get("content-type") != "application/json" || body != `{"status":"ok"}` {
 		t.Fatalf("health = (%d, %q, %q)", status, header.Get("content-type"), body)
+	}
+}
+
+func TestOperationsDispatchesEveryMethodByPath(t *testing.T) {
+	server := newRelayTestServer(t, DefaultConfig())
+	for _, path := range []string{"/health", "/ready", "/metrics", "/missing"} {
+		request, err := http.NewRequest(http.MethodPost, server.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+		want := http.StatusOK
+		if path == "/missing" {
+			want = http.StatusNotFound
+		}
+		if response.StatusCode != want {
+			t.Fatalf("POST %s status = %d, want %d", path, response.StatusCode, want)
+		}
 	}
 }
 

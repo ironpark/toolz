@@ -36,7 +36,7 @@ func TestMemoryPressureEngagesAtWatermarkAndClosesAdmission(t *testing.T) {
 	dialRelayExpectingStatus(t, server, "pressure-admission", RoleServer, 1, "", http.StatusServiceUnavailable)
 }
 
-func TestMemoryPressureShedsAttachedPeersAndBuffers(t *testing.T) {
+func TestMemoryPressureShedsAttachedPeersAndWaitingDeliveries(t *testing.T) {
 	relay := mustNewRelay(t, pressureConfig(1_000))
 	server := httptestServerForRelay(t, relay)
 	conn := dialRelay(t, server, "pressure-shed", RoleServer, 1, "")
@@ -168,41 +168,46 @@ func TestHeapInUseReportsNonZero(t *testing.T) {
 	}
 }
 
-// TestMemoryPressureReleasesBufferedFrames covers the part of shedding that
-// actually frees memory: queued frames awaiting a data route.
-func TestMemoryPressureReleasesBufferedFrames(t *testing.T) {
+// TestMemoryPressureReleasesWaitingDelivery covers the part of shedding that
+// wakes a source blocked while its data route is unattached.
+func TestMemoryPressureReleasesWaitingDelivery(t *testing.T) {
 	config := pressureConfig(1_000)
 	config.DataAttachTimeoutMS = 10_000
 	relay := mustNewRelay(t, config)
 	server := httptestServerForRelay(t, relay)
-	serverID := "pressure-buffer"
+	serverID := "pressure-wait"
 
 	control := dialRelay(t, server, serverID, RoleServer, 2, "")
 	defer control.CloseNow()
-	client := dialRelay(t, server, serverID, RoleClient, 2, "buffered")
+	client := dialRelay(t, server, serverID, RoleClient, 2, "waiting")
 	defer client.CloseNow()
 
 	ctx, cancel := context.WithTimeout(context.Background(), relayTestTimeout)
 	defer cancel()
 	if err := client.Write(ctx, websocket.MessageBinary, []byte("queued-while-detached")); err != nil {
-		t.Fatalf("write buffered frame: %v", err)
+		t.Fatalf("write waiting frame: %v", err)
 	}
-	if !waitScenario(func() bool { return relay.ingressReserved.Load() > 0 }, relayTestTimeout) {
-		t.Fatal("frame was not buffered")
+	if !waitScenario(func() bool { return relayWaitingMessages(relay, serverID, "waiting") == 1 }, relayTestTimeout) {
+		t.Fatal("frame did not block awaiting data")
 	}
 
 	relay.sampleMemoryPressure(1_000)
 
 	if !waitScenario(func() bool { return relay.ingressReserved.Load() == 0 }, relayTestTimeout) {
-		t.Fatalf("buffered bytes not released by shedding: %d", relay.ingressReserved.Load())
+		t.Fatalf("waiting delivery bytes not released by shedding: %d", relay.ingressReserved.Load())
 	}
-	// Shedding closed this session's only peers, so it is reclaimed too.
+	// The close handshake may still be in progress, so an attached session can
+	// briefly remain while its waiting delivery has already been released.
 	if !waitScenario(func() bool { return !relayHasSession(relay, serverID) }, relayTestTimeout) {
 		relay.mu.Lock()
-		buffered := len(relay.sessions[serverID].buffer)
+		session := relay.sessions[serverID]
+		waiting := 0
+		if session != nil {
+			waiting = len(session.waiting["waiting"])
+		}
 		relay.mu.Unlock()
-		if buffered != 0 {
-			t.Fatalf("buffered frames after shedding=%d, want 0", buffered)
+		if waiting != 0 {
+			t.Fatalf("waiting delivery remained after shedding: %d", waiting)
 		}
 	}
 }

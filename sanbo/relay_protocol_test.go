@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,9 +26,9 @@ func TestRelayV1ForwardsOrderedTextAndBinaryFrames(t *testing.T) {
 	assertRelayMessage(t, daemon, websocket.MessageBinary, []byte{0, 255, 1})
 }
 
-func TestRelayV2ControlPairsClientsAndFlushesBufferedFramesInOrder(t *testing.T) {
+func TestRelayV2ControlPairsClientsAndDeliversWaitingFramesInOrder(t *testing.T) {
 	server := newRelayTestServer(t, DefaultConfig())
-	serverID := "v2-buffered"
+	serverID := "v2-waiting"
 	control := dialRelay(t, server, serverID, RoleServer, 2, "")
 	assertControlMessage(t, control, map[string]any{"type": "sync", "connectionIds": []string{}})
 	client := dialRelay(t, server, serverID, RoleClient, 2, "client-1")
@@ -55,6 +56,127 @@ func TestRelayV2ControlAnswersLegacyJSONPingWithJSONPong(t *testing.T) {
 	if afterFrames != beforeFrames+1 {
 		t.Fatalf("frames forwarded = %v, want %v", afterFrames, beforeFrames+1)
 	}
+}
+
+func TestRelayV2ControlDiscardsBinaryBeforeObservationAndAdmission(t *testing.T) {
+	relay := mustNewRelay(t, DefaultConfig())
+	server := httptestServerForRelay(t, relay)
+	control := dialRelay(t, server, "v2-control-binary", RoleServer, 2, "")
+	assertControlMessage(t, control, map[string]any{"type": "sync"})
+
+	beforeCount := relay.frameCount.Load()
+	beforeBytes := relay.frameBytes.Load()
+	beforeMax := relay.maxFrameBytes.Load()
+	beforeReserved := relay.ingressReserved.Load()
+	beforeInFlight := relay.ingressInFlight.Load()
+	beforeForwarded := relay.framesForwarded.Load()
+	ping := []byte(`{"type":"ping"}`)
+	writeRelayMessage(t, control, websocket.MessageBinary, []byte("discard me"))
+	writeRelayMessage(t, control, websocket.MessageText, ping)
+	assertControlMessage(t, control, map[string]any{"type": "pong"})
+
+	if got := relay.frameCount.Load(); got != beforeCount+1 {
+		t.Fatalf("observed frames = %d, want %d (only ping)", got, beforeCount+1)
+	}
+	if got := relay.frameBytes.Load(); got != beforeBytes+int64(len(ping)) {
+		t.Fatalf("observed bytes = %d, want %d (only ping)", got, beforeBytes+int64(len(ping)))
+	}
+	wantMax := maxInt64(beforeMax, int64(len(ping)))
+	if got := relay.maxFrameBytes.Load(); got != wantMax {
+		t.Fatalf("max frame bytes = %d, want %d", got, wantMax)
+	}
+	if relay.ingressReserved.Load() != beforeReserved || relay.ingressInFlight.Load() != beforeInFlight {
+		t.Fatalf("control binary changed ingress accounting: reserved %d/%d in-flight %d/%d", relay.ingressReserved.Load(), beforeReserved, relay.ingressInFlight.Load(), beforeInFlight)
+	}
+	if got := relay.framesForwarded.Load(); got != beforeForwarded+1 {
+		t.Fatalf("forwarded frames = %d, want %d (only pong)", got, beforeForwarded+1)
+	}
+}
+
+func maxInt64(left, right int64) int64 {
+	if left > right {
+		return left
+	}
+	return right
+}
+
+func TestRelayV2ClientBlocksOneMessageUntilDataAttaches(t *testing.T) {
+	config := DefaultConfig()
+	config.DeliveryTimeoutMS = 500
+	config.DataAttachTimeoutMS = 1_000
+	relay := mustNewRelay(t, config)
+	server := httptestServerForRelay(t, relay)
+	client := dialRelay(t, server, "v2-single-flight", RoleClient, 2, "waiting")
+
+	writeRelayMessage(t, client, websocket.MessageText, []byte("first"))
+	eventually(t, relayTestTimeout, func() bool {
+		relay.mu.Lock()
+		defer relay.mu.Unlock()
+		session := relay.sessions["v2-single-flight"]
+		return session != nil && len(session.waiting["waiting"]) == 1
+	})
+
+	writeRelayMessage(t, client, websocket.MessageBinary, []byte("second"))
+	time.Sleep(25 * time.Millisecond)
+	if got := relay.frameCount.Load(); got != 1 {
+		t.Fatalf("source read %d frames while first delivery was waiting, want 1", got)
+	}
+	relay.mu.Lock()
+	waiting := len(relay.sessions["v2-single-flight"].waiting["waiting"])
+	relay.mu.Unlock()
+	if waiting != 1 {
+		t.Fatalf("source waiters = %d, want one in-flight waiter", waiting)
+	}
+
+	data := dialRelay(t, server, "v2-single-flight", RoleServer, 2, "waiting")
+	assertRelayMessage(t, data, websocket.MessageText, []byte("first"))
+	assertRelayMessage(t, data, websocket.MessageBinary, []byte("second"))
+}
+
+func TestRelayV2PreAttachWaitUsesTheEarlierDeadline(t *testing.T) {
+	tests := []struct {
+		name       string
+		delivery   int
+		attach     int
+		wantCode   websocket.StatusCode
+		wantReason string
+	}{
+		{name: "delivery deadline", delivery: 50, attach: 500, wantCode: websocket.StatusTryAgainLater, wantReason: "Delivery unavailable"},
+		{name: "data attach deadline", delivery: 500, attach: 50, wantCode: websocket.StatusTryAgainLater, wantReason: "Data route unavailable"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := DefaultConfig()
+			config.DeliveryTimeoutMS = test.delivery
+			config.DataAttachTimeoutMS = test.attach
+			relay := mustNewRelay(t, config)
+			server := httptestServerForRelay(t, relay)
+			client := dialRelay(t, server, "v2-timeout-"+strings.ReplaceAll(test.name, " ", "-"), RoleClient, 2, "waiting")
+			writeRelayMessage(t, client, websocket.MessageBinary, []byte("waiting"))
+			assertRelayClose(t, client, test.wantCode, test.wantReason)
+			eventually(t, relayTestTimeout, func() bool {
+				return relay.ingressReserved.Load() == 0 && relay.ingressInFlight.Load() == 0
+			})
+		})
+	}
+}
+
+func TestRelayV2PongQueueFailureClosesWithDeliveryUnavailable(t *testing.T) {
+	config := DefaultConfig()
+	config.DeliveryTimeoutMS = 40
+	relay := mustNewRelay(t, config)
+	server := httptestServerForRelay(t, relay)
+	control := dialRelay(t, server, "v2-pong-failure", RoleServer, 2, "")
+	assertControlMessage(t, control, map[string]any{"type": "sync"})
+	peer := relay.testPeer("v2-pong-failure", RoleServer, 2, "")
+	if peer == nil {
+		t.Fatal("control peer missing")
+	}
+	peer.writeSlot <- struct{}{}
+	defer func() { <-peer.writeSlot }()
+
+	writeRelayMessage(t, control, websocket.MessageText, []byte(`{"type":"ping"}`))
+	assertRelayClose(t, control, websocket.StatusTryAgainLater, "Delivery unavailable")
 }
 
 func TestRelayV2ResetsUnresponsiveControlAfterNudgingDataAttachment(t *testing.T) {

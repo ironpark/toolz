@@ -214,12 +214,19 @@ func TestMultiNodeConcurrentClaimsProduceOneOwner(t *testing.T) {
 		}(node)
 	}
 	close(start)
-	claimed, rerouted := 0, 0
+	claimed, expired, rerouted := 0, 0, 0
 	for range 2 {
 		result := <-results
 		if result.conn != nil {
-			claimed++
 			t.Cleanup(func() { _ = result.conn.CloseNow() })
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			_, _, readErr := result.conn.Read(ctx)
+			cancel()
+			if websocket.CloseStatus(readErr) == websocket.StatusServiceRestart {
+				expired++
+			} else {
+				claimed++
+			}
 			continue
 		}
 		if result.err != nil && result.response != nil && result.response.StatusCode == http.StatusConflict {
@@ -229,8 +236,8 @@ func TestMultiNodeConcurrentClaimsProduceOneOwner(t *testing.T) {
 			_ = result.response.Body.Close()
 		}
 	}
-	if claimed != 1 || rerouted != 1 {
-		t.Fatalf("concurrent claims: upgraded=%d rerouted=%d, want 1/1", claimed, rerouted)
+	if claimed != 1 || expired != 1 || rerouted != 0 {
+		t.Fatalf("concurrent claims: live=%d expired=%d rerouted=%d, want 1/1/0", claimed, expired, rerouted)
 	}
 }
 

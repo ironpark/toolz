@@ -44,9 +44,9 @@ go build -o sanbo .
 
 | 경로 | 용도 | 현재 상태 |
 | --- | --- | --- |
-| `GET /health` | 프로세스 liveness | 구현됨 |
-| `GET /ready` | 신규 작업 수락 가능 여부 | drain, 클러스터 floor, 연결 ceiling, capacity/pressure 반영 |
-| `GET /metrics` | Prometheus 텍스트 메트릭 | 연결·세션·전달·용량·handshake·histogram 전체 surface |
+| `/health` (any method) | 프로세스 liveness | 구현됨 |
+| `/ready` (any method) | 신규 작업 수락 가능 여부 | drain, 클러스터 floor, 연결 ceiling, capacity/pressure 반영 |
+| `/metrics` (any method) | Prometheus 텍스트 메트릭 | 연결·세션·전달·용량·handshake·histogram 전체 surface |
 | `GET /ws` | paseo-relay 호환 WebSocket 업그레이드 | v1/v2 routing, ownership 및 opaque reroute 구현 |
 
 `/metrics`는 참조 구현과 같은 HELP/TYPE 메타데이터와 누적 histogram bucket을
@@ -131,7 +131,7 @@ OS로부터 확보한 메모리(`runtime/metrics`의 `총 메모리 - 반환된 
 샘플링합니다. watermark에 도달하면
 
 - `/ready`와 WebSocket admission이 닫히고,
-- 버퍼링된 프레임을 모두 폐기하고 예약된 ingress를 반환하며,
+- data attach를 기다리던 in-flight frame을 모두 폐기하고 예약된 ingress를 반환하며,
 - 연결된 모든 peer를 `1013 Relay memory pressure`로 종료한 뒤
   (`paseo_relay_memory_pressure_disconnects_total` 증가) `runtime.GC()`를 호출합니다.
 
@@ -143,8 +143,8 @@ Shedding은 watermark를 넘는 순간 한 번만 수행됩니다. 사용량이 
 ### Capacity 조정
 
 `PASEO_RELAY_CAPACITY_MUTATION_TIMEOUT_MS` 주기마다 relay는 ingress 원장을 실제
-상태와 대조합니다. 예약된 바이트는 항상 (세션 버퍼에 쌓인 바이트 + 라우팅
-진행 중인 바이트)와 일치해야 하며, 예약이 이를 초과하면 유실된 예약으로
+상태와 대조합니다. 예약된 바이트는 항상 (data attach를 기다리거나 라우팅 중인
+바이트)와 일치해야 하며, 예약이 이를 초과하면 유실된 예약으로
 간주합니다. 이 경우
 
 - admission을 닫고 (`capacity_unavailable`),
@@ -201,13 +201,13 @@ go vet ./...
 - v2 control sync, connected, disconnected 및 legacy ping/pong의 기본 경로
 - canonical X25519 handshake key 검증
 - client-originated handshake만 검증하는 role boundary와 outcome counter
-- 가중 ingress reservation, data-route attach timeout 및 buffer 정리
+- 가중 ingress reservation, source-blocking data-route attach wait 및 reservation 정리
 - 전달 deadline, slow-consumer fail-closed 처리 및 capacity reconciliation
 - 단일 프로세스 내 다중 relay node ownership, 원자적 claim 및 opaque reroute
 - query와 release cookie로 격리된 host-level 다중 프로세스 lease registry
 - 실제 member heartbeat 수를 사용하는 minimum-cluster readiness
 - process 종료 후 lease 만료와 remote ownership reclaim
-- 원자적 pre-upgrade claim과 소유권 상실 시 WebSocket `1012` 수렴
+- WebSocket upgrade 후 원자적 claim과 소유권 상실 시 WebSocket `1012` 수렴
 - 연결 ceiling, memory-pressure admission/shedding 및 session reclamation
 - 전체 Prometheus counter/gauge/histogram surface
 - 실제 socket lifecycle을 사용하는 provider-neutral load 시나리오

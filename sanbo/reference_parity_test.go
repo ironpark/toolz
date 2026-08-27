@@ -248,7 +248,7 @@ func TestShedPicksLongestBlockedSourceBeforeNewestActiveSocket(t *testing.T) {
 	relay.sessions["shed-order"] = &relaySession{
 		clients: map[string][]*relayPeer{"route": {oldBlocked, newBlocked, oldActive, newActive}},
 		data:    map[string]*relayPeer{},
-		buffer:  map[string][]relayMessage{},
+		waiting: map[string][]*relayDataWaiter{},
 	}
 	attached := relay.attachedPeersLocked()
 	relay.mu.Unlock()
@@ -271,7 +271,7 @@ func TestShedSkipsSocketsAlreadyChosen(t *testing.T) {
 	relay.sessions["shed-skip"] = &relaySession{
 		clients: map[string][]*relayPeer{"route": {already, next}},
 		data:    map[string]*relayPeer{},
-		buffer:  map[string][]relayMessage{},
+		waiting: map[string][]*relayDataWaiter{},
 	}
 	attached := relay.attachedPeersLocked()
 	relay.mu.Unlock()

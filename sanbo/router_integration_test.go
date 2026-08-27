@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bufio"
+	"errors"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -50,6 +54,58 @@ func TestRouterRejectsIncompleteWebSocketHandshakeBeforeClaimingOwnership(t *tes
 	if response.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusBadRequest)
 	}
+}
+
+// A valid upgrade request can still fail after Accept has written the 101
+// headers (for example, when hijacking the underlying HTTP connection fails).
+// The failed request must not expose a provisional owner to another request.
+func TestRouterFailedWebSocketAcceptDoesNotClaimOwnership(t *testing.T) {
+	relay := mustNewRelay(t, DefaultConfig())
+	serverID := "accept-failure"
+	writer := &blockingHijackWriter{started: make(chan struct{}), release: make(chan struct{})}
+	request := httptest.NewRequest(http.MethodGet, "http://relay.test/ws?serverId="+serverID+"&role=server", nil)
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	request.Header.Set("Sec-WebSocket-Version", "13")
+	request.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+
+	done := make(chan bool, 1)
+	go func() {
+		_, _, _, ok := relay.admit(writer, request)
+		done <- ok
+	}()
+	<-writer.started
+
+	if _, owned, err := relay.ownership.lookup(serverID); err != nil || owned {
+		t.Fatalf("failed Accept exposed ownership: owned=%t err=%v", owned, err)
+	}
+	close(writer.release)
+	if ok := <-done; ok {
+		t.Fatal("failed Accept returned a live connection")
+	}
+}
+
+type blockingHijackWriter struct {
+	header  http.Header
+	started chan struct{}
+	release chan struct{}
+}
+
+func (w *blockingHijackWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (*blockingHijackWriter) Write(p []byte) (int, error) { return len(p), nil }
+
+func (*blockingHijackWriter) WriteHeader(int) {}
+
+func (w *blockingHijackWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	close(w.started)
+	<-w.release
+	return nil, nil, errors.New("forced hijack failure")
 }
 
 func TestRouterRejectsOversizedRouteIdentifiersBeforeClaimingOwnership(t *testing.T) {

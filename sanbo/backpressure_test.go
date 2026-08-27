@@ -50,9 +50,14 @@ func TestBackpressureSuspendedSourceKeepsOutboundWriterLive(t *testing.T) {
 	}
 }
 
-func TestBackpressureCompletedMessagesCannotExceedNodeByteBudget(t *testing.T) {
+func TestBackpressureBlockedSourceDoesNotAdmitItsNextFrame(t *testing.T) {
 	r := backpressureScenario(t, "strict-node-byte-budget")
-	requireClose(t, r, websocket.StatusTryAgainLater, "Relay ingress capacity")
+	if r.CloseCode != 0 {
+		t.Fatalf("blocked source closed before data attached: (%d, %q)", r.CloseCode, r.CloseReason)
+	}
+	if len(r.Forwarded) != 2 || string(r.Forwarded[0]) != "12345678" || string(r.Forwarded[1]) != "x" {
+		t.Fatalf("forwarded frames = %q, want both frames in order", r.Forwarded)
+	}
 	if r.IngressReservedBytes > int64(DefaultConfig().IngressBudgetBytes) {
 		t.Fatalf("reserved %d exceeds budget", r.IngressReservedBytes)
 	}

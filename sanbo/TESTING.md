@@ -37,19 +37,19 @@ Run only the cross-process cluster contracts with:
 go test -count=1 -run '^TestMultiNode' ./...
 ```
 
-The 100 upstream ports are supplemented by 33 Go regression tests, for 133
+The 100 upstream ports are supplemented by 38 Go regression tests, for 138
 ordinary tests in total. `production_contract_test.go` adds real socket/state
 coverage for readiness at capacity, the complete metrics surface, session and
-buffer cleanup, handshake role boundaries, data-attach expiry, ingress budget
+waiting-delivery cleanup, handshake role boundaries, data-attach expiry, ingress budget
 enforcement, rejection accounting, and the control read limit.
 
 `memory_pressure_test.go` drives the watermark sampler itself: watermark
-crossing, admission closure, peer and buffer shedding with the `1013` close
+crossing, admission closure, peer and waiting-delivery shedding with the `1013` close
 code, once-per-crossing shedding, hysteresis on release, and readmission after
 relief.
 
 `capacity_reconcile_test.go` covers the ingress ledger reconciler: orphaned
-reservations reclaimed with a capacity-epoch bump, in-flight and buffered
+reservations reclaimed with a capacity-epoch bump, in-flight and waiting
 reservations left untouched, ledgers balancing after ordinary routing, and the
 reconciler goroutine running on its configured interval.
 

@@ -16,9 +16,9 @@ WebSocket 공개 동작 계약이다. 구현 자체도 “internal protocols may
 ## 전송과 업그레이드
 
 - 엔드포인트: `GET /ws` WebSocket upgrade (HTTP/1 전용, `protocols: [:http]`).
-- `/ws` 이외의 경로는 WebSocket이 아니라 운영 엔드포인트로 처리된다.
-  `GET /health`는 `200 {"status":"ok"}`, `GET /ready`는 `200 {"status":"ready"}`
-  또는 `503 {"status":"unready"}`, `GET /metrics`는 Prometheus 텍스트를 반환하고,
+- `/ws` 이외의 경로는 WebSocket이 아니라 운영 엔드포인트로 처리된다. method와
+  무관하게 `/health`는 `200 {"status":"ok"}`, `/ready`는 `200 {"status":"ready"}`
+  또는 `503 {"status":"unready"}`, `/metrics`는 Prometheus 텍스트를 반환하고,
   그 외 경로는 `404 not found`다.
 - upgrade가 완료되기 전까지의 HTTP 요청에는 `PASEO_RELAY_HTTP_IDLE_TIMEOUT_MS`
   (기본 15초)가 적용된다. upgrade 이후 WebSocket에는 idle timeout이 없다.
@@ -32,15 +32,17 @@ WebSocket 공개 동작 계약이다. 구현 자체도 “internal protocols may
    (기본 `x-reroute-target`). 응답 본문은 비어 있다. 클라이언트나 앞단 프록시는
    원래 upgrade 요청을 그 대상에 재시도해야 한다.
 4. 연결 budget admission → 실패 시 `503`.
-5. 소유자 확보 → drain/cluster/owner 상태에 따라 `503`, 또는 이 시점에 다른
-   노드가 소유권을 가져갔다면 `409`.
+5. WebSocket upgrade → 실패하면 연결 budget을 되돌리고 소유권을 건드리지 않는다.
+6. 소유자 확보 → upgrade 성공 뒤 원자적으로 claim한다. 이때 claim에 실패하거나
+   다른 노드가 소유권을 가져갔다면 이미 열린 소켓을 `1012 Session expired`로
+   닫는다.
 
 즉 reroute(`409`) 판정은 연결 용량 검사보다 **먼저** 일어나므로, 노드가 포화
 상태여도 다른 노드 소유 세션은 `503`이 아니라 `409`로 안내된다.
 
 ### Prometheus 메트릭
 
-`GET /metrics`는 참조 구현과 같은 17개 일반 metric family의 HELP/TYPE와
+`/metrics`는 method와 무관하게 참조 구현과 같은 17개 일반 metric family의 HELP/TYPE와
 handshake counter family를 포함한다. delivery 대기 시간 bucket은
 `0.001`, `0.01`, `0.1`, `1`, `10`초이고, frame 크기 bucket은 `1024`,
 `65536`, `1048576`, `8388608`, `33554418`바이트이며 모두 누적값이다.
@@ -111,8 +113,10 @@ v2는 하나의 `serverId` 아래에서 control, data, client route를 분리한
 
 하나의 `connectionId`에는 client WebSocket이 여러 개 붙을 수 있다.
 
-**client → data**: data 소켓이 아직 붙지 않았다면 붙기를 기다린다. 대기 한도는
-`min(남은 delivery deadline, PASEO_RELAY_DATA_ATTACH_TIMEOUT_MS)`이며, 기본값
+**client → data**: data 소켓이 아직 붙지 않았다면 source마다 한 메시지만 in-flight로
+둔 채 붙기를 기다린다. 릴레이 내부에 제한 없는 route별 프레임 버퍼는 두지 않으며,
+source의 다음 프레임은 읽기 루프가 대기를 끝낼 때까지 TCP 수신 쪽에 남는다. 대기
+한도는 `min(남은 delivery deadline, PASEO_RELAY_DATA_ATTACH_TIMEOUT_MS)`이며, 기본값
 기준으로는 15초다. data가 도착하면 대기 중이던 메시지가 입력 순서대로 전달된다.
 대기 한도가 지나면 source client는 `1013 Data route unavailable`으로 닫힌다.
 대기 시작 시점에 delivery deadline이 이미 소진되어 있으면 대기하지 않고
@@ -167,9 +171,14 @@ inbound로 의미 있게 처리하는 것은 text JSON의 `{"type":"ping"}`뿐�
 ```
 
 `ts`는 밀리초 Unix epoch 정수다. 그 외 text payload는 무시되고, control 소켓의
-**binary frame은 아무 처리 없이 버려진다**(ingress 예산도 소비하지 않는다).
+**binary frame은 아무 처리 없이 버려진다**(frame 관찰 counter와 ingress 예산도
+소비하지 않는다).
 표준 WebSocket ping/pong/close control frame은 Cowboy WebSocket 계층이 처리하며,
 릴레이 애플리케이션은 별도의 의미를 부여하지 않는다.
+
+JSON ping의 pong도 control delivery queue를 통해 전송되므로
+`PASEO_RELAY_CONTROL_QUEUE_BYTES`의 제한을 받는다. queue 또는 delivery가 실패하면
+control 소켓을 `1013 Delivery unavailable`으로 닫는다.
 
 control 소켓은 `role=server`이므로 아래의 client handshake 검사 대상이 아니다.
 
@@ -343,7 +352,7 @@ Go에는 프로세스별 힙이 없으므로 `PASEO_RELAY_WEBSOCKET_MAX_HEAP_WOR
 합산한다.
 
 - 그 소켓이 라우팅 중인 프레임의 payload bytes
-- data 소켓 부착을 기다리며 그 소켓 몫으로 버퍼링된 프레임의 payload bytes
+- data 소켓 부착을 기다리는 source의 in-flight frame payload bytes
 - 그 소켓으로 나가는 write에 들어간 payload bytes와, 진행 중인 write 뒤에 큐잉된
   control 알림 bytes
 

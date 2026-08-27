@@ -11,7 +11,7 @@ import (
 func TestCapacityReconcileReleasesOrphanedReservation(t *testing.T) {
 	relay := mustNewRelay(t, DefaultConfig())
 	epoch := relay.capacityEpoch.Load()
-	// A reservation no buffer and no live route accounts for: the shape left
+	// A reservation no waiting delivery or live route accounts for: the shape left
 	// behind when a teardown path loses its release.
 	relay.ingressReserved.Add(4_096)
 
@@ -31,7 +31,7 @@ func TestCapacityReconcileReleasesOrphanedReservation(t *testing.T) {
 func TestCapacityReconcileLeavesInFlightReservationsAlone(t *testing.T) {
 	relay := mustNewRelay(t, DefaultConfig())
 	epoch := relay.capacityEpoch.Load()
-	// Mid-route: reserved and published as in-flight, not yet buffered.
+	// Mid-route: reserved and published as in-flight, not yet waiting for data.
 	relay.ingressInFlight.Add(4_096)
 	relay.ingressReserved.Add(4_096)
 
@@ -45,32 +45,32 @@ func TestCapacityReconcileLeavesInFlightReservationsAlone(t *testing.T) {
 	}
 }
 
-func TestCapacityReconcileLeavesBufferedFramesAlone(t *testing.T) {
+func TestCapacityReconcileLeavesWaitingDeliveriesAlone(t *testing.T) {
 	config := DefaultConfig()
 	config.DataAttachTimeoutMS = 10_000
 	relay := mustNewRelay(t, config)
 	server := httptestServerForRelay(t, relay)
-	serverID := "reconcile-buffered"
+	serverID := "reconcile-waiting"
 
 	control := dialRelay(t, server, serverID, RoleServer, 2, "")
 	defer control.CloseNow()
-	client := dialRelay(t, server, serverID, RoleClient, 2, "buffered")
+	client := dialRelay(t, server, serverID, RoleClient, 2, "waiting")
 	defer client.CloseNow()
 
 	ctx, cancel := context.WithTimeout(context.Background(), relayTestTimeout)
 	defer cancel()
 	if err := client.Write(ctx, websocket.MessageBinary, []byte("still-waiting-for-a-route")); err != nil {
-		t.Fatalf("write buffered frame: %v", err)
+		t.Fatalf("write waiting frame: %v", err)
 	}
 	if !waitScenario(func() bool { return relay.ingressReserved.Load() > 0 }, relayTestTimeout) {
-		t.Fatal("frame was not buffered")
+		t.Fatal("frame did not wait for data")
 	}
 	reserved := relay.ingressReserved.Load()
 
 	relay.reconcileCapacity()
 
 	if got := relay.ingressReserved.Load(); got != reserved {
-		t.Fatalf("reconcile reclaimed buffered bytes: %d, want %d", got, reserved)
+		t.Fatalf("reconcile reclaimed waiting bytes: %d, want %d", got, reserved)
 	}
 }
 
