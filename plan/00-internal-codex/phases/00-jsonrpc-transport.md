@@ -1,6 +1,7 @@
 ---
+completed_at: "2026-08-27T20:13:49Z"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: `go test ./internal/codex/ -run Transport` passes; a scripted fake peer over
 > NEXT: none

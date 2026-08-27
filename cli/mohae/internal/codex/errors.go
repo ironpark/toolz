@@ -50,6 +50,22 @@ const (
 	CodeServerOverloaded = -32001
 )
 
+// Common codexErrorInfo discriminators carried by a failed turn's error.
+// Compare them against TurnError.Kind.
+const (
+	ErrorInfoContextWindowExceeded          = "ContextWindowExceeded"
+	ErrorInfoUsageLimitExceeded             = "UsageLimitExceeded"
+	ErrorInfoHTTPConnectionFailed           = "HttpConnectionFailed"
+	ErrorInfoResponseStreamConnectionFailed = "ResponseStreamConnectionFailed"
+	ErrorInfoResponseStreamDisconnected     = "ResponseStreamDisconnected"
+	ErrorInfoResponseTooManyFailedAttempts  = "ResponseTooManyFailedAttempts"
+	ErrorInfoBadRequest                     = "BadRequest"
+	ErrorInfoUnauthorized                   = "Unauthorized"
+	ErrorInfoSandboxError                   = "SandboxError"
+	ErrorInfoInternalServerError            = "InternalServerError"
+	ErrorInfoOther                          = "Other"
+)
+
 // IsOverloaded reports whether err is an app-server overload error
 // (JSON-RPC code -32001) that the caller may retry after a backoff.
 func IsOverloaded(err error) bool {

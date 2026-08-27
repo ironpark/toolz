@@ -1,6 +1,6 @@
 ---
 perf_phase: false
-status: planned
+status: in-progress
 ---
 > DONE-WHEN: All documented example payloads in scope decode into typed values without
 > NEXT: none
