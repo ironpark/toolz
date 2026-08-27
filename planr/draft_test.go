@@ -95,6 +95,54 @@ func TestNewDraftReportsEveryPlaceholderAtOnce(t *testing.T) {
 	}
 }
 
+// A caller that never opens the document only learns what is wrong from the
+// error, so a section mismatch must name the offending sections rather than
+// restating what a correct draft looks like.
+func TestSectionMismatchNamesTheOffendingSections(t *testing.T) {
+	raw := newDraftForTest(t, languageEnglish)
+	lines := []string{}
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.HasPrefix(line, "# CONTEXT") {
+			continue
+		}
+		if strings.Contains(line, draftPlaceholder) {
+			line = "- filled in"
+		}
+		lines = append(lines, line)
+	}
+	_, err := parseDraft([]byte(strings.Join(lines, "\n")), "demo.md")
+	if err == nil {
+		t.Fatal("parseDraft() accepted a draft with a missing section")
+	}
+	for _, want := range []string{"missing section(s): CONTEXT", "found sections:"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+	records := validationRecords(err)
+	if len(records) != 1 || records[0].Rule != "sections" || !strings.Contains(records[0].Detail, "CONTEXT") {
+		t.Fatalf("validation records = %#v, want one sections record naming CONTEXT", records)
+	}
+}
+
+func TestDescribeSectionMismatch(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		found []string
+		want  string
+	}{
+		{name: "missing", found: []string{"GOALS", "SCOPE", "PHASES"}, want: "missing section(s): CONTEXT, VERIFICATION, ORDERING, NEXT"},
+		{name: "unexpected", found: append(append([]string{}, requiredSections...), "EXTRA"), want: "unexpected section(s): EXTRA"},
+		{name: "duplicated", found: append(append([]string{}, requiredSections...), "GOALS"), want: "duplicated section(s): GOALS"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := describeSectionMismatch(testCase.found); !strings.Contains(got, testCase.want) {
+				t.Fatalf("describeSectionMismatch() = %q, want it to contain %q", got, testCase.want)
+			}
+		})
+	}
+}
+
 // Every language's skeleton must parse, so a draft written against one
 // language is not silently unusable under another.
 func TestNewDraftRoundTripsInEveryLanguage(t *testing.T) {

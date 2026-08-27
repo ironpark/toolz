@@ -29,6 +29,25 @@ draft contains its work, done-when, `depends_on`, `status`,
 `entry_condition`, `perf_phase`, and editable slug; `apply` assigns the phase
 number as the next number after the largest existing one.
 
+Send a document by writing it to a scratch file and redirecting it, not by
+embedding it in a shell quote: plan text contains backticks, quotes, and blank
+lines that a quoted `-c` string mangles, and shell expansion can execute the
+command examples inside your own document.
+
+```sh
+cat > .planr-draft <<'PLANR'
+<the full document>
+PLANR
+planr apply --stdin < .planr-draft && rm .planr-draft
+```
+
+Remove the scratch file once it is applied; an untracked file left in the
+repository blocks `planr phase done`.
+
+Add `--json` to `apply` when it fails. The failure comes back as structured
+errors naming the rule and the section or phase to fix, which is faster than
+re-reading the document.
+
 `edit --json` returns the checkout document and its `planr_base` hash. Preserve
 the frontmatter identity fields and send the edited `document` to
 `planr apply --stdin`. If another command changed the target meanwhile,

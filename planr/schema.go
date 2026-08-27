@@ -22,6 +22,7 @@ type schemaOutput struct {
 	EditFrontmatter       []string         `json:"edit_frontmatter"`
 	ApplyKinds            []string         `json:"apply_kinds"`
 	DerivedRegions        []string         `json:"derived_regions"`
+	ValidationErrors      string           `json:"validation_errors"`
 }
 
 type schemaPhaseBlock struct {
@@ -56,6 +57,9 @@ func schemaValue() schemaOutput {
 		EditFrontmatter:       []string{"planr_edit", "planr_target", "planr_base", "planr_section (section checkouts)", "planr_phase and planr_slug (phase checkouts)"},
 		ApplyKinds:            []string{"full plan draft", "phase draft", "planr_edit checkout"},
 		DerivedRegions:        []string{"PLAN.md phase checklist", "PLAN.md plan_status", "phase status transitions"},
+		// Both evaluated agents reached for schema first and never discovered
+		// that apply can report failures as data, so the contract advertises it.
+		ValidationErrors: "run `planr apply --json` to get failures as {rule, section, phase, line, detail} instead of prose",
 	}
 }
 

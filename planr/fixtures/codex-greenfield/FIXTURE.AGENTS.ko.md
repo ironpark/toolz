@@ -28,6 +28,23 @@ planr phase done <plan-name> <number> # phase 완료
 작업, 완료 조건, `depends_on`, `status`, `entry_condition`, `perf_phase`, 편집 가능한
 slug가 들어가며, phase 번호는 기존 최대 번호 다음으로 `apply`가 지정합니다.
 
+문서를 넘길 때는 셸 따옴표 안에 넣지 말고 임시 파일에 쓴 뒤 리다이렉션합니다. 계획
+본문에는 백틱·따옴표·빈 줄이 들어 있어 따옴표로 감싼 `-c` 문자열에서 깨지고, 문서
+안의 명령 예시가 셸에서 실행될 수 있습니다.
+
+```sh
+cat > .planr-draft <<'PLANR'
+<문서 전체>
+PLANR
+planr apply --stdin < .planr-draft && rm .planr-draft
+```
+
+적용한 뒤에는 임시 파일을 지웁니다. 저장소에 남은 미추적 파일은 `planr phase done`을
+막습니다.
+
+`apply`가 실패하면 `--json`을 붙입니다. 어떤 규칙을 어느 섹션·phase에서 어겼는지가
+구조화된 오류로 돌아오므로 문서를 다시 읽는 것보다 빠릅니다.
+
 `edit --json`은 checkout 문서와 `planr_base` hash를 반환합니다. frontmatter의 식별
 필드를 보존하고 수정한 `document`를 `planr apply --stdin`으로 보냅니다. 그동안 다른
 명령이 대상 문서를 바꿨으면 적용이 거부되므로 다시 checkout합니다. phase 상태 변경은

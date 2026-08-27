@@ -115,6 +115,66 @@ type draft struct {
 	NextPhase                                                     int
 }
 
+// describeSectionMismatch reports which top-level headings are missing,
+// unexpected, or duplicated. A draft is rejected on the heading count alone, so
+// without this the author only learns that the count was wrong.
+func describeSectionMismatch(found []string) string {
+	counts := map[string]int{}
+	for _, name := range found {
+		counts[name]++
+	}
+	required := map[string]bool{}
+	missing := []string{}
+	for _, name := range requiredSections {
+		required[name] = true
+		if counts[name] == 0 {
+			missing = append(missing, name)
+		}
+	}
+	duplicated := []string{}
+	unexpected := []string{}
+	for _, name := range found {
+		switch {
+		case !required[name]:
+			unexpected = appendUnique(unexpected, name)
+		case counts[name] > 1:
+			duplicated = appendUnique(duplicated, name)
+		}
+	}
+	parts := []string{}
+	if len(missing) > 0 {
+		parts = append(parts, "missing section(s): "+strings.Join(missing, ", "))
+	}
+	if len(unexpected) > 0 {
+		parts = append(parts, "unexpected section(s): "+strings.Join(unexpected, ", "))
+	}
+	if len(duplicated) > 0 {
+		parts = append(parts, "duplicated section(s): "+strings.Join(duplicated, ", "))
+	}
+	if len(parts) == 0 {
+		// The names all line up, so the count can only be off by repetition that
+		// the checks above already tolerate; report the count plainly.
+		return fmt.Sprintf("document has %d top-level sections, want %d", len(found), len(requiredSections))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func joinOrNone(values []string) string {
+	if len(values) == 0 {
+		return "(none)"
+	}
+	return strings.Join(values, ", ")
+}
+
 func parseDraft(raw []byte, fallback string) (draft, error) {
 	front, body, err := frontmatter(string(raw))
 	if err != nil {
@@ -122,8 +182,21 @@ func parseDraft(raw []byte, fallback string) (draft, error) {
 	}
 	matches := topHeading.FindAllStringSubmatchIndex(body, -1)
 	if len(matches) != len(requiredSections) {
-		detail := fmt.Sprintf("expected sections: %s", strings.Join(requiredSections, ", "))
-		return draft{}, newValidationFailure(validationRecord{Rule: "sections", Section: "document", Detail: detail}, detail)
+		// The caller may be an agent that never reads the document, so name the
+		// sections that are actually missing or extra instead of only restating
+		// what a correct draft looks like.
+		found := make([]string, 0, len(matches))
+		for _, m := range matches {
+			found = append(found, body[m[2]:m[3]])
+		}
+		detail := describeSectionMismatch(found)
+		return draft{}, newValidationFailure(
+			validationRecord{Rule: "sections", Section: "document", Detail: detail},
+			fmt.Sprintf("%s\nexpected sections: %s\nfound sections: %s",
+				detail,
+				strings.Join(requiredSections, ", "),
+				joinOrNone(found)),
+		)
 	}
 	if err := checkDraftPlaceholders(string(raw)); err != nil {
 		return draft{}, err
