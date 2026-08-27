@@ -58,6 +58,15 @@ prompts: # 대화. 순서대로 전송되며, 둘 이상이면 멀티턴
   - text: 빌드가 깨져 있습니다. 멈추기 전에 고치세요.
     when: sh("go build ./...") != 0 # 조건이 참일 때만 전송
 
+skills: # 워크스페이스에 설치할 스킬. agents로 대상 에이전트 제한
+  - path: ./skills/commit
+    agents: [claude-code]
+
+mcp: # 연결할 MCP 서버. agents 생략 시 모든 에이전트에 제공
+  - name: context7
+    config: ./mcp.json
+    agents: [claude-code, codex]
+
 verify:
   script: ./verify.sh
 

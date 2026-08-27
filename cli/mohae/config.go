@@ -35,9 +35,10 @@ type Config struct {
 	// Prompts is the conversation, in order. More than one makes the trial
 	// multi-turn; each entry may carry a `when` condition, so the same
 	// configuration can describe follow-ups that only some runs need.
-	Prompts []Prompt     `yaml:"prompts"`
-	MCP     MCPConfig    `yaml:"mcp,omitempty"`
-	Verify  VerifyConfig `yaml:"verify,omitempty"`
+	Prompts []Prompt          `yaml:"prompts"`
+	Skills  []SkillConfig     `yaml:"skills,omitempty"`
+	MCP     []MCPServerConfig `yaml:"mcp,omitempty"`
+	Verify  VerifyConfig      `yaml:"verify,omitempty"`
 	Limits  LimitsConfig `yaml:"limits,omitempty"`
 	Report  ReportConfig `yaml:"report,omitempty"`
 }
@@ -66,8 +67,30 @@ type WorkspaceConfig struct {
 	Git     bool   `yaml:"git,omitempty"`
 }
 
-type MCPConfig struct {
-	Config string `yaml:"config,omitempty"`
+// SkillConfig installs one skill into the workspace before the trial starts.
+// Agents limits which agent types see it; an empty list enables it for all,
+// so the common single-agent config never has to repeat the agent's name.
+type SkillConfig struct {
+	Path   string   `yaml:"path"`
+	Agents []string `yaml:"agents,omitempty"`
+}
+
+// EnabledFor reports whether this skill applies to the given agent type.
+func (s SkillConfig) EnabledFor(agentType string) bool {
+	return len(s.Agents) == 0 || contains(s.Agents, agentType)
+}
+
+// MCPServerConfig connects one MCP server to the trial. Agents limits which
+// agent types it is offered to; an empty list offers it to all.
+type MCPServerConfig struct {
+	Name   string   `yaml:"name,omitempty"`
+	Config string   `yaml:"config"`
+	Agents []string `yaml:"agents,omitempty"`
+}
+
+// EnabledFor reports whether this server applies to the given agent type.
+func (m MCPServerConfig) EnabledFor(agentType string) bool {
+	return len(m.Agents) == 0 || contains(m.Agents, agentType)
 }
 
 // VerifyConfig grades the finished workspace. The script runs outside the
@@ -158,6 +181,22 @@ func (c *Config) Validate() error {
 			return err
 		}
 	}
+	for index, skill := range c.Skills {
+		if skill.Path == "" {
+			return fmt.Errorf("skills[%d].path is required", index)
+		}
+		if err := validateAgents(fmt.Sprintf("skills[%d]", index), skill.Agents); err != nil {
+			return err
+		}
+	}
+	for index, server := range c.MCP {
+		if server.Config == "" {
+			return fmt.Errorf("mcp[%d].config is required", index)
+		}
+		if err := validateAgents(fmt.Sprintf("mcp[%d]", index), server.Agents); err != nil {
+			return err
+		}
+	}
 	for _, format := range c.Report.Formats {
 		if !contains(KnownFormats, format) {
 			return fmt.Errorf("unknown report format %q (one of: %s)", format, strings.Join(KnownFormats, ", "))
@@ -189,8 +228,13 @@ func (c *Config) ReferencedPaths() []LabeledPath {
 		{"workspace.source", c.Workspace.Source},
 		{"workspace.init_script", c.Workspace.InitScript},
 		{"workspace.agent_md", c.Workspace.AgentMD},
-		{"mcp.config", c.MCP.Config},
 		{"verify.script", c.Verify.Script},
+	}
+	for index, skill := range c.Skills {
+		candidates = append(candidates, LabeledPath{fmt.Sprintf("skills[%d].path", index), skill.Path})
+	}
+	for index, server := range c.MCP {
+		candidates = append(candidates, LabeledPath{fmt.Sprintf("mcp[%d].config", index), server.Config})
 	}
 	for index, prompt := range c.Prompts {
 		candidates = append(candidates, LabeledPath{fmt.Sprintf("prompts[%d].file", index), prompt.File})
@@ -211,6 +255,17 @@ func (c *Config) ReferencedPaths() []LabeledPath {
 type LabeledPath struct {
 	Field string
 	Path  string
+}
+
+// validateAgents rejects an agents list naming a driver that does not exist,
+// which would otherwise read as an item silently enabled for nobody.
+func validateAgents(field string, agents []string) error {
+	for _, agent := range agents {
+		if !contains(KnownAgentTypes, agent) {
+			return fmt.Errorf("%s.agents: unknown agent type %q (one of: %s)", field, agent, strings.Join(KnownAgentTypes, ", "))
+		}
+	}
+	return nil
 }
 
 func contains(values []string, value string) bool {

@@ -94,7 +94,9 @@ func applyRunOverrides(cmd *cli.Command, configs []*Config) error {
 			config.Verify.Script = absoluteOverride(value)
 		}
 		if value := cmd.String("mcp-config"); value != "" {
-			config.MCP.Config = absoluteOverride(value)
+			// The override replaces the configured servers wholesale, and with
+			// no agents filter, so what the flag names is what every agent gets.
+			config.MCP = []MCPServerConfig{{Config: absoluteOverride(value)}}
 		}
 		if cmd.IsSet("timeout") {
 			config.Limits.TimeoutSeconds = cmd.Int("timeout")

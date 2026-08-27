@@ -159,7 +159,11 @@ report:
 	case "mcp-server":
 		return header + `
 mcp:
-  config: ./mcp.json
+  # Each server may limit which agent types it is offered to; omitting
+  # agents offers it to all of them.
+  - name: server-under-test
+    config: ./mcp.json
+    agents: [claude-code, codex]
 `
 	case "cli-skill":
 		return header + `
