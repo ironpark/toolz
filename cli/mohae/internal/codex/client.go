@@ -55,6 +55,7 @@ type Client struct {
 
 	mu          sync.Mutex
 	initialized bool
+	threads     map[string]*threadSubscription
 }
 
 // New spawns `codex app-server`, performs the initialize/initialized
@@ -83,7 +84,7 @@ func dial(ctx context.Context, opts Options, in io.Reader, out io.Writer, releas
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	c := &Client{opts: opts, logger: logger}
+	c := &Client{opts: opts, logger: logger, threads: make(map[string]*threadSubscription)}
 	c.tr = newTransport(transportConfig{
 		in:             in,
 		out:            out,
@@ -95,6 +96,10 @@ func dial(ctx context.Context, opts Options, in io.Reader, out io.Writer, releas
 		_ = c.tr.Close()
 		return nil, err
 	}
+	go func() {
+		<-c.tr.Done()
+		c.shutdown()
+	}()
 	return c, nil
 }
 
@@ -201,5 +206,6 @@ func (c *Client) handleNotification(method string, params json.RawMessage) {
 
 // dispatchNotification routes a notification to its subscribers.
 func (c *Client) dispatchNotification(method string, params json.RawMessage) {
-	_, _ = routeIDs(params)
+	threadID, _ := routeIDs(params)
+	c.routeThreadNotification(method, params, threadID)
 }

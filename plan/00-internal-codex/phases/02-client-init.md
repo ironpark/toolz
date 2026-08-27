@@ -1,9 +1,10 @@
 ---
+completed_at: "2026-08-27T20:27:23Z"
 depends_on:
 - "00-internal-codex#0"
 - "00-internal-codex#1"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: Tests prove: successful handshake yields a usable client; initialize error
 > NEXT: none

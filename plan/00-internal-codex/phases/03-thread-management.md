@@ -2,7 +2,7 @@
 depends_on:
 - "00-internal-codex#2"
 perf_phase: false
-status: planned
+status: in-progress
 ---
 > DONE-WHEN: Every listed method has a wire-shape + decode test against the fake server;
 > NEXT: none
