@@ -349,6 +349,7 @@ Go 소스 또는 실제 실행으로 확인한 것이다.
 | 소켓별 힙 상한 | BEAM 소켓 프로세스의 `max_heap_size` (`kill: true`) | 소켓별 **메모리 회계**로 등가 구현. 아래 참고 |
 | ownership registry | Syn scope + DNSCluster peer discovery | process-local registry 또는 동일 호스트 file-lease registry. cross-host distributed clustering은 미지원 |
 | 503 본문 | 위 표의 7종 | 위 표의 7종을 동일 문자열로 반환하며, 로컬 backend의 admission 상태에 매핑 |
+| `beam_*` 메모리 gauge | `:erlang.memory/1`의 `total`/`processes`/`binary`/`ets` | Go 런타임 근사치. `beam_total`과 `beam_process`는 둘 다 heap alloc, `beam_binary`는 heap in-use, `beam_ets`는 mcache in-use를 보고한다. 패밀리 이름과 HELP만 호환되며 값은 참조와 비교 불가 |
 
 client fan-out, control 초기 `sync` roster, 10초/5초 control watchdog, handshake
 좌표 범위 검사, batch 단위 메모리 pressure shedding, 단일 보유 role의 소켓 교체,

@@ -135,9 +135,10 @@ OS로부터 확보한 메모리(`runtime/metrics`의 `총 메모리 - 반환된 
 - 연결된 모든 peer를 `1013 Relay memory pressure`로 종료한 뒤
   (`paseo_relay_memory_pressure_disconnects_total` 증가) `runtime.GC()`를 호출합니다.
 
-Shedding은 watermark를 넘는 순간 한 번만 수행됩니다. 사용량이 watermark의 90%
-아래로 내려가야 pressure가 해제되므로, 경계에 머무는 heap이 admission을
-반복적으로 여닫지 않습니다. Ownership reroute는 pressure보다 우선하므로 다른
+Shedding은 watermark를 넘는 순간 한 번만 수행됩니다. 사용량이
+`watermark - 최대 메시지 payload(약 32MiB)` 아래로 내려가야 pressure가
+해제되므로, 경계에 머무는 heap이 admission을 반복적으로 여닫지 않습니다.
+(레퍼런스 `capacity.ex`와 동일한 hysteresis입니다.) Ownership reroute는 pressure보다 우선하므로 다른
 노드가 소유한 세션은 pressure 중에도 `409`로 안내됩니다.
 
 ### Capacity 조정
