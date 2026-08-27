@@ -30,11 +30,15 @@ import (
 type Relay struct {
 	Config Config
 
-	activeWebSockets          atomic.Int64
-	serverMu                  sync.Mutex
-	server                    *http.Server
-	mu                        sync.Mutex
-	sessions                  map[string]*relaySession
+	activeWebSockets atomic.Int64
+	serverMu         sync.Mutex
+	server           *http.Server
+	mu               sync.Mutex
+	sessions         map[string]*relaySession
+	// ownerSessions is the lock-free index used by the owner-call watchdog. A
+	// timeout must be able to find and close a session even when its owner call
+	// is the goroutine currently waiting for mu.
+	ownerSessions             sync.Map
 	framesForwarded           atomic.Int64
 	bytesForwarded            atomic.Int64
 	connectionRejections      atomic.Int64
@@ -70,6 +74,7 @@ type Relay struct {
 	// reach them; in-package tests shorten them.
 	controlSyncDelay  time.Duration
 	controlCloseDelay time.Duration
+	ownerCallTimeout  time.Duration
 	// shedBatch and shedHeapBefore carry memory-pressure shedding state between
 	// sampler ticks and are only touched from the sampling path.
 	shedBatch      int
@@ -139,6 +144,12 @@ type relaySession struct {
 	waiting map[string][]*relayDataWaiter
 	// watchdogFor is the control peer with a live watchdog stage-one timer.
 	watchdogFor *relayPeer
+	// ownerDone closes when the session owner has been killed by the owner-call
+	// watchdog. peers is published after every topology mutation so the watchdog
+	// never needs to take Relay.mu before closing attached sockets.
+	ownerDone   chan struct{}
+	ownerClosed atomic.Bool
+	peers       atomic.Value // stores []*relayPeer
 }
 
 type relayDataWaiter struct {
@@ -175,10 +186,43 @@ func NewRelay(config Config) (*Relay, error) {
 		moved:             make(map[string]bool),
 		controlSyncDelay:  controlSyncDelay,
 		controlCloseDelay: controlCloseDelay,
+		ownerCallTimeout:  ownerCallTimeout,
 		ownership:         ownership,
 	}
 	relay.draining.Store(config.Drain)
 	return relay, nil
+}
+
+func newRelaySession() *relaySession {
+	session := &relaySession{
+		clients:   map[string][]*relayPeer{},
+		data:      map[string]*relayPeer{},
+		waiting:   map[string][]*relayDataWaiter{},
+		ownerDone: make(chan struct{}),
+	}
+	session.peers.Store([]*relayPeer{})
+	return session
+}
+
+func (s *relaySession) publishPeersLocked() {
+	s.peers.Store(sessionPeers(s))
+}
+
+func (s *relaySession) peerSnapshot() []*relayPeer {
+	if value := s.peers.Load(); value != nil {
+		return append([]*relayPeer(nil), value.([]*relayPeer)...)
+	}
+	return nil
+}
+
+func (s *relaySession) markOwnerClosed() bool {
+	if !s.ownerClosed.CompareAndSwap(false, true) {
+		return false
+	}
+	if s.ownerDone != nil {
+		close(s.ownerDone)
+	}
+	return true
 }
 
 // BeginDrain closes this node to new sessions. Existing sessions are left to
@@ -413,6 +457,11 @@ func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connec
 		writer.WriteHeader(http.StatusConflict)
 		return Connection{}, nil, nil, false
 	}
+	if r.sessionOwnerClosed(connection.ServerID) {
+		r.connectionRejections.Add(1)
+		writeText(writer, http.StatusServiceUnavailable, "owner")
+		return Connection{}, nil, nil, false
+	}
 	// A drain refuses to claim a session this node does not already own;
 	// sockets joining an existing local session continue below.
 	if r.Draining() && (!found || !owner.ownedBy(r)) {
@@ -473,6 +522,15 @@ func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connec
 	}, true
 }
 
+func (r *Relay) sessionOwnerClosed(serverID string) bool {
+	value, ok := r.ownerSessions.Load(serverID)
+	if !ok {
+		return false
+	}
+	session, ok := value.(*relaySession)
+	return ok && session.ownerClosed.Load()
+}
+
 // attach places an upgraded socket into its session topology and performs the
 // notification each kind owes on arrival. It returns nil when the socket was
 // refused after the upgrade, in which case it is already closed and has no
@@ -482,13 +540,23 @@ func (r *Relay) attach(connection Connection, conn *websocket.Conn) *relayPeer {
 	r.mu.Lock()
 	peer.attachSeq.Store(r.nextSeq())
 	s := r.sessions[connection.ServerID]
+	if s == nil && r.moved[connection.ServerID] {
+		r.mu.Unlock()
+		_ = conn.Close(websocket.StatusServiceRestart, "Session expired")
+		return nil
+	}
 	if s == nil {
-		s = &relaySession{
-			clients: map[string][]*relayPeer{},
-			data:    map[string]*relayPeer{},
-			waiting: map[string][]*relayDataWaiter{},
-		}
+		s = newRelaySession()
 		r.sessions[connection.ServerID] = s
+		r.ownerSessions.Store(connection.ServerID, s)
+	} else if s.ownerClosed.Load() {
+		r.mu.Unlock()
+		_ = conn.Close(websocket.StatusServiceRestart, "Session owner moved")
+		return nil
+	} else if r.moved[connection.ServerID] {
+		r.mu.Unlock()
+		_ = conn.Close(websocket.StatusServiceRestart, "Session expired")
+		return nil
 	}
 	switch connection.kind() {
 	case peerV1Server, peerV1Client:
@@ -500,6 +568,7 @@ func (r *Relay) attach(connection Connection, conn *websocket.Conn) *relayPeer {
 		} else {
 			replaced, s.v1Client = s.v1Client, peer
 		}
+		s.publishPeersLocked()
 		r.mu.Unlock()
 		closeReplaced(replaced)
 	case peerControl:
@@ -507,20 +576,17 @@ func (r *Relay) attach(connection Connection, conn *websocket.Conn) *relayPeer {
 		s.control = peer
 		ids := clientRouteIDsLocked(s)
 		r.armControlWatchdogLocked(s, peer)
+		s.publishPeersLocked()
 		r.mu.Unlock()
 		closeReplaced(replaced)
 		r.sendSync(peer, ids)
 	case peerV2Client:
-		if r.moved[connection.ServerID] {
-			r.mu.Unlock()
-			_ = conn.Close(websocket.StatusServiceRestart, "Session expired")
-			return nil
-		}
 		// Clients coexist on one route, so a second client is an addition and
 		// never replaces the first.
 		s.clients[connection.ConnectionID] = append(s.clients[connection.ConnectionID], peer)
 		control := s.control
 		r.armControlWatchdogLocked(s, control)
+		s.publishPeersLocked()
 		r.mu.Unlock()
 		if control != nil {
 			_ = r.sendControl(control, connectedFrame(connection.ConnectionID))
@@ -530,6 +596,7 @@ func (r *Relay) attach(connection Connection, conn *websocket.Conn) *relayPeer {
 		s.data[connection.ConnectionID] = peer
 		waiting := append([]*relayDataWaiter(nil), s.waiting[connection.ConnectionID]...)
 		delete(s.waiting, connection.ConnectionID)
+		s.publishPeersLocked()
 		r.mu.Unlock()
 		closeReplaced(replaced)
 		for _, waiter := range waiting {
@@ -828,6 +895,70 @@ func closeAsync(conn *websocket.Conn, code websocket.StatusCode, reason string) 
 	go func() { _ = conn.Close(code, reason) }()
 }
 
+// timeoutSessionOwner is the kill half of the owner-call watchdog. It closes
+// the published peer snapshot before taking Relay.mu, because the stalled
+// owner call may itself be waiting for that mutex.
+func (r *Relay) timeoutSessionOwner(serverID string, expected *relaySession) {
+	var session *relaySession
+	if expected != nil {
+		session = expected
+		if value, ok := r.ownerSessions.Load(serverID); ok && value != session {
+			return
+		}
+	} else {
+		value, ok := r.ownerSessions.Load(serverID)
+		if !ok {
+			return
+		}
+		session, _ = value.(*relaySession)
+	}
+	if session == nil || !session.markOwnerClosed() {
+		return
+	}
+	for _, peer := range session.peerSnapshot() {
+		closeAsync(peer.conn, websocket.StatusServiceRestart, "Session owner moved")
+	}
+	go r.finishTimedOutSession(serverID, session)
+}
+
+// finishTimedOutSession drains waiters and releases the ownership record after
+// the immediate socket kill. Keeping the moved marker until release prevents a
+// new upgrade from claiming the old owner while cleanup is still in flight.
+func (r *Relay) finishTimedOutSession(serverID string, session *relaySession) {
+	r.mu.Lock()
+	if r.sessions[serverID] != session {
+		r.mu.Unlock()
+		return
+	}
+	r.moved[serverID] = true
+	var waiting []*relayDataWaiter
+	for connectionID, routeWaiters := range session.waiting {
+		waiting = append(waiting, routeWaiters...)
+		delete(session.waiting, connectionID)
+	}
+	peers := session.peerSnapshot()
+	r.mu.Unlock()
+
+	notifyDataWaiters(waiting, relayDataWaitResult{
+		code:   websocket.StatusServiceRestart,
+		reason: "Session owner moved",
+	})
+	for _, peer := range peers {
+		closeAsync(peer.conn, websocket.StatusServiceRestart, "Session owner moved")
+	}
+	_ = r.ownership.release(serverID, r)
+
+	r.mu.Lock()
+	if r.sessions[serverID] == session {
+		delete(r.sessions, serverID)
+		if value, ok := r.ownerSessions.Load(serverID); ok && value == session {
+			r.ownerSessions.Delete(serverID)
+		}
+		delete(r.moved, serverID)
+	}
+	r.mu.Unlock()
+}
+
 // handshakeKind classifies a decoded frame, reporting false when the frame is
 // not a handshake at all.
 func handshakeKind(frame handshakeFrame) (int, bool) {
@@ -968,43 +1099,12 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 	source.blockSeq.Store(r.nextSeq())
 	defer source.blockSeq.Store(0)
 	deadline := time.Now().Add(time.Duration(r.Config.DeliveryTimeoutMS) * time.Millisecond)
-	r.mu.Lock()
-	s := r.sessions[c.ServerID]
-	var destinations []*relayPeer
-	switch c.kind() {
-	case peerV1Server, peerV1Client:
-		if s != nil {
-			peer := s.v1
-			if c.Role != RoleClient {
-				peer = s.v1Client
-			}
-			if peer != nil {
-				destinations = []*relayPeer{peer}
-			}
-		}
-	case peerV2Client:
-		if s != nil && s.data[c.ConnectionID] != nil {
-			destinations = []*relayPeer{s.data[c.ConnectionID]}
-		}
-	case peerV2Data:
-		// Route slices are appended to or replaced wholesale, never mutated in
-		// place, so the map value can be shared with the fan-out without copying.
-		if s != nil {
-			destinations = s.clients[c.ConnectionID]
-		}
-	case peerControl:
-		// A control frame that is not a ping has nowhere to go.
+	ownerResult := r.ownerDestinations(c, source, deadline)
+	if ownerResult.code != 0 {
+		closeAsync(source.conn, ownerResult.code, ownerResult.reason)
+		return
 	}
-	r.mu.Unlock()
-
-	if c.kind() == peerV2Client && len(destinations) == 0 {
-		destination, code, reason := r.dataDestinationOrWait(c.ServerID, c.ConnectionID, source, deadline)
-		if code != 0 {
-			closeAsync(source.conn, code, reason)
-			return
-		}
-		destinations = []*relayPeer{destination}
-	}
+	destinations := ownerResult.destinations
 
 	// One surviving destination is enough: forward closes a slow destination
 	// itself, and only an entirely failed fan-out reaches back to the source.
@@ -1038,7 +1138,88 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 // timeout is the earlier of the remaining delivery deadline and the configured
 // data-attach timeout, so waiting cannot grant the subsequent write a fresh
 // delivery budget.
-func (r *Relay) dataDestinationOrWait(serverID, connectionID string, source *relayPeer, deadline time.Time) (*relayPeer, websocket.StatusCode, string) {
+type ownerDestinationsResult struct {
+	destinations []*relayPeer
+	code         websocket.StatusCode
+	reason       string
+}
+
+func ownerMovedResult() ownerDestinationsResult {
+	return ownerDestinationsResult{
+		code:   websocket.StatusServiceRestart,
+		reason: "Session owner moved",
+	}
+}
+
+// ownerDestinations bounds the session-owner operation independently of the
+// delivery deadline. The reference kills an owner whose call does not return
+// within five seconds; the timeout path therefore closes the whole session,
+// not only the source that happened to make the call.
+func (r *Relay) ownerDestinations(c Connection, source *relayPeer, deadline time.Time) ownerDestinationsResult {
+	var expected *relaySession
+	if value, ok := r.ownerSessions.Load(c.ServerID); ok {
+		expected, _ = value.(*relaySession)
+	}
+	result := make(chan ownerDestinationsResult, 1)
+	go func() {
+		result <- r.ownerDestinationsCall(c, source, deadline)
+	}()
+	timeout := r.ownerCallTimeout
+	if timeout <= 0 {
+		timeout = ownerCallTimeout
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case value := <-result:
+		return value
+	case <-timer.C:
+		r.timeoutSessionOwner(c.ServerID, expected)
+		return ownerMovedResult()
+	}
+}
+
+func (r *Relay) ownerDestinationsCall(c Connection, source *relayPeer, deadline time.Time) ownerDestinationsResult {
+	r.mu.Lock()
+	s := r.sessions[c.ServerID]
+	if s == nil || s.ownerClosed.Load() || r.moved[c.ServerID] {
+		r.mu.Unlock()
+		return ownerMovedResult()
+	}
+	var destinations []*relayPeer
+	switch c.kind() {
+	case peerV1Server, peerV1Client:
+		peer := s.v1
+		if c.Role != RoleClient {
+			peer = s.v1Client
+		}
+		if peer != nil {
+			destinations = []*relayPeer{peer}
+		}
+	case peerV2Client:
+		if s.data[c.ConnectionID] != nil {
+			destinations = []*relayPeer{s.data[c.ConnectionID]}
+		}
+	case peerV2Data:
+		// Route slices are appended to or replaced wholesale, never mutated in
+		// place, so the map value can be shared with the fan-out without copying.
+		destinations = s.clients[c.ConnectionID]
+	case peerControl:
+		// A control frame that is not a ping has nowhere to go.
+	}
+	r.mu.Unlock()
+
+	if c.kind() == peerV2Client && len(destinations) == 0 {
+		destination, code, reason := r.dataDestinationOrWait(s, c.ConnectionID, source, deadline)
+		if code != 0 {
+			return ownerDestinationsResult{code: code, reason: reason}
+		}
+		destinations = []*relayPeer{destination}
+	}
+	return ownerDestinationsResult{destinations: destinations}
+}
+
+func (r *Relay) dataDestinationOrWait(s *relaySession, connectionID string, source *relayPeer, deadline time.Time) (*relayPeer, websocket.StatusCode, string) {
 	now := time.Now()
 	attachDeadline := now.Add(time.Duration(r.Config.DataAttachTimeoutMS) * time.Millisecond)
 	timeoutAt := deadline
@@ -1053,10 +1234,9 @@ func (r *Relay) dataDestinationOrWait(serverID, connectionID string, source *rel
 
 	waiter := &relayDataWaiter{source: source, ready: make(chan relayDataWaitResult, 1)}
 	r.mu.Lock()
-	s := r.sessions[serverID]
-	if s == nil {
+	if s.ownerClosed.Load() {
 		r.mu.Unlock()
-		return nil, websocket.StatusTryAgainLater, "Delivery unavailable"
+		return nil, websocket.StatusServiceRestart, "Session owner moved"
 	}
 	if destination := s.data[connectionID]; destination != nil {
 		r.mu.Unlock()
@@ -1073,10 +1253,19 @@ func (r *Relay) dataDestinationOrWait(serverID, connectionID string, source *rel
 	select {
 	case result := <-waiter.ready:
 		return result.destination, result.code, result.reason
+	case <-s.ownerDone:
+		r.mu.Lock()
+		removeDataWaiterLocked(s, connectionID, waiter)
+		r.mu.Unlock()
+		return nil, websocket.StatusServiceRestart, "Session owner moved"
 	case <-timer.C:
 		r.mu.Lock()
+		ownerClosed := s.ownerClosed.Load()
 		removed := removeDataWaiterLocked(s, connectionID, waiter)
 		r.mu.Unlock()
+		if ownerClosed {
+			return nil, websocket.StatusServiceRestart, "Session owner moved"
+		}
 		if removed {
 			return nil, timeoutCode, timeoutReason
 		}
@@ -1160,6 +1349,7 @@ func (r *Relay) removePeer(c Connection, p *relayPeer) {
 			data := s.data[c.ConnectionID]
 			delete(s.data, c.ConnectionID)
 			control := s.control
+			s.publishPeersLocked()
 			r.reclaimSessionLocked(c.ServerID, s)
 			r.mu.Unlock()
 			if data != nil {
@@ -1178,6 +1368,7 @@ func (r *Relay) removePeer(c Connection, p *relayPeer) {
 			orphaned := s.clients[c.ConnectionID]
 			waiting := append([]*relayDataWaiter(nil), s.waiting[c.ConnectionID]...)
 			delete(s.waiting, c.ConnectionID)
+			s.publishPeersLocked()
 			r.reclaimSessionLocked(c.ServerID, s)
 			r.mu.Unlock()
 			notifyDataWaiters(waiting, relayDataWaitResult{
@@ -1190,6 +1381,7 @@ func (r *Relay) removePeer(c Connection, p *relayPeer) {
 			return
 		}
 	}
+	s.publishPeersLocked()
 	r.reclaimSessionLocked(c.ServerID, s)
 	r.mu.Unlock()
 }
@@ -1216,6 +1408,9 @@ func detachClientLocked(s *relaySession, connectionID string, p *relayPeer) (rem
 func (r *Relay) reclaimSessionLocked(serverID string, s *relaySession) {
 	if s.v1 == nil && s.v1Client == nil && s.control == nil && len(s.clients) == 0 && len(s.data) == 0 && len(s.waiting) == 0 {
 		delete(r.sessions, serverID)
+		if value, ok := r.ownerSessions.Load(serverID); ok && value == s {
+			r.ownerSessions.Delete(serverID)
+		}
 		delete(r.moved, serverID)
 		_ = r.ownership.release(serverID, r)
 	}
@@ -1298,6 +1493,7 @@ const (
 	// re-send the control socket has to produce one.
 	controlSyncDelay  = 10 * time.Second
 	controlCloseDelay = 5 * time.Second
+	ownerCallTimeout  = 5 * time.Second
 )
 
 // readMemoryMetrics reads the named runtime/metrics uint64 samples in order.
@@ -1523,6 +1719,7 @@ func (r *Relay) closeLostSessions() {
 		r.moved[serverID] = true
 		var waiting []*relayDataWaiter
 		if session != nil {
+			session.markOwnerClosed()
 			for connectionID, routeWaiters := range session.waiting {
 				waiting = append(waiting, routeWaiters...)
 				delete(session.waiting, connectionID)

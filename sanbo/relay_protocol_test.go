@@ -337,6 +337,46 @@ func TestRelayV2SocketsFailClosedWhenSessionOwnerExits(t *testing.T) {
 	assertRelayClose(t, control, websocket.StatusServiceRestart, "Session owner moved")
 }
 
+func TestRelayOwnerCallWatchdogClosesEveryAttachedSocket(t *testing.T) {
+	relay := mustNewRelay(t, DefaultConfig())
+	relay.ownerCallTimeout = 20 * time.Millisecond
+	server := httptestServerForRelay(t, relay)
+	serverID := "owner-call-watchdog"
+	daemon := dialRelay(t, server, serverID, RoleServer, 1, "")
+	client := dialRelay(t, server, serverID, RoleClient, 1, "")
+
+	// Hold the session lock after both sockets are attached. The owner-side
+	// destination call is now stalled in the same place a slow owner operation
+	// would be, while the watchdog must still close the published peer snapshot.
+	relay.mu.Lock()
+	writeDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		writeDone <- client.Write(ctx, websocket.MessageText, []byte("stalled"))
+	}()
+	eventually(t, time.Second, func() bool {
+		value, ok := relay.ownerSessions.Load(serverID)
+		if !ok {
+			return false
+		}
+		session, ok := value.(*relaySession)
+		return ok && session.ownerClosed.Load()
+	})
+	assertRelayClose(t, daemon, websocket.StatusServiceRestart, "Session owner moved")
+	assertRelayClose(t, client, websocket.StatusServiceRestart, "Session owner moved")
+	relay.mu.Unlock()
+
+	select {
+	case <-writeDone:
+	case <-time.After(time.Second):
+		t.Fatal("stalled owner-call write did not unwind")
+	}
+	eventually(t, time.Second, func() bool {
+		return relay.activeWebSockets.Load() == 0 && !relayHasSession(relay, serverID)
+	})
+}
+
 func TestRelayV2SocketInitializationFailsClosedWhenOwnerMoves(t *testing.T) {
 	relay := mustNewRelay(t, DefaultConfig())
 	server := httptestServerForRelay(t, relay)
