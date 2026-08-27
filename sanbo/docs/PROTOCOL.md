@@ -240,7 +240,8 @@ pressure는 메모리가 `watermark - 최대 메시지 크기`(recovery threshol
 각 WebSocket 소켓 프로세스에는 `PASEO_RELAY_WEBSOCKET_MAX_HEAP_WORDS`(기본
 33,554,432 words) 힙 상한이 `kill: true`로 걸려 있다. 이 상한을 넘긴 소켓은
 close frame 없이 종료되므로, 클라이언트는 정상 close code 없는 연결 종료도
-처리할 수 있어야 한다.
+처리할 수 있어야 한다. Go 구현이 이 상한을 어떻게 재는지는 아래
+“소켓별 힙 상한의 등가 구현”을 참고한다.
 
 ## 실패와 close code
 
@@ -317,13 +318,51 @@ Go 소스 또는 실제 실행으로 확인한 것이다.
 | 항목 | 참조(Elixir) | sanbo(Go) |
 | --- | --- | --- |
 | `connectionId`당 client roster | map key 순서 | `sync`의 `connectionIds`를 정렬해 보낸다. 계약이 순서를 보장하지 않으므로 호환 범위 안이다 |
-| 소켓별 힙 상한 | `websocket_max_heap_words`로 강제 종료 | 미구현. 설정값은 호환을 위해 파싱만 한다 |
-| 503 본문 | 위 표의 7종 | `cluster ownership unavailable`, `relay capacity unavailable` 2종 |
+| 소켓별 힙 상한 | BEAM 소켓 프로세스의 `max_heap_size` (`kill: true`) | 소켓별 **메모리 회계**로 등가 구현. 아래 참고 |
+| 503 본문 | 위 표의 7종 | `draining`, `cluster ownership unavailable`, `relay capacity unavailable` 3종 |
 
 client fan-out, control 초기 `sync` roster, 10초/5초 control watchdog, handshake
-좌표 범위 검사, batch 단위 메모리 pressure shedding은 계약대로 동작한다. 남은 두
-항목은 관찰 가능한 wire 동작이 아니라 운영 세부(힙 상한)와 진단 문자열(503 본문)의
-차이다.
+좌표 범위 검사, batch 단위 메모리 pressure shedding, 단일 보유 role의 소켓 교체,
+data 소켓 해제 시 client 정리, control queue 상한, pressure 중 admission/delivery
+거부, shedding 희생자 선정 순서, 런타임 drain은 계약대로 동작한다.
+
+### 소켓별 힙 상한의 등가 구현
+
+Go에는 프로세스별 힙이 없으므로 `PASEO_RELAY_WEBSOCKET_MAX_HEAP_WORDS`를 소켓별
+메모리 회계로 대체했다. 상한은 `words × 8` bytes이며, 각 소켓에 대해 다음을
+합산한다.
+
+- 그 소켓이 라우팅 중인 프레임의 payload bytes
+- data 소켓 부착을 기다리며 그 소켓 몫으로 버퍼링된 프레임의 payload bytes
+- 그 소켓으로 나가는 write에 들어간 payload bytes와, 진행 중인 write 뒤에 큐잉된
+  control 알림 bytes
+
+합계가 상한을 넘으면 **그 소켓만** close frame 없이 즉시 끊는다(`CloseNow`).
+클라이언트가 관찰하는 결과 — “close code 없는 연결 종료” — 는 참조와 같다.
+
+정확한 등가가 아닌 부분:
+
+- 참조는 BEAM 힙 전체(스택, 프로세스 힙, 공유 binary 포함)를 재는 반면 Go 회계는
+  릴레이가 그 소켓 몫으로 명시적으로 붙잡고 있는 payload 메모리만 잰다. 따라서
+  Go 쪽 값이 항상 더 작고, 같은 설정값에서 퓨즈가 더 늦게 걸린다.
+- 참조는 힙 초과를 스케줄러가 감지해 프로세스를 죽이므로 시점이 GC와 묶여 있다.
+  Go는 회계 시점(프레임 라우팅 시작, write 시작)에만 판정한다.
+- 참조의 `words`는 BEAM word 크기에 의존한다. Go는 64-bit word(8 bytes)로 고정
+  해석한다.
+
+### 런타임 drain
+
+drain은 참조와 마찬가지로 **프로세스 로컬 admission 상태**이며, drain 전용 HTTP
+엔드포인트는 없다(`references/paseo-relay/OPERATIONS.md:99-101`). 부팅 시
+`PASEO_RELAY_DRAIN`으로 초기화되고, 실행 중에는 `Relay.BeginDrain()` /
+`Relay.CancelDrain()` / `Relay.Draining()`으로 토글한다.
+
+drain 중에는:
+
+- `/ready`가 `503`이 되고 `paseo_relay_draining`이 `1`이 된다.
+- 이 노드가 아직 소유하지 않은 `serverId`의 신규 upgrade는 `503 draining`이다.
+- 이미 이 노드가 소유한 세션은 유지되며, 그 세션에 붙는 새 소켓도 계속 받는다.
+  노드가 한 번에 끊기지 않고 점진적으로 비워지도록 하기 위한 것이다.
 
 ## 소스 근거
 

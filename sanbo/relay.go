@@ -55,8 +55,14 @@ type Relay struct {
 	listenerEpoch             atomic.Int64
 	capacityUnavailable       atomic.Bool
 	memoryPressure            atomic.Bool
-	stalled                   map[string]bool
-	moved                     map[string]bool
+	// draining is process-local admission state, seeded from PASEO_RELAY_DRAIN
+	// and toggled at runtime through BeginDrain/CancelDrain. As in the
+	// reference there is no drain HTTP endpoint.
+	draining atomic.Bool
+	// seq issues the monotonic ordering keys peers are shed by.
+	seq     atomic.Int64
+	stalled map[string]bool
+	moved   map[string]bool
 	// controlSyncDelay and controlCloseDelay are the two control-watchdog
 	// stages. They are unexported and set by NewRelay so no environment can
 	// reach them; in-package tests shorten them.
@@ -77,11 +83,40 @@ type relayPeer struct {
 	// shed marks a peer already chosen by memory-pressure shedding, which runs
 	// again before the closed socket has left the session. Guarded by Relay.mu.
 	shed bool
+	// attachSeq and blockSeq are the monotonic ordering keys memory-pressure
+	// shedding picks victims by: the longest-blocked source first, then the
+	// newest attached socket. blockSeq is zero while the socket has no delivery
+	// in flight.
+	attachSeq atomic.Int64
+	blockSeq  atomic.Int64
+	// controlQueued is the byte size of control notifications waiting behind an
+	// in-flight write on this socket, bounded by PASEO_RELAY_CONTROL_QUEUE_BYTES.
+	controlQueued atomic.Int64
+	// heapBytes is the payload memory currently held on this socket's behalf:
+	// its in-flight frame, the frames buffered for it, and the control
+	// notifications queued to it. It stands in for the reference's per-process
+	// max_heap_size fuse.
+	heapBytes atomic.Int64
 }
 
 func newRelayPeer(conn *websocket.Conn) *relayPeer {
 	return &relayPeer{conn: conn, writeSlot: make(chan struct{}, 1)}
 }
+
+// chargeHeap accounts bytes against this socket's heap fuse, reporting false
+// when the socket has exceeded it. A socket over the fuse is killed outright
+// rather than closed, mirroring a BEAM socket process reaching max_heap_size
+// with kill: true — the peer sees a transport-level disconnect, not a close
+// frame.
+func (p *relayPeer) chargeHeap(bytes, limit int64) bool {
+	if reserveCounter(&p.heapBytes, bytes, limit) {
+		return true
+	}
+	go p.conn.CloseNow()
+	return false
+}
+
+func (p *relayPeer) releaseHeap(bytes int64) { p.heapBytes.Add(-bytes) }
 
 type relaySession struct {
 	v1       *relayPeer
@@ -100,12 +135,18 @@ type relaySession struct {
 type relayMessage struct {
 	typ     websocket.MessageType
 	payload []byte
+	// source is the client socket the frame was buffered for; its heap charge
+	// is held until the frame is forwarded or the buffer is dropped.
+	source *relayPeer
 }
 
 // dropBufferLocked removes all buffered-route state for connectionID and
 // returns the ingress bytes the buffer had reserved. Callers hold r.mu.
 func (s *relaySession) dropBufferLocked(connectionID string) int64 {
 	reserved := s.bufferBytes[connectionID]
+	for _, message := range s.buffer[connectionID] {
+		message.source.releaseHeap(int64(len(message.payload)))
+	}
 	delete(s.buffer, connectionID)
 	delete(s.bufferBytes, connectionID)
 	if timer := s.bufferTimers[connectionID]; timer != nil {
@@ -121,7 +162,7 @@ func NewRelay(config Config) *Relay {
 	if err != nil {
 		ownership = &failedOwnershipCoordinator{err: err}
 	}
-	return &Relay{
+	relay := &Relay{
 		Config:            config,
 		sessions:          make(map[string]*relaySession),
 		stalled:           make(map[string]bool),
@@ -130,7 +171,25 @@ func NewRelay(config Config) *Relay {
 		controlCloseDelay: controlCloseDelay,
 		ownership:         ownership,
 	}
+	relay.draining.Store(config.Drain)
+	return relay
 }
+
+// BeginDrain closes this node to new sessions. Existing sessions are left to
+// the routing layer, which keeps serving them.
+func (r *Relay) BeginDrain() { r.draining.Store(true) }
+
+// CancelDrain reopens this node to new sessions.
+func (r *Relay) CancelDrain() { r.draining.Store(false) }
+
+// Draining reports the current process-local drain state.
+func (r *Relay) Draining() bool { return r.draining.Load() }
+
+// nextSeq issues the next monotonic ordering key.
+func (r *Relay) nextSeq() int64 { return r.seq.Add(1) }
+
+// heapFuse is the per-socket memory ceiling in bytes.
+func (r *Relay) heapFuse() int64 { return int64(r.Config.WebsocketMaxHeapWords) * 8 }
 
 // Start listens and blocks until the relay is stopped or fails.
 func (r *Relay) Start() error {
@@ -230,7 +289,7 @@ func (r *Relay) handleMetrics(writer http.ResponseWriter, _ *http.Request) {
 		ready = 1
 	}
 	draining := 0
-	if r.Config.Drain {
+	if r.Draining() {
 		draining = 1
 	}
 
@@ -294,6 +353,15 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		http.Error(writer, "relay capacity unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	// A drain only refuses to claim a session this node does not already own;
+	// sockets joining an existing session keep being served so the node can be
+	// emptied gradually rather than cut off.
+	if r.Draining() {
+		if _, owned, err := r.ownership.lookup(connection.ServerID); err != nil || !owned {
+			writeText(writer, http.StatusServiceUnavailable, "draining")
+			return
+		}
+	}
 	owner, acquired, err := r.ownership.claim(connection.ServerID, r)
 	if err != nil {
 		r.connectionRejections.Add(1)
@@ -346,23 +414,30 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 	conn.SetReadLimit(readLimit)
 	peer := newRelayPeer(conn)
 	r.mu.Lock()
+	peer.attachSeq.Store(r.nextSeq())
 	s := r.sessions[connection.ServerID]
 	if s == nil {
 		s = &relaySession{clients: map[string][]*relayPeer{}, data: map[string]*relayPeer{}, buffer: map[string][]relayMessage{}, bufferBytes: map[string]int64{}, bufferTimers: map[string]*time.Timer{}}
 		r.sessions[connection.ServerID] = s
 	}
 	if connection.Version == 1 {
+		// One socket per role per session: attaching replaces whatever held the
+		// role before.
+		var replaced *relayPeer
 		if connection.Role == RoleServer {
-			s.v1 = peer
+			replaced, s.v1 = s.v1, peer
 		} else {
-			s.v1Client = peer
+			replaced, s.v1Client = s.v1Client, peer
 		}
 		r.mu.Unlock()
+		closeReplaced(replaced)
 	} else if connection.isControl() {
+		replaced := s.control
 		s.control = peer
 		ids := clientRouteIDsLocked(s)
 		r.armControlWatchdogLocked(s, peer)
 		r.mu.Unlock()
+		closeReplaced(replaced)
 		r.sendSync(peer, ids)
 	} else if connection.Role == RoleClient {
 		if r.moved[connection.ServerID] {
@@ -377,20 +452,24 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		r.armControlWatchdogLocked(s, control)
 		r.mu.Unlock()
 		if control != nil {
-			r.send(control, websocket.MessageText, []byte(`{"type":"connected","connectionId":"`+connection.ConnectionID+`"}`))
+			_ = r.sendControl(control, []byte(`{"type":"connected","connectionId":"`+connection.ConnectionID+`"}`))
 		}
 	} else {
-		old := s.data[connection.ConnectionID]
+		replaced := s.data[connection.ConnectionID]
 		s.data[connection.ConnectionID] = peer
 		buffered := s.buffer[connection.ConnectionID]
+		// The buffered frames are forwarded below, so their heap charge outlives
+		// dropBufferLocked and is retired per frame afterwards.
+		for _, m := range buffered {
+			m.source.heapBytes.Add(int64(len(m.payload)))
+		}
 		bufferedBytes := s.dropBufferLocked(connection.ConnectionID)
 		r.ingressReserved.Add(-bufferedBytes)
 		r.mu.Unlock()
-		if old != nil {
-			_ = old.conn.Close(websocket.StatusPolicyViolation, "Replaced by new connection")
-		}
+		closeReplaced(replaced)
 		for _, m := range buffered {
 			_ = r.forward(peer, m.typ, m.payload)
+			m.source.releaseHeap(int64(len(m.payload)))
 		}
 	}
 	defer func() { r.removePeer(connection, peer) }()
@@ -408,6 +487,13 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 			return
 		}
 		r.observeFrame(len(payload))
+		// Message admission runs before the handshake check, as in the
+		// reference: a node under memory pressure, or a socket already picked
+		// by shedding, stops accepting inbound work entirely.
+		if r.admitsMessage(connection, typ, peer) != nil {
+			_ = conn.Close(websocket.StatusTryAgainLater, "Relay ingress capacity")
+			return
+		}
 		if connection.Role == RoleClient && !r.validateHandshake(connection.Version, payload) {
 			_ = conn.Close(websocket.StatusPolicyViolation, "Invalid handshake key")
 			return
@@ -450,7 +536,7 @@ func (r *Relay) sendSync(control *relayPeer, ids []string) {
 		Type          string   `json:"type"`
 		ConnectionIDs []string `json:"connectionIds"`
 	}{Type: "sync", ConnectionIDs: ids})
-	_ = r.send(control, websocket.MessageText, b)
+	_ = r.sendControl(control, b)
 }
 
 func waitingForDataLocked(s *relaySession) bool {
@@ -515,7 +601,76 @@ func (r *Relay) send(p *relayPeer, typ websocket.MessageType, b []byte) error {
 		return context.DeadlineExceeded
 	}
 	defer func() { <-p.writeSlot }()
+	if !p.chargeHeap(int64(len(b)), r.heapFuse()) {
+		return errHeapFuse
+	}
+	defer p.releaseHeap(int64(len(b)))
 	return p.conn.Write(ctx, typ, b)
+}
+
+var (
+	// errControlQueue reports a destination whose queued control notifications
+	// passed PASEO_RELAY_CONTROL_QUEUE_BYTES.
+	errControlQueue = errors.New("control queue exhausted")
+	// errHeapFuse reports a socket killed by its per-socket memory ceiling.
+	errHeapFuse = errors.New("socket heap fuse")
+)
+
+// sendControl delivers a control notification. Control frames queue behind an
+// in-flight payload write rather than being dropped, but the queue is bounded
+// by PASEO_RELAY_CONTROL_QUEUE_BYTES: a destination that cannot keep up is a
+// slow consumer and is closed instead of allowed to accumulate.
+func (r *Relay) sendControl(p *relayPeer, b []byte) error {
+	if p == nil {
+		return nil
+	}
+	// An idle writer starts the notification immediately, which is the only
+	// path the queue bound does not apply to.
+	select {
+	case p.writeSlot <- struct{}{}:
+		defer func() { <-p.writeSlot }()
+		return r.writeControl(p, b)
+	default:
+	}
+	queued := int64(len(b))
+	if !reserveCounter(&p.controlQueued, queued, int64(r.Config.ControlQueueBytes)) {
+		r.slowConsumerDisconnects.Add(1)
+		closeAsync(p.conn, websocket.StatusTryAgainLater, "Slow consumer")
+		return errControlQueue
+	}
+	defer p.controlQueued.Add(-queued)
+	if !p.chargeHeap(queued, r.heapFuse()) {
+		return errHeapFuse
+	}
+	defer p.releaseHeap(queued)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(r.Config.DeliveryTimeoutMS)*time.Millisecond)
+	defer cancel()
+	select {
+	case p.writeSlot <- struct{}{}:
+	case <-ctx.Done():
+		r.deliveryTimeouts.Add(1)
+		r.slowConsumerDisconnects.Add(1)
+		closeAsync(p.conn, websocket.StatusTryAgainLater, "Slow consumer")
+		return context.DeadlineExceeded
+	}
+	defer func() { <-p.writeSlot }()
+	return r.writeControl(p, b)
+}
+
+// writeControl performs the write itself; callers hold the destination's write
+// slot. A write that misses its deadline is the same slow consumer the queue
+// bound catches earlier.
+func (r *Relay) writeControl(p *relayPeer, b []byte) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(r.Config.DeliveryTimeoutMS)*time.Millisecond)
+	defer cancel()
+	if err := p.conn.Write(ctx, websocket.MessageText, b); err != nil {
+		r.deliveryTimeouts.Add(1)
+		r.slowConsumerDisconnects.Add(1)
+		closeAsync(p.conn, websocket.StatusTryAgainLater, "Slow consumer")
+		return err
+	}
+	return nil
 }
 
 func (r *Relay) forward(p *relayPeer, typ websocket.MessageType, b []byte) error {
@@ -537,6 +692,15 @@ func (r *Relay) forward(p *relayPeer, typ websocket.MessageType, b []byte) error
 	r.capacityEpoch.Add(1)
 	closeAsync(p.conn, websocket.StatusTryAgainLater, "Slow consumer")
 	return err
+}
+
+// closeReplaced retires the socket a new attach displaced. Every role that
+// holds exactly one socket per session — both v1 peers, the v2 control socket,
+// and a v2 data socket — is replaced this way.
+func closeReplaced(replaced *relayPeer) {
+	if replaced != nil {
+		closeAsync(replaced.conn, websocket.StatusPolicyViolation, "Replaced by new connection")
+	}
 }
 
 // closeAsync closes conn off the calling path: Close waits for the peer's
@@ -664,12 +828,54 @@ func (r *Relay) validateHandshake(version int, b []byte) bool {
 	return accepted
 }
 
+// admitsMessage is the inbound admission gate. It reports the reason a frame
+// cannot be accepted, or nil when it can. Memory pressure and a socket already
+// picked by shedding both close the door; the reference discards a control
+// socket's binary frames before admission, so those are never charged.
+func (r *Relay) admitsMessage(c Connection, typ websocket.MessageType, source *relayPeer) error {
+	if c.isControl() && typ != websocket.MessageText {
+		return nil
+	}
+	if r.memoryPressure.Load() {
+		return errMemoryPressure
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if source.shed {
+		return errShedding
+	}
+	return nil
+}
+
+var (
+	// errMemoryPressure reports admission or delivery refused while the node is
+	// over its memory watermark.
+	errMemoryPressure = errors.New("relay memory pressure")
+	// errShedding reports a socket already chosen by memory-pressure shedding.
+	errShedding = errors.New("socket shedding")
+)
+
 func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType, b []byte) {
 	weighted := int64(len(b) * r.Config.IngressWeight)
 	if !r.reserveIngress(weighted) {
 		_ = source.conn.Close(websocket.StatusTryAgainLater, "Relay ingress capacity")
 		return
 	}
+	// Pressure that arrives between admission and delivery stops the message
+	// here instead, which the reference reports with its own close reason.
+	if r.admitsMessage(c, typ, source) != nil {
+		r.releaseInFlight(weighted)
+		_ = source.conn.Close(websocket.StatusTryAgainLater, "Relay memory pressure")
+		return
+	}
+	if !source.chargeHeap(int64(len(b)), r.heapFuse()) {
+		r.releaseInFlight(weighted)
+		return
+	}
+	// A source with a delivery in flight is blocked, and shedding drops the
+	// longest-blocked source first.
+	source.blockSeq.Store(r.nextSeq())
+	defer source.blockSeq.Store(0)
 	r.mu.Lock()
 	s := r.sessions[c.ServerID]
 	var destinations []*relayPeer
@@ -687,7 +893,7 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 			destinations = []*relayPeer{d}
 		} else {
 			buffered = true
-			s.buffer[c.ConnectionID] = append(s.buffer[c.ConnectionID], relayMessage{typ: typ, payload: append([]byte(nil), b...)})
+			s.buffer[c.ConnectionID] = append(s.buffer[c.ConnectionID], relayMessage{typ: typ, payload: append([]byte(nil), b...), source: source})
 			s.bufferBytes[c.ConnectionID] += weighted
 			r.ingressInFlight.Add(-weighted)
 			if s.bufferTimers[c.ConnectionID] == nil {
@@ -727,9 +933,11 @@ func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType
 	if len(destinations) > 0 && !delivered {
 		_ = source.conn.Close(websocket.StatusTryAgainLater, "Delivery unavailable")
 	}
-	// A buffered frame keeps its reservation until attach or expiry retires it.
+	// A buffered frame keeps its reservation, and its source's heap charge,
+	// until attach or expiry retires it.
 	if !buffered {
 		r.releaseInFlight(weighted)
+		source.releaseHeap(int64(len(b)))
 	}
 }
 
@@ -797,12 +1005,21 @@ func (r *Relay) removePeer(c Connection, p *relayPeer) {
 				_ = data.conn.Close(websocket.StatusGoingAway, "Client disconnected")
 			}
 			if control != nil {
-				r.send(control, websocket.MessageText, []byte(`{"type":"disconnected","connectionId":"`+c.ConnectionID+`"}`))
+				_ = r.sendControl(control, []byte(`{"type":"disconnected","connectionId":"`+c.ConnectionID+`"}`))
 			}
 			return
 		}
+		// A route without its data socket cannot be served, so the clients on it
+		// are told the daemon side is gone rather than left waiting.
 		if s.data[c.ConnectionID] == p {
 			delete(s.data, c.ConnectionID)
+			orphaned := s.clients[c.ConnectionID]
+			r.reclaimSessionLocked(c.ServerID, s)
+			r.mu.Unlock()
+			for _, client := range orphaned {
+				closeAsync(client.conn, websocket.StatusServiceRestart, "Server disconnected")
+			}
+			return
 		}
 	}
 	r.reclaimSessionLocked(c.ServerID, s)
@@ -838,12 +1055,14 @@ func (r *Relay) reclaimSessionLocked(serverID string, s *relaySession) {
 }
 
 func (r *Relay) ready() bool {
-	return r.readyForAdmission() && r.activeWebSockets.Load() < int64(r.Config.Acceptors*r.Config.ConnectionsPerAcceptor)
+	return !r.Draining() && r.readyForAdmission() && r.activeWebSockets.Load() < int64(r.Config.Acceptors*r.Config.ConnectionsPerAcceptor)
 }
 
+// readyForAdmission excludes drain: a drain only refuses new session claims,
+// so sockets joining a session this node already owns are still admitted.
 func (r *Relay) readyForAdmission() bool {
 	members, err := r.ownership.members()
-	return err == nil && !r.Config.Drain && members >= r.Config.MinimumClusterSize && !r.capacityUnavailable.Load() && !r.memoryPressure.Load()
+	return err == nil && members >= r.Config.MinimumClusterSize && !r.capacityUnavailable.Load() && !r.memoryPressure.Load()
 }
 
 // watchCapacity reconciles the ingress ledger against live state. The interval
@@ -999,24 +1218,45 @@ func memoryRecoveryThreshold(watermark int) uint64 {
 	return uint64(watermark - MaximumMessagePayloadBytes)
 }
 
+// shedCandidatesLocked orders the sockets shedding may close: sources that
+// have been blocked on a delivery longest first, then the most recently
+// attached sockets. Blocking longest means holding memory longest, and among
+// the rest the newest arrival is the one whose loss costs the least
+// established work. Peers already shed stay attached until their read loop
+// unwinds, so they are skipped to keep a batch a batch of distinct sockets.
+// Callers hold r.mu.
+func (r *Relay) shedCandidatesLocked() []*relayPeer {
+	var blocked, active []*relayPeer
+	for _, session := range r.sessions {
+		for _, peer := range sessionPeers(session) {
+			switch {
+			case peer.shed:
+			case peer.blockSeq.Load() != 0:
+				blocked = append(blocked, peer)
+			default:
+				active = append(active, peer)
+			}
+		}
+	}
+	sort.Slice(blocked, func(i, j int) bool { return blocked[i].blockSeq.Load() < blocked[j].blockSeq.Load() })
+	sort.Slice(active, func(i, j int) bool { return active[i].attachSeq.Load() > active[j].attachSeq.Load() })
+	return append(blocked, active...)
+}
+
 // shedForMemoryPressure drops every buffered frame and closes up to batch
 // attached peers, then returns the freed memory to the runtime so the next
 // sample can observe the relief.
 func (r *Relay) shedForMemoryPressure(batch int) {
 	r.mu.Lock()
-	peers := make([]*relayPeer, 0, batch)
+	peers := r.shedCandidatesLocked()
+	if len(peers) > batch {
+		peers = peers[:batch]
+	}
+	for _, peer := range peers {
+		peer.shed = true
+	}
 	released := int64(0)
 	for _, session := range r.sessions {
-		if len(peers) < batch {
-			for _, peer := range sessionPeers(session) {
-				// Peers already shed stay attached until their read loop unwinds;
-				// skipping them keeps a batch a batch of distinct sockets.
-				if len(peers) < batch && !peer.shed {
-					peer.shed = true
-					peers = append(peers, peer)
-				}
-			}
-		}
 		for connectionID := range session.buffer {
 			released += session.dropBufferLocked(connectionID)
 		}
@@ -1121,6 +1361,15 @@ func reserveCounter(counter *atomic.Int64, amount, limit int64) bool {
 			return true
 		}
 	}
+}
+
+// writeText writes an exact plain-text body, without http.Error's trailing
+// newline, so 503 diagnostics match the reference byte for byte.
+func writeText(writer http.ResponseWriter, status int, body string) {
+	writer.Header().Set("content-type", "text/plain; charset=utf-8")
+	writer.Header().Set("x-content-type-options", "nosniff")
+	writer.WriteHeader(status)
+	_, _ = io.WriteString(writer, body)
 }
 
 func writeJSON(writer http.ResponseWriter, status int, body string) {
