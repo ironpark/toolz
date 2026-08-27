@@ -8,12 +8,12 @@
 
 ## CLI
 
-| 도구 | 설명 |
-| --- | --- |
-| [`chatctl`](cli/chatctl/) | ChatGPT, Gemini, Claude 웹 세션의 대화 목록을 관리하는 Go CLI입니다. |
-| [`mohae`](cli/mohae/) | CLI, MCP 서버, 에이전트 스킬을 재현 가능한 환경에서 평가하는 Go CLI입니다. |
-| [`planr`](cli/planr/) | 규격화된 Markdown 계획을 등록·조회하는 Go CLI입니다. |
-| [`sanbo`](cli/sanbo/) | WebSocket 연결을 중계하고 라우팅하는 Go CLI입니다. |
+| 도구 | 상태 | 설명 |
+| --- | --- | --- |
+| [`chatctl`](cli/chatctl/) | 개발 중 | ChatGPT, Gemini, Claude 웹 세션의 대화 목록을 관리하는 Go CLI입니다. |
+| [`mohae`](cli/mohae/) | 초기 골격 | CLI, MCP 서버, 에이전트 스킬을 재현 가능한 환경에서 평가하는 Go CLI입니다. |
+| [`planr`](cli/planr/) | 사용 가능 | 규격화된 Markdown 계획을 등록·조회하는 Go CLI입니다. |
+| [`sanbo`](cli/sanbo/) | 호환성 검증 중 | [`getpaseo/paseo-relay`](https://github.com/getpaseo/paseo-relay)의 드롭인 교체를 목표로 하는 Go 구현체입니다. |
 
 각 도구의 사용 방법과 상세 설명은 해당 디렉터리에서 안내합니다.
 
