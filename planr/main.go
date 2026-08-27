@@ -92,7 +92,8 @@ func newRootCommand() *cli.Command {
 					&cli.StringSliceFlag{Name: "depends-on", Usage: "plan dependency (repeatable)"},
 					&cli.StringFlag{Name: "description", Usage: "short plan description (max 200 characters)"},
 				},
-				Action: newCommand,
+				ShellComplete: planNameShellComplete,
+				Action:        newCommand,
 			},
 			{
 				Name:      "add",
