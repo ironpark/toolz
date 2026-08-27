@@ -51,7 +51,7 @@ func noteLine(planDirectory, event, phase, at string) string {
 // The state change is already written to disk by the time this runs, so a
 // failure here is reported to the caller but must not undo that change.
 func recordCompletionNote(repoRoot, planDirectory, event string, phaseID int) error {
-	repository, err := git.PlainOpen(repoRoot)
+	repository, err := git.PlainOpenWithOptions(repoRoot, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
 	if err != nil {
 		return fmt.Errorf("open repository: %w", err)
 	}
@@ -235,7 +235,7 @@ func encodeObject(repository *git.Repository, encode func(plumbing.EncodedObject
 // readPlanNotes returns every recorded completion, newest first.
 // planFilter limits the result to one plan directory when it is not empty.
 func readPlanNotes(repoRoot, planFilter string) ([]planNote, error) {
-	repository, err := git.PlainOpen(repoRoot)
+	repository, err := git.PlainOpenWithOptions(repoRoot, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
 	if err != nil {
 		return nil, fmt.Errorf("open repository: %w", err)
 	}

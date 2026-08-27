@@ -83,7 +83,7 @@ func discoverConfig(start string) (configLocation, error) {
 	searchRoot := absolute
 	baseRoot := absolute
 	insideWorktree := false
-	if repository, openErr := git.PlainOpenWithOptions(absolute, &git.PlainOpenOptions{DetectDotGit: true}); openErr == nil {
+	if repository, openErr := git.PlainOpenWithOptions(absolute, &git.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true}); openErr == nil {
 		if worktree, worktreeErr := repository.Worktree(); worktreeErr == nil {
 			if root, rootErr := filepath.Abs(worktree.Filesystem.Root()); rootErr == nil {
 				root = rootInStartPath(root, absolute)
@@ -237,7 +237,7 @@ func validatePlanDirs(directories []string) error {
 // Completion records are stored as git notes and the done-check reads the
 // worktree status, so every plan operation assumes a repository is present.
 func ensureGitRepository(start string) error {
-	_, err := git.PlainOpenWithOptions(start, &git.PlainOpenOptions{DetectDotGit: true})
+	_, err := git.PlainOpenWithOptions(start, &git.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
 	if err == nil {
 		return nil
 	}

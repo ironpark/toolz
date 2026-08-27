@@ -271,7 +271,7 @@ func ensureCleanSource(repoRoot string, planDirectories, ignore []string) error 
 }
 
 func uncommittedSourcePaths(repoRoot string, planDirectories, ignore []string) ([]string, error) {
-	repository, err := git.PlainOpen(repoRoot)
+	repository, err := git.PlainOpenWithOptions(repoRoot, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
 	if err != nil {
 		return nil, err
 	}
