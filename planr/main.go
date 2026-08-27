@@ -26,10 +26,22 @@ func buildVersion() string {
 }
 
 func main() {
-	command := &cli.Command{
-		Name:    "planr",
-		Usage:   "register and track structured implementation plans",
-		Version: buildVersion(),
+	command := newRootCommand()
+
+	if err := command.Run(context.Background(), os.Args); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func newRootCommand() *cli.Command {
+	return &cli.Command{
+		Name:                  "planr",
+		Usage:                 "register and track structured implementation plans",
+		Version:               buildVersion(),
+		EnableShellCompletion: true,
+		Flags: []cli.Flag{
+			&cli.BoolFlag{Name: "no-hooks", Usage: "skip all configured hooks for this invocation"},
+		},
 		// Every command reads or writes plan state inside a repository, so the
 		// check runs once here instead of at each call site. The two diagnostic
 		// commands are intentionally allowed to run outside a repository so they
@@ -41,7 +53,7 @@ func main() {
 			if cmd.Args() != nil {
 				commandName = cmd.Args().First()
 			}
-			if commandName == "config" || commandName == "doctor" {
+			if commandName == "config" || commandName == "doctor" || commandName == "completion" {
 				// `config` can inspect defaults without git, and `doctor` needs
 				// to turn a missing repository into a diagnostic rather than an
 				// early generic failure.
@@ -55,8 +67,11 @@ func main() {
 		},
 		Commands: []*cli.Command{
 			{
-				Name:   "config",
-				Usage:  "show the applied configuration",
+				Name:  "config",
+				Usage: "show the applied configuration",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
+				},
 				Action: configCommand,
 			},
 			{
@@ -64,6 +79,7 @@ func main() {
 				Usage: "diagnose configuration, plans, and repository consistency",
 				Flags: []cli.Flag{
 					&cli.BoolFlag{Name: "fix", Usage: "repair PLAN.md checklists from phase files"},
+					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
 				},
 				Action: doctorCommand,
 			},
@@ -94,7 +110,18 @@ func main() {
 				Flags: []cli.Flag{
 					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
 				},
-				Action: statusCommand,
+				ShellComplete: planNameShellComplete,
+				Action:        statusCommand,
+			},
+			{
+				Name:      "show",
+				Usage:     "show the current or selected phase document",
+				ArgsUsage: "<plan-name> [phase-number]",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
+				},
+				ShellComplete: planNameShellComplete,
+				Action:        showCommand,
 			},
 			{
 				Name:      "overview",
@@ -103,7 +130,8 @@ func main() {
 				Flags: []cli.Flag{
 					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
 				},
-				Action: overviewCommand,
+				ShellComplete: planNameShellComplete,
+				Action:        overviewCommand,
 			},
 			{
 				Name:      "notes",
@@ -112,7 +140,15 @@ func main() {
 				Flags: []cli.Flag{
 					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
 				},
-				Action: notesCommand,
+				ShellComplete: planNameShellComplete,
+				Action:        notesCommand,
+			},
+			{
+				Name:          "archive",
+				Usage:         "move a completed plan to the archive directory",
+				ArgsUsage:     "<plan-name>",
+				ShellComplete: planNameShellComplete,
+				Action:        archiveCommand,
 			},
 			{
 				Name:  "phase",
@@ -131,7 +167,8 @@ func main() {
 							&cli.StringFlag{Name: "work", Usage: "planned work (required)"},
 							&cli.StringFlag{Name: "done-when", Usage: "completion condition (required)"},
 						},
-						Action: phaseAddCommand,
+						ShellComplete: planNameShellComplete,
+						Action:        phaseAddCommand,
 					},
 					{
 						Name:      "set",
@@ -142,7 +179,8 @@ func main() {
 							&cli.StringFlag{Name: "status", Usage: "planned, conditional, in-progress, or done"},
 							&cli.BoolFlag{Name: "force", Usage: "mark done despite uncommitted source changes"},
 						},
-						Action: phaseSetCommand,
+						ShellComplete: planNameShellComplete,
+						Action:        phaseSetCommand,
 					},
 					{
 						Name:      "start",
@@ -151,7 +189,8 @@ func main() {
 						Flags: []cli.Flag{
 							&cli.BoolFlag{Name: "force", Usage: "start despite unfinished dependencies"},
 						},
-						Action: phaseShortcutCommand("in-progress"),
+						ShellComplete: planNameShellComplete,
+						Action:        phaseShortcutCommand("in-progress"),
 					},
 					{
 						Name:      "done",
@@ -160,20 +199,28 @@ func main() {
 						Flags: []cli.Flag{
 							&cli.BoolFlag{Name: "force", Usage: "complete despite unfinished dependencies or uncommitted source changes"},
 						},
-						Action: phaseShortcutCommand("done"),
+						ShellComplete: planNameShellComplete,
+						Action:        phaseShortcutCommand("done"),
 					},
 					{
-						Name:      "reset",
-						Usage:     "reset a phase to planned",
+						Name:          "reset",
+						Usage:         "reset a phase to planned",
+						ArgsUsage:     "<plan-name> <phase-number>",
+						ShellComplete: planNameShellComplete,
+						Action:        phaseShortcutCommand("planned"),
+					},
+					{
+						Name:      "rm",
+						Usage:     "remove a phase from an open plan",
 						ArgsUsage: "<plan-name> <phase-number>",
-						Action:    phaseShortcutCommand("planned"),
+						Flags: []cli.Flag{
+							&cli.BoolFlag{Name: "force", Usage: "remove a phase despite dependent phases"},
+						},
+						ShellComplete: planNameShellComplete,
+						Action:        phaseRemoveCommand,
 					},
 				},
 			},
 		},
-	}
-
-	if err := command.Run(context.Background(), os.Args); err != nil {
-		log.Fatal(err)
 	}
 }
