@@ -10,7 +10,7 @@ registered_at: "2026-08-27T20:07:33Z"
 - [x] [Phase 00: JSON-RPC transport over subprocess stdio](phases/00-jsonrpc-transport.md)
 - [x] [Phase 01: Protocol types](phases/01-protocol-types.md)
 - [x] [Phase 02: Client and initialization handshake](phases/02-client-init.md)
-- [ ] [Phase 03: Thread management](phases/03-thread-management.md)
+- [x] [Phase 03: Thread management](phases/03-thread-management.md)
 - [ ] [Phase 04: Turn execution and event streaming](phases/04-turn-streaming.md)
 - [ ] [Phase 05: Approvals and server-initiated requests](phases/05-approvals.md)
 - [ ] [Phase 06: Auth surface](phases/06-auth-surface.md)

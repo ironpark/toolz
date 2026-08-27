@@ -2,7 +2,7 @@
 depends_on:
 - "00-internal-codex#3"
 perf_phase: false
-status: planned
+status: in-progress
 ---
 > DONE-WHEN: Scripted end-to-end test (init -> thread/start -> turn/start -> deltas ->
 > NEXT: none

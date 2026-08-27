@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T20:29:28Z"
 depends_on:
 - "00-internal-codex#2"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: Every listed method has a wire-shape + decode test against the fake server;
 > NEXT: none

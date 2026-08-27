@@ -27,9 +27,12 @@ type ThreadEvent struct {
 type threadSubscription struct {
 	id     string
 	events chan ThreadEvent
+	queue  chan queuedNotification
+	quit   chan struct{}
 
-	mu     sync.Mutex
-	closed bool
+	mu      sync.Mutex
+	closed  bool
+	streams []*TurnStream
 }
 
 // emit delivers an event without ever blocking the transport reader. A slow
@@ -56,6 +59,7 @@ func (s *threadSubscription) close() {
 	}
 	s.closed = true
 	close(s.events)
+	close(s.quit)
 }
 
 // eventBuffer returns the configured per-subscription channel capacity.
@@ -81,8 +85,11 @@ func (c *Client) subscribe(threadID string) *threadSubscription {
 	sub := &threadSubscription{
 		id:     threadID,
 		events: make(chan ThreadEvent, c.eventBuffer()),
+		queue:  make(chan queuedNotification, 4*c.eventBuffer()),
+		quit:   make(chan struct{}),
 	}
 	c.threads[threadID] = sub
+	go sub.pump(c)
 	return sub
 }
 
@@ -288,6 +295,9 @@ func (c *Client) shutdown() {
 	c.mu.Unlock()
 
 	for _, sub := range subs {
+		for _, stream := range sub.activeStreams() {
+			stream.finish(nil, ErrClosed)
+		}
 		sub.close()
 	}
 }

@@ -206,6 +206,9 @@ func (c *Client) handleNotification(method string, params json.RawMessage) {
 
 // dispatchNotification routes a notification to its subscribers.
 func (c *Client) dispatchNotification(method string, params json.RawMessage) {
-	threadID, _ := routeIDs(params)
+	threadID, turnID := routeIDs(params)
+	if c.routeTurnNotification(method, params, threadID, turnID) {
+		return
+	}
 	c.routeThreadNotification(method, params, threadID)
 }
