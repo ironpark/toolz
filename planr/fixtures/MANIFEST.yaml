@@ -67,3 +67,23 @@ fixtures:
           문법 16종·탐욕 매칭·플래그·종료 코드·잘못된 패턴 5종을 검사하고,
           `regexp` import 여부와 외부 의존성 유무도 함께 본다. 워크스페이스로
           복사하지 않으므로 에이전트가 검사 내용을 보고 맞출 수 없다.
+
+  - name: codex-kvstore
+    used_by: planr/scripts/codex.py --fixture codex-kvstore
+    workspace: 시스템 임시 디렉터리 (산출물은 planr/run/<timestamp>-codex-kvstore/)
+    description: >-
+      phase 사이에 불변식이 걸린 Codex 평가. 명령은 set·get·del·list·compact 다섯 개뿐이지만,
+      요구는 추가 전용 로그 위의 영속성·잘린 꼬리 복구·원자적 compaction·동시 쓰기다.
+      codex-regex가 구현 난이도로 phase를 나누게 한다면 이 픽스처는 뒤 phase에서 앞 phase의
+      설계 결함이 드러나게 한다 — compaction 버그는 복구 경로에서, 잠금 누락은 병렬 쓰기에서만
+      보인다. 인수 검사는 올바른 참조 구현으로 23/23 통과를, 파일 전체를 다시 쓰는 순진한
+      구현으로 5건 실패를 확인해 판별력을 검증했다.
+    contents:
+      - .planr.yaml: 훅으로 planr 이벤트를 .harness/planr-events.log에 기록
+      - .gitignore: .harness/, bin/, 빌드된 kv 바이너리와 *.log 제외
+      - FIXTURE.PROMPT.<언어>.md: 실행 언어에 맞는 파일이 에이전트에게 보내는 요청. 워크스페이스로 복사하지 않는다
+      - FIXTURE.AGENTS.<언어>.md: 실행 언어에 맞는 파일이 AGENTS.md로 설치되는 저장소 지침
+      - FIXTURE.TEST.sh: >-
+          기본 동작·종료 코드·영속성 외에 잘린 로그, 쓰레기 꼬리, compaction 전후 상태와 크기,
+          200개 시드 위에서 30개씩 3회 병렬 쓰기를 검사한다. 병렬 검사는 경쟁 구간을 넓혀야
+          판별되므로 시드를 먼저 쌓는다.

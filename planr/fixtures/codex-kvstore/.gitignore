@@ -1,0 +1,7 @@
+.harness/
+bin/
+
+# The built CLI and its data files: run output, not source.
+/kv
+!/kv/
+*.log
