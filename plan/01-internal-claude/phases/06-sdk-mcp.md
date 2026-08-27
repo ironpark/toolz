@@ -1,8 +1,9 @@
 ---
+completed_at: "2026-08-27T20:35:51Z"
 depends_on:
 - "01-internal-claude#3"
 perf_phase: false
-status: in-progress
+status: done
 ---
 > DONE-WHEN: Tests: tools/list returns declared schemas and annotations meta;
 > NEXT: none

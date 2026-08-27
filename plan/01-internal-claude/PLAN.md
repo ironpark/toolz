@@ -13,7 +13,7 @@ registered_at: "2026-08-27T20:07:58Z"
 - [x] [Phase 03: Control protocol engine](phases/03-control-protocol.md)
 - [x] [Phase 04: One-shot Query API](phases/04-query-api.md)
 - [x] [Phase 05: Bidirectional Client API](phases/05-client-api.md)
-- [ ] [Phase 06: In-process SDK MCP servers](phases/06-sdk-mcp.md)
+- [x] [Phase 06: In-process SDK MCP servers](phases/06-sdk-mcp.md)
 - [ ] [Phase 07: Package docs, examples, and full-suite verification](phases/07-docs-and-verification.md)
 
 # Shared Verification

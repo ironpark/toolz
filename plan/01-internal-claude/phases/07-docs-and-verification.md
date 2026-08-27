@@ -4,7 +4,7 @@ depends_on:
 - "01-internal-claude#5"
 - "01-internal-claude#6"
 perf_phase: false
-status: planned
+status: in-progress
 ---
 > DONE-WHEN: `go build ./...`, `go vet ./...`, `go test ./...` all pass from
 > NEXT: none
