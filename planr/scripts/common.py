@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from typing import Any
 
 
 MODULE_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -34,6 +35,15 @@ PLANS_DIR = "plans"
 
 class HarnessError(RuntimeError):
     """A user-facing harness configuration or setup error."""
+
+
+def one_line(value: Any, limit: int = 110) -> str:
+    """Collapse a value to a single readable line at most `limit` characters."""
+
+    # Slice before normalizing: an agent message or tool output can be tens of
+    # kilobytes, and only the first `limit` characters survive.
+    text = " ".join(str(value)[: limit * 4].split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def require_command(name: str) -> None:

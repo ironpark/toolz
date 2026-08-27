@@ -20,7 +20,7 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 	section := strings.TrimSpace(cmd.String("section"))
 	selector := cmd.Args().First()
 	if section != "" {
-		if section != "goals" && section != "context" && section != "plan" {
+		if !validSection(section) {
 			return fmt.Errorf("invalid edit section %q; use goals, context, or plan", section)
 		}
 		if strings.Contains(selector, "#") {

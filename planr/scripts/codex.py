@@ -38,6 +38,7 @@ from common import (
     fixture_dir,
     init_git_repository,
     make_agent_workspace,
+    one_line,
     make_run_dir,
     remove_runs,
     require_command,
@@ -166,13 +167,6 @@ class Progress:
 
 
 progress = Progress()
-
-
-def one_line(value: Any, limit: int = 110) -> str:
-    # Slice before normalizing: an agent message or tool output can be tens of
-    # kilobytes, and only the first `limit` characters survive.
-    text = " ".join(str(value)[: limit * 4].split())
-    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def describe_item(item: dict[str, Any]) -> str | None:

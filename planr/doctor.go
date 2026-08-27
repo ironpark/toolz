@@ -599,28 +599,22 @@ func doctorHasPhase(plan doctorPlan, id int) bool {
 }
 
 func doctorStringValue(value any) string {
-	text, ok := value.(string)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(text)
+	return strings.TrimSpace(stringValue(value))
 }
 
+// doctorStringList is the strict variant of yamlStrings: a non-list value or a
+// list with any non-string element is rejected instead of silently skipped.
 func doctorStringList(value any) ([]string, bool) {
-	switch values := value.(type) {
-	case []any:
-		result := make([]string, 0, len(values))
-		for _, value := range values {
-			text, ok := value.(string)
-			if !ok {
-				return nil, false
-			}
-			result = append(result, text)
+	values, ok := value.([]any)
+	if !ok {
+		if typed, isStrings := value.([]string); isStrings {
+			return append([]string{}, typed...), true
 		}
-		return result, true
-	case []string:
-		return append([]string{}, values...), true
-	default:
 		return nil, false
 	}
+	result := yamlStrings(value)
+	if len(result) != len(values) {
+		return nil, false
+	}
+	return result, true
 }

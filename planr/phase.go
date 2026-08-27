@@ -73,7 +73,7 @@ func phaseCommand(cmd *cli.Command, status string) error {
 		}
 	}
 	if status == "done" && len(settings.Hooks.commands("before", hookEventPlanDone)) > 0 {
-		willComplete, err = phaseWillComplete(planRoot, phaseID, status)
+		willComplete, err = phaseWillComplete(planRoot, phaseID)
 		if err != nil {
 			return err
 		}
@@ -240,13 +240,9 @@ func unmetPlanDependency(planDirectories []string, dependency planDependency) st
 
 // planLevelDependencies reads the depends_on list from a plan's PLAN.md.
 func planLevelDependencies(planRoot string) ([]planDependency, error) {
-	raw, err := os.ReadFile(filepath.Join(planRoot, "PLAN.md"))
+	front, _, err := readPlanDocument(planRoot, "PLAN.md")
 	if err != nil {
 		return nil, err
-	}
-	front, _, err := frontmatter(string(raw))
-	if err != nil {
-		return nil, fmt.Errorf("parse PLAN.md: %w", err)
 	}
 	dependencies := []planDependency{}
 	for _, raw := range yamlStrings(front["depends_on"]) {
@@ -288,11 +284,12 @@ func uncommittedSourcePaths(repoRoot string, planDirectories, ignore []string) (
 		return nil, err
 	}
 	paths := []string{}
+	ignorePatterns := compileIgnorePatterns(ignore)
 	for path, fileStatus := range status {
 		if fileStatus == nil || (fileStatus.Staging == git.Unmodified && fileStatus.Worktree == git.Unmodified) {
 			continue
 		}
-		if !isGeneratedPlanPath(repoRoot, planDirectories, path) && !isPlanDraftPath(repoRoot, path) && !isIgnoredPath(path, ignore) {
+		if !isGeneratedPlanPath(repoRoot, planDirectories, path) && !isPlanDraftPath(repoRoot, path) && !matchesIgnorePatterns(path, ignorePatterns) {
 			paths = append(paths, path)
 		}
 	}
@@ -330,25 +327,48 @@ func isPlanDraftPath(repoRoot, relativePath string) bool {
 	return ok
 }
 
-func isIgnoredPath(relativePath string, patterns []string) bool {
-	path := filepath.ToSlash(filepath.Clean(relativePath))
+// ignorePattern is one config ignore entry, with its glob form compiled once
+// so matching many paths does not recompile the same expression.
+type ignorePattern struct {
+	raw        string
+	expression *regexp.Regexp
+}
+
+func compileIgnorePatterns(patterns []string) []ignorePattern {
+	compiled := make([]ignorePattern, 0, len(patterns))
 	for _, pattern := range patterns {
 		pattern = filepath.ToSlash(strings.TrimSpace(pattern))
 		pattern = strings.TrimPrefix(pattern, "./")
 		if pattern == "" {
 			continue
 		}
-		if globPathMatch(pattern, path) {
-			return true
-		}
-		if !strings.ContainsAny(pattern, "*?") && (path == pattern || strings.HasPrefix(path, strings.TrimSuffix(pattern, "/")+"/")) {
+		compiled = append(compiled, ignorePattern{raw: pattern, expression: globPathExpression(pattern)})
+	}
+	return compiled
+}
+
+func (p ignorePattern) match(path string) bool {
+	if p.expression != nil && p.expression.MatchString(path) {
+		return true
+	}
+	return !strings.ContainsAny(p.raw, "*?") && (path == p.raw || strings.HasPrefix(path, strings.TrimSuffix(p.raw, "/")+"/"))
+}
+
+func isIgnoredPath(relativePath string, patterns []string) bool {
+	return matchesIgnorePatterns(relativePath, compileIgnorePatterns(patterns))
+}
+
+func matchesIgnorePatterns(relativePath string, patterns []ignorePattern) bool {
+	path := filepath.ToSlash(filepath.Clean(relativePath))
+	for _, pattern := range patterns {
+		if pattern.match(path) {
 			return true
 		}
 	}
 	return false
 }
 
-func globPathMatch(pattern, value string) bool {
+func globPathExpression(pattern string) *regexp.Regexp {
 	pattern = filepath.ToSlash(pattern)
 	var expression strings.Builder
 	expression.WriteString("^")
@@ -368,8 +388,11 @@ func globPathMatch(pattern, value string) bool {
 		}
 	}
 	expression.WriteString("$")
-	matched, err := regexp.MatchString(expression.String(), value)
-	return err == nil && matched
+	compiled, err := regexp.Compile(expression.String())
+	if err != nil {
+		return nil
+	}
+	return compiled
 }
 
 func isGeneratedPlanPath(repoRoot string, planDirectories []string, relativePath string) bool {
@@ -401,10 +424,7 @@ func phaseHookEvent(status string) string {
 	}
 }
 
-func phaseWillComplete(planRoot string, phaseID int, status string) (bool, error) {
-	if status != "done" {
-		return false, nil
-	}
+func phaseWillComplete(planRoot string, phaseID int) (bool, error) {
 	phases, err := readPlanPhases(planRoot)
 	if err != nil {
 		return false, err
@@ -429,29 +449,12 @@ func phaseWillComplete(planRoot string, phaseID int, status string) (bool, error
 }
 
 func planAlreadyDone(planRoot string) (bool, error) {
-	raw, err := os.ReadFile(filepath.Join(planRoot, "PLAN.md"))
+	front, _, err := readPlanDocument(planRoot, "PLAN.md")
 	if err != nil {
 		return false, err
 	}
-	front, _, err := frontmatter(string(raw))
-	if err != nil {
-		return false, fmt.Errorf("parse PLAN.md: %w", err)
-	}
 	status, _ := front["plan_status"].(string)
 	return status == "done", nil
-}
-
-func updatePhaseStatus(planDirectories []string, planArg string, phaseID int, status string) (string, bool, error) {
-	planRoot, planDirectory, err := findPlanDirectory(planDirectories, planArg)
-	if err != nil {
-		return "", false, err
-	}
-	planLock, err := acquirePlanLock(planRoot)
-	if err != nil {
-		return "", false, err
-	}
-	defer planLock.close()
-	return updatePhaseStatusLocked(planRoot, planDirectory, phaseID, status)
 }
 
 func updatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status string) (string, bool, error) {
@@ -519,31 +522,17 @@ func updatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 }
 
 func updatePhaseChecklist(body string, phaseID int, done bool) (string, error) {
-	marker := fmt.Sprintf("[Phase %02d:", phaseID)
 	checkmark := " "
 	if done {
 		checkmark = "x"
 	}
-	lines := strings.SplitAfter(body, "\n")
-	updated := 0
-	for index, line := range lines {
-		if !strings.Contains(line, marker) || !strings.Contains(strings.TrimSpace(line), "- [") {
-			continue
-		}
+	return transformChecklistEntry(body, phaseID, func(line string) (string, bool) {
 		open := strings.Index(line, "[")
 		if open < 0 || open+2 >= len(line) || line[open+2] != ']' {
-			continue
+			return "", false
 		}
-		lines[index] = line[:open] + "[" + checkmark + "]" + line[open+3:]
-		updated++
-	}
-	if updated == 0 {
-		return body, fmt.Errorf("checklist entry for phase %02d not found", phaseID)
-	}
-	if updated > 1 {
-		return body, fmt.Errorf("multiple checklist entries found for phase %02d", phaseID)
-	}
-	return strings.Join(lines, ""), nil
+		return line[:open] + "[" + checkmark + "]" + line[open+3:], true
+	})
 }
 
 func validatePhaseStatusChange(front map[string]any, status string) error {

@@ -37,7 +37,6 @@ func newTestProvider(homeURL, morePattern string) *Provider {
 	return &Provider{
 		Name: "test", HomeURL: homeURL, BaseURL: homeURL, convPath: "/c/",
 		selector: sel, morePattern: morePattern,
-		listScript: linkScript(sel), readyScript: countScript(sel),
 	}
 }
 

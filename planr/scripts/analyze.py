@@ -19,6 +19,7 @@ from common import (
     PLANS_DIR,
     STATE_DIR,
     HarnessError,
+    one_line,
     read_metadata as load_metadata,
 )
 
@@ -478,12 +479,9 @@ ERROR_LINE = re.compile(
     re.IGNORECASE,
 )
 
-
-def one_line(value: str, limit: int = 160) -> str:
-    """Collapse a message to a single readable line for a bullet list."""
-
-    collapsed = " ".join(value.split())
-    return collapsed if len(collapsed) <= limit else collapsed[: limit - 1] + "…"
+# A `planr phase done --force` invocation bypasses source verification, which
+# the observations call out; matched per command line, so compiled once here.
+FORCED_PHASE_DONE = re.compile(r"\bplanr\b.*\bphase\s+done\b.*--force", re.IGNORECASE)
 
 
 def error_excerpt(output: str, limit: int = 3) -> str:
@@ -595,8 +593,7 @@ def make_observations(
     ):
         documentation.append("`phase done`의 소스 커밋 전제에서 오류/경고가 발생했습니다. 커밋 순서와 `--force` 사용 경계가 실제 작업 흐름에 맞는지 검토하세요.")
     if any(
-        re.search(r"\bplanr\b.*\bphase\s+done\b.*--force", command, re.IGNORECASE)
-        for command in commands
+        FORCED_PHASE_DONE.search(command) for command in commands
     ):
         workflow.append("phase 완료 과정에서 `--force`가 언급되었습니다. 소스 검증을 우회하지 않고 완료할 수 있었는지 확인하세요.")
 
@@ -620,7 +617,7 @@ def make_observations(
     for failure in failures or []:
         location = f"실행 #{failure['index']} (exit {failure['exit_code']})"
         # The first error line is the root cause; later ones are its fallout.
-        first_error = one_line(failure["error"].splitlines()[0]) if failure["error"] else "출력 없음"
+        first_error = one_line(failure["error"].splitlines()[0], limit=160) if failure["error"] else "출력 없음"
         if failure["planr_actions"]:
             actions = ", ".join(f"`planr {action}`" for action in failure["planr_actions"])
             documentation.append(

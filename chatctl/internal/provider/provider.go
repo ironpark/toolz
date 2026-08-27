@@ -36,10 +36,6 @@ type Provider struct {
 	selector string
 	// morePattern은 "더 보기" 류 버튼의 텍스트 패턴입니다. 비어 있으면 스크롤만 합니다.
 	morePattern string
-	// listScript는 사이드바에서 대화 목록을 추출하는 JS 표현식입니다.
-	listScript string
-	// readyScript는 목록이 로드되었는지 판별하는 JS 표현식입니다.
-	readyScript string
 }
 
 // 사이드바 링크에서 대화 목록을 뽑아내는 공통 스크립트를 만듭니다.
@@ -130,23 +126,19 @@ const (
 // All은 지원하는 모든 서비스입니다.
 var All = []*Provider{
 	{
-		Name:        "chatgpt",
-		HomeURL:     "https://chatgpt.com/",
-		BaseURL:     "https://chatgpt.com",
-		convPath:    "/c/",
-		selector:    chatgptSelector,
-		listScript:  linkScript(chatgptSelector),
-		readyScript: countScript(chatgptSelector),
+		Name:     "chatgpt",
+		HomeURL:  "https://chatgpt.com/",
+		BaseURL:  "https://chatgpt.com",
+		convPath: "/c/",
+		selector: chatgptSelector,
 	},
 	{
 		Name: "claude",
 		// /recents 는 사이드바의 "모든 대화 보기" 가 여는 전체 목록 페이지입니다.
-		HomeURL:     "https://claude.ai/recents",
-		BaseURL:     "https://claude.ai",
-		convPath:    "/chat/",
-		selector:    claudeSelector,
-		listScript:  linkScript(claudeSelector),
-		readyScript: countScript(claudeSelector),
+		HomeURL:  "https://claude.ai/recents",
+		BaseURL:  "https://claude.ai",
+		convPath: "/chat/",
+		selector: claudeSelector,
 	},
 	{
 		Name:        "gemini",
@@ -155,8 +147,6 @@ var All = []*Provider{
 		convPath:    "/app/",
 		selector:    geminiSelector,
 		morePattern: `^(더보기|더 보기|show more)$`,
-		listScript:  linkScript(geminiSelector),
-		readyScript: countScript(geminiSelector),
 	},
 }
 
@@ -191,9 +181,9 @@ func (p *Provider) List(ctx context.Context, limit int, wait time.Duration) ([]C
 	var loaded int
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(p.HomeURL),
-		chromedp.Poll(p.readyScript, nil, chromedp.WithPollingTimeout(ready)),
+		chromedp.Poll(countScript(p.selector), nil, chromedp.WithPollingTimeout(ready)),
 		chromedp.Evaluate(expandScript(p.selector, p.morePattern, limit, expand), &loaded, awaitPromise),
-		chromedp.Evaluate(p.listScript, &raw),
+		chromedp.Evaluate(linkScript(p.selector), &raw),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%s 대화 목록을 읽지 못했습니다 (로그인이 필요할 수 있습니다): %w", p.Name, err)

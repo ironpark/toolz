@@ -239,12 +239,15 @@ func draftPlaceholderRecords(raw string) []validationRecord {
 	return records
 }
 
+// phaseNumberLine matches the `phase:` metadata line inside a draft phase block.
+var phaseNumberLine = regexp.MustCompile(`^phase:\s*(-?\d+)\s*$`)
+
 func draftLocation(lines []string, line int) (string, *int) {
 	section := ""
 	phaseHeadingLine := -1
 	for index := 0; index <= line && index < len(lines); index++ {
 		trimmed := strings.TrimSpace(lines[index])
-		if match := regexp.MustCompile(`^# (GOALS|SCOPE|CONTEXT|PHASES|VERIFICATION|ORDERING|NEXT)$`).FindStringSubmatch(trimmed); len(match) == 2 {
+		if match := topHeading.FindStringSubmatch(trimmed); len(match) == 2 {
 			section = match[1]
 			phaseHeadingLine = -1
 		}
@@ -255,9 +258,8 @@ func draftLocation(lines []string, line int) (string, *int) {
 	if section != "PHASES" || phaseHeadingLine < 0 {
 		return section, nil
 	}
-	phasePattern := regexp.MustCompile(`^phase:\s*(-?\d+)\s*$`)
 	for index := phaseHeadingLine + 1; index <= line && index < len(lines); index++ {
-		if match := phasePattern.FindStringSubmatch(strings.TrimSpace(lines[index])); len(match) == 2 {
+		if match := phaseNumberLine.FindStringSubmatch(strings.TrimSpace(lines[index])); len(match) == 2 {
 			if value, err := strconv.Atoi(match[1]); err == nil {
 				return section, validationIntPointer(value)
 			}

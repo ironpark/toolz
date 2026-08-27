@@ -25,6 +25,22 @@ const (
 	planChecklistPlaceholder = "<!-- planr: phase checklist is derived; do not edit -->"
 )
 
+// editEnvelopeKeys are the frontmatter keys that belong to planr's document
+// envelopes (edit checkouts and new-phase drafts), not to the stored document.
+var editEnvelopeKeys = []string{
+	"planr_edit",
+	"planr_target",
+	"planr_base",
+	"planr_phase",
+	"planr_slug",
+	"planr_section",
+	"planr_new",
+	"planr_plan",
+	"phase_title",
+	"phase",
+	"slug",
+}
+
 type phaseDraftInput struct {
 	Plan  string
 	Title string
@@ -431,7 +447,7 @@ func applyPhaseDraft(d phaseDraftInput, settings config, repoRoot string, dryRun
 			return applyOperation{}, newValidationFailure(validationRecord{Rule: "phase_slug_duplicate", Section: "frontmatter", Detail: detail}, detail)
 		}
 	}
-	dependencies, err := resolvePhaseDraftDependencies(d.Meta.DependsOnRefs, phases, planDirectory)
+	dependencies, err := resolvePhaseDraftDependencies(d.Meta.DependsOnRefs, phases)
 	if err != nil {
 		return applyOperation{}, err
 	}
@@ -485,7 +501,7 @@ func applyPhaseDraft(d phaseDraftInput, settings config, repoRoot string, dryRun
 	return op, nil
 }
 
-func resolvePhaseDraftDependencies(refs []phaseRef, existing []storedPhase, planDirectory string) ([]int, error) {
+func resolvePhaseDraftDependencies(refs []phaseRef, existing []storedPhase) ([]int, error) {
 	bySlug := map[string]int{}
 	known := make([]string, 0, len(existing))
 	for _, phase := range existing {
@@ -551,19 +567,39 @@ func nextPhaseID(phases []storedPhase) int {
 	return next
 }
 
-func validateNewPhaseDependencies(planDirectory string, newPhase phaseMeta, title string, existing []storedPhase) error {
-	plan := planName(planDirectory)
-	all := make([]draftPhase, 0, len(existing)+1)
-	for _, phase := range existing {
-		meta := phaseMeta{Phase: phase.id, Slug: phase.slug, Status: phase.status}
-		for _, raw := range phase.dependencies {
-			dependency, err := parseDependency(raw)
-			if err != nil || dependency.phase == nil || dependency.plan != plan {
-				return fmt.Errorf("phase %d has invalid internal dependency %q", phase.id, raw)
-			}
-			meta.DependsOn = append(meta.DependsOn, *dependency.phase)
+// storedPhaseToDraft converts one stored phase into the draft shape used by
+// dependency validation, resolving its internal depends_on references.
+func storedPhaseToDraft(plan string, phase storedPhase) (draftPhase, error) {
+	meta := phaseMeta{Phase: phase.id, Slug: phase.slug, Status: phase.status}
+	for _, raw := range phase.dependencies {
+		dependency, err := parseDependency(raw)
+		if err != nil || dependency.phase == nil || dependency.plan != plan {
+			return draftPhase{}, fmt.Errorf("phase %d has invalid internal dependency %q", phase.id, raw)
 		}
-		all = append(all, draftPhase{Title: phase.title, Meta: meta})
+		meta.DependsOn = append(meta.DependsOn, *dependency.phase)
+	}
+	return draftPhase{Title: phase.title, Meta: meta}, nil
+}
+
+// storedPhasesToDraft converts a plan's stored phases into draft phases so the
+// shared dependency-graph validation can run against them.
+func storedPhasesToDraft(planDirectory string, phases []storedPhase) ([]draftPhase, error) {
+	plan := planName(planDirectory)
+	all := make([]draftPhase, 0, len(phases)+1)
+	for _, phase := range phases {
+		converted, err := storedPhaseToDraft(plan, phase)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, converted)
+	}
+	return all, nil
+}
+
+func validateNewPhaseDependencies(planDirectory string, newPhase phaseMeta, title string, existing []storedPhase) error {
+	all, err := storedPhasesToDraft(planDirectory, existing)
+	if err != nil {
+		return err
 	}
 	all = append(all, draftPhase{Title: title, Meta: newPhase})
 	if err := validatePhaseDependencies(all); err != nil {
@@ -770,7 +806,7 @@ func parseEditDocumentSelector(selector string, front map[string]any) (string, s
 			return "", "", 0, "", fmt.Errorf("planr_section must be goals, context, or plan")
 		}
 		section = strings.TrimSpace(section)
-		if section != "goals" && section != "context" && section != "plan" {
+		if !validSection(section) {
 			return "", "", 0, "", fmt.Errorf("invalid edit section %q; use goals, context, or plan", section)
 		}
 		if strings.Contains(selector, "#") {
@@ -784,15 +820,24 @@ func parseEditDocumentSelector(selector string, front map[string]any) (string, s
 	return parseEditSelector(selector)
 }
 
+// sectionFiles maps the editable/showable plan section names to the documents
+// they live in; it also serves as the section-name validation set.
+var sectionFiles = map[string]string{
+	"goals":   "GOALS.md",
+	"context": "CONTEXT.md",
+	"plan":    "PLAN.md",
+}
+
+func validSection(section string) bool {
+	_, ok := sectionFiles[section]
+	return ok
+}
+
 func sectionFile(section string) string {
-	switch section {
-	case "goals":
-		return "GOALS.md"
-	case "context":
-		return "CONTEXT.md"
-	default:
-		return "PLAN.md"
+	if file, ok := sectionFiles[section]; ok {
+		return file
 	}
+	return "PLAN.md"
 }
 
 func relativeTargetPath(repoRoot, value string) (string, error) {
@@ -869,17 +914,9 @@ func applyPhaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte,
 		detail := fmt.Sprintf("phase %q work and completion must not be empty", title)
 		return applyOperation{}, newValidationFailure(validationRecord{Rule: "phase_document", Section: "phase", Phase: validationIntPointer(phaseID), Detail: detail}, detail)
 	}
-	delete(normalizedFront, "planr_edit")
-	delete(normalizedFront, "planr_target")
-	delete(normalizedFront, "planr_base")
-	delete(normalizedFront, "planr_phase")
-	delete(normalizedFront, "planr_slug")
-	delete(normalizedFront, "planr_section")
-	delete(normalizedFront, "planr_new")
-	delete(normalizedFront, "planr_plan")
-	delete(normalizedFront, "phase_title")
-	delete(normalizedFront, "phase")
-	delete(normalizedFront, "slug")
+	for _, key := range editEnvelopeKeys {
+		delete(normalizedFront, key)
+	}
 	normalizedFront["status"] = currentStatus
 	if completedAt, found := currentFront["completed_at"]; found {
 		normalizedFront["completed_at"] = completedAt
@@ -999,7 +1036,7 @@ func editablePhaseMeta(front map[string]any, planDirectory string, phaseID int, 
 		value := strings.TrimSpace(condition)
 		meta.EntryCondition = &value
 	}
-	dependencies, normalized, err := editablePhaseDependencies(front["depends_on"], planDirectory, phaseID, phases)
+	dependencies, normalized, err := editablePhaseDependencies(front["depends_on"], planDirectory, phases)
 	if err != nil {
 		return phaseMeta{}, nil, err
 	}
@@ -1012,11 +1049,7 @@ func editablePhaseMeta(front map[string]any, planDirectory string, phaseID int, 
 	return meta, normalizedFront, nil
 }
 
-func editablePhaseDependencies(value any, planDirectory string, phaseID int, phases []storedPhase) ([]int, any, error) {
-	bySlug := map[string]int{}
-	for _, phase := range phases {
-		bySlug[phase.slug] = phase.id
-	}
+func editablePhaseDependencies(value any, planDirectory string, phases []storedPhase) ([]int, any, error) {
 	var values []any
 	switch typed := value.(type) {
 	case []any:
@@ -1030,47 +1063,42 @@ func editablePhaseDependencies(value any, planDirectory string, phaseID int, pha
 	default:
 		return nil, nil, fmt.Errorf("phase depends_on must be a list")
 	}
-	ids := []int{}
-	seen := map[int]bool{}
+	refs := make([]phaseRef, 0, len(values))
 	for _, item := range values {
-		var id int
 		switch typed := item.(type) {
 		case int:
-			id = typed
+			id := typed
+			refs = append(refs, phaseRef{number: &id})
 		case int64:
-			id = int(typed)
+			id := int(typed)
+			refs = append(refs, phaseRef{number: &id})
 		case float64:
 			if typed != float64(int(typed)) {
 				return nil, nil, fmt.Errorf("phase dependency %v must be a whole phase number", typed)
 			}
-			id = int(typed)
+			id := int(typed)
+			refs = append(refs, phaseRef{number: &id})
 		case string:
 			raw := strings.TrimSpace(typed)
 			if dependency, err := parseDependency(raw); err == nil && dependency.phase != nil {
 				if dependency.plan != planName(planDirectory) {
 					return nil, nil, fmt.Errorf("phase dependency %q must reference a phase in %s", raw, planName(planDirectory))
 				}
-				id = *dependency.phase
+				refs = append(refs, phaseRef{number: dependency.phase})
 			} else if parsed, parseErr := strconv.Atoi(raw); parseErr == nil {
-				id = parsed
-			} else if found, ok := bySlug[raw]; ok {
-				id = found
+				id := parsed
+				refs = append(refs, phaseRef{number: &id})
 			} else {
-				return nil, nil, fmt.Errorf("phase dependency %q is neither a phase number nor an existing phase slug", raw)
+				refs = append(refs, phaseRef{slug: raw})
 			}
 		default:
 			return nil, nil, fmt.Errorf("phase depends_on entries must be phase numbers or strings")
 		}
-		if id < 0 {
-			return nil, nil, fmt.Errorf("phase dependency %d must be non-negative", id)
-		}
-		if seen[id] {
-			return nil, nil, fmt.Errorf("phase dependency %d is listed more than once", id)
-		}
-		seen[id] = true
-		ids = append(ids, id)
 	}
-	sort.Ints(ids)
+	ids, err := resolvePhaseDraftDependencies(refs, phases)
+	if err != nil {
+		return nil, nil, err
+	}
 	normalized := make([]string, len(ids))
 	for index, id := range ids {
 		normalized[index] = fmt.Sprintf("%s#%d", planDirectory, id)
@@ -1079,49 +1107,30 @@ func editablePhaseDependencies(value any, planDirectory string, phaseID int, pha
 }
 
 func replacePhaseChecklistEntry(body string, phaseID int, title, slug string, done bool) (string, error) {
-	marker := fmt.Sprintf("[Phase %02d:", phaseID)
-	lines := strings.SplitAfter(body, "\n")
-	replaced := 0
-	for index, line := range lines {
-		if !strings.Contains(line, marker) || !strings.Contains(strings.TrimSpace(line), "- [") {
-			continue
-		}
-		lines[index] = phaseChecklistEntry(phaseID, title, slug, done) + "\n"
+	return transformChecklistEntry(body, phaseID, func(line string) (string, bool) {
+		replacement := phaseChecklistEntry(phaseID, title, slug, done) + "\n"
 		if !strings.HasSuffix(line, "\n") {
-			lines[index] = strings.TrimSuffix(lines[index], "\n")
+			replacement = strings.TrimSuffix(replacement, "\n")
 		}
-		replaced++
-	}
-	if replaced == 0 {
-		return body, fmt.Errorf("checklist entry for phase %02d not found", phaseID)
-	}
-	if replaced > 1 {
-		return body, fmt.Errorf("multiple checklist entries found for phase %02d", phaseID)
-	}
-	return strings.Join(lines, ""), nil
+		return replacement, true
+	})
 }
 
 func validateNewPhaseEditDependencies(planDirectory string, edited phaseMeta, phases []storedPhase) error {
+	plan := planName(planDirectory)
 	all := make([]draftPhase, 0, len(phases))
 	for _, phase := range phases {
-		meta := phaseMeta{Phase: phase.id, Slug: phase.slug, Status: phase.status}
 		if phase.id == edited.Phase {
-			meta = edited
-		} else {
-			for _, raw := range phase.dependencies {
-				dependency, err := parseDependency(raw)
-				if err != nil || dependency.phase == nil || dependency.plan != planName(planDirectory) {
-					return fmt.Errorf("phase %d has invalid internal dependency %q", phase.id, raw)
-				}
-				meta.DependsOn = append(meta.DependsOn, *dependency.phase)
-			}
+			all = append(all, draftPhase{Title: phase.title, Meta: edited})
+			continue
 		}
-		all = append(all, draftPhase{Title: phase.title, Meta: meta})
+		converted, err := storedPhaseToDraft(plan, phase)
+		if err != nil {
+			return err
+		}
+		all = append(all, converted)
 	}
-	if err := validatePhaseDependencies(all); err != nil {
-		return err
-	}
-	return nil
+	return validatePhaseDependencies(all)
 }
 
 func applySectionEdit(raw []byte, currentRaw []byte, target, planDirectory, section string, dryRun, jsonOutput bool) (applyOperation, error) {

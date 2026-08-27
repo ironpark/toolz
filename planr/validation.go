@@ -39,13 +39,6 @@ func validationRecords(err error) []validationRecord {
 	return append([]validationRecord{}, failure.records...)
 }
 
-func validationRecordForError(err error, rule, section string) []validationRecord {
-	if records := validationRecords(err); len(records) > 0 {
-		return records
-	}
-	return []validationRecord{{Rule: rule, Section: section, Detail: err.Error()}}
-}
-
 func wrapValidationError(err error, rule, section string) error {
 	if err == nil || len(validationRecords(err)) > 0 {
 		return err

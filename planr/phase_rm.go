@@ -133,22 +133,7 @@ func formatPhaseDependents(phases []storedPhase) string {
 }
 
 func removePhaseChecklist(body string, phaseID int) (string, error) {
-	marker := fmt.Sprintf("[Phase %02d:", phaseID)
-	lines := strings.SplitAfter(body, "\n")
-	removed := 0
-	result := make([]string, 0, len(lines))
-	for _, line := range lines {
-		if strings.Contains(line, marker) && strings.Contains(strings.TrimSpace(line), "- [") {
-			removed++
-			continue
-		}
-		result = append(result, line)
-	}
-	if removed == 0 {
-		return body, fmt.Errorf("checklist entry for phase %02d not found", phaseID)
-	}
-	if removed > 1 {
-		return body, fmt.Errorf("multiple checklist entries found for phase %02d", phaseID)
-	}
-	return strings.Join(result, ""), nil
+	return transformChecklistEntry(body, phaseID, func(string) (string, bool) {
+		return "", true
+	})
 }

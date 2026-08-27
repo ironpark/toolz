@@ -174,9 +174,12 @@ func parseDependency(value string) (planDependency, error) {
 	return planDependency{plan: plan, phase: &phase}, nil
 }
 
+// planDirectoryPrefix matches a numbered plan directory name, capturing its
+// index and plan name.
+var planDirectoryPrefix = regexp.MustCompile(`^(\d+)-(.+)$`)
+
 func nextPlanDirectory(planDirectories []string, name string) (string, error) {
 	maxIndex := -1
-	prefix := regexp.MustCompile(`^(\d+)-(.+)$`)
 	for _, directory := range planDirectories {
 		entries, err := os.ReadDir(directory)
 		if os.IsNotExist(err) {
@@ -189,7 +192,7 @@ func nextPlanDirectory(planDirectories []string, name string) (string, error) {
 			if !entry.IsDir() {
 				continue
 			}
-			match := prefix.FindStringSubmatch(entry.Name())
+			match := planDirectoryPrefix.FindStringSubmatch(entry.Name())
 			if len(match) != 3 {
 				continue
 			}
@@ -285,6 +288,40 @@ func phaseChecklistEntry(id int, title, slug string, done bool) string {
 		checkmark = "x"
 	}
 	return fmt.Sprintf("- [%s] [Phase %02d: %s](%s)", checkmark, id, title, phaseDocumentPath(id, slug))
+}
+
+// transformChecklistEntry rewrites the single checklist line for a phase in a
+// PLAN.md body. transform receives the matching line (including its trailing
+// newline, when present) and returns the replacement plus true to count the
+// line as handled; returning an empty replacement drops the line, and false
+// keeps the original line without counting it as a match.
+func transformChecklistEntry(body string, phaseID int, transform func(line string) (string, bool)) (string, error) {
+	marker := fmt.Sprintf("[Phase %02d:", phaseID)
+	lines := strings.SplitAfter(body, "\n")
+	matched := 0
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if !strings.Contains(line, marker) || !strings.Contains(strings.TrimSpace(line), "- [") {
+			result = append(result, line)
+			continue
+		}
+		replacement, handled := transform(line)
+		if !handled {
+			result = append(result, line)
+			continue
+		}
+		matched++
+		if replacement != "" {
+			result = append(result, replacement)
+		}
+	}
+	if matched == 0 {
+		return body, fmt.Errorf("checklist entry for phase %02d not found", phaseID)
+	}
+	if matched > 1 {
+		return body, fmt.Errorf("multiple checklist entries found for phase %02d", phaseID)
+	}
+	return strings.Join(result, ""), nil
 }
 
 func phaseFrontmatter(planDirectory string, meta phaseMeta) map[string]any {

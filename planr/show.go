@@ -27,7 +27,7 @@ func showCommand(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("show requires <plan-name> and optionally <phase-number>")
 	}
 	section := strings.TrimSpace(cmd.String("section"))
-	if section != "" && section != "goals" && section != "context" && section != "plan" {
+	if section != "" && !validSection(section) {
 		return fmt.Errorf("invalid show section %q; use goals, context, or plan", section)
 	}
 	if (section != "" || cmd.Bool("all")) && cmd.NArg() != 1 {
@@ -223,8 +223,14 @@ func readPhaseDetails(planRoot, planDirectory string, stored storedPhase) (phase
 }
 
 func frontString(front map[string]any, key string) string {
-	value, _ := front[key].(string)
-	return value
+	return stringValue(front[key])
+}
+
+// stringValue is the shared coercion of a frontmatter value into a string; a
+// non-string value reads as empty.
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return text
 }
 
 func printShowBody(label, body string) {
