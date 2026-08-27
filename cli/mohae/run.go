@@ -20,6 +20,9 @@ func newRunCommand() *cli.Command {
 			// Overrides. Each one shadows a configuration field for this
 			// invocation only, which is what makes a config reusable across
 			// variants instead of edited between runs.
+			// Profiles apply first, then the field flags below, so a flag can
+			// still fine-tune whatever a profile selected.
+			&cli.StringSliceFlag{Name: "profile", Usage: "apply a named profile from the config; repeatable, later ones win"},
 			&cli.StringFlag{Name: "agent", Aliases: []string{"a"}, Usage: "override the agent type (claude-code, codex, custom-cli)"},
 			// Repeatable: the configured conversation is replaced wholesale,
 			// in the order the flags were given. Replacing rather than
@@ -78,6 +81,11 @@ func applyRunOverrides(cmd *cli.Command, configs []*Config) error {
 		return err
 	}
 	for _, config := range configs {
+		for _, name := range cmd.StringSlice("profile") {
+			if err := config.ApplyProfile(name); err != nil {
+				return err
+			}
+		}
 		if value := cmd.String("agent"); value != "" {
 			config.Agent.Type = value
 		}

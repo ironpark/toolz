@@ -181,10 +181,15 @@ mcp:
 `
 	case "multi-agent":
 		return header + `
-# Write one file per agent and run them together:
-#   mohae run 'trials/*.config.yaml'
-# Keeping every other field identical is what makes the comparison mean
-# something.
+# One profile per agent: a section a profile declares replaces the base
+# section wholesale, everything else stays shared, and that sameness is what
+# makes the comparison mean something. Run each variant with
+#   mohae run --profile claude
+profiles:
+  claude:
+    agent:
+      type: claude-code
+      model: claude-opus-5
 `
 	default:
 		return header

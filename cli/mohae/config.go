@@ -41,6 +41,10 @@ type Config struct {
 	Verify  VerifyConfig      `yaml:"verify,omitempty"`
 	Limits  LimitsConfig `yaml:"limits,omitempty"`
 	Report  ReportConfig `yaml:"report,omitempty"`
+
+	// Profiles are named subsets of this configuration; `--profile` overwrites
+	// the base with one or more of them before the trial runs.
+	Profiles map[string]Profile `yaml:"profiles,omitempty"`
 }
 
 // AgentConfig selects the agent under test. `type` names a built-in driver;
