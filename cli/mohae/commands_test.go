@@ -142,7 +142,8 @@ func TestVerifyStrictFailsOnWarnings(t *testing.T) {
 	trimmed := strings.NewReplacer(
 		"  init_script: ./init.sh\n", "",
 		"  agent_md: ./AGENTS.md\n", "",
-		"  script: ./verify.sh\n", "",
+		"  scripts:\n", "",
+		"    - ./verify.sh\n", "",
 	).Replace(string(config))
 	trimmed = strings.Replace(trimmed, "verify:\n", "", 1)
 	if err := os.WriteFile(filepath.Join(directory, DefaultConfigName), []byte(trimmed), 0o644); err != nil {

@@ -33,7 +33,7 @@ func newRunCommand() *cli.Command {
 			&cli.StringSliceFlag{Name: "prompt-when", Usage: "expr condition gating the prompt at the same position; use '' to leave one unconditional (repeatable)"},
 			&cli.StringFlag{Name: "agent-md", Usage: "override the AGENTS.md installed in the workspace"},
 			&cli.StringFlag{Name: "init-script", Usage: "override the workspace setup script"},
-			&cli.StringFlag{Name: "verify-script", Usage: "override the script that grades the finished workspace"},
+			&cli.StringSliceFlag{Name: "verify-script", Usage: "replace the scripts that grade the finished workspace (repeatable)"},
 			&cli.StringFlag{Name: "mcp-config", Aliases: []string{"m"}, Usage: "override the MCP server configuration"},
 
 			&cli.StringFlag{Name: "output", Aliases: []string{"o"}, Value: "terminal", Usage: "report format: terminal, json, markdown, html"},
@@ -98,8 +98,11 @@ func applyRunOverrides(cmd *cli.Command, configs []*Config) error {
 		if value := cmd.String("init-script"); value != "" {
 			config.Workspace.InitScript = absoluteOverride(value)
 		}
-		if value := cmd.String("verify-script"); value != "" {
-			config.Verify.Script = absoluteOverride(value)
+		if values := cmd.StringSlice("verify-script"); len(values) > 0 {
+			config.Verify.Scripts = nil
+			for _, value := range values {
+				config.Verify.Scripts = append(config.Verify.Scripts, absoluteOverride(value))
+			}
 		}
 		if value := cmd.String("mcp-config"); value != "" {
 			// The override replaces the configured servers wholesale, and with

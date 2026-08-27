@@ -24,7 +24,7 @@
    `when` 조건이 붙어 있으면 조건이 참일 때만 보냅니다. 그 사이에는 개입하지 않으므로
    에이전트가 스스로 완료를 판단해야 하며, 그동안 대화·명령 실행·실패·토큰 사용량을
    기록합니다.
-4. **채점** — `verify.script`가 끝난 워크스페이스를 검사합니다. 워크스페이스 **밖**에서
+4. **채점** — `verify.scripts`가 순서대로 끝난 워크스페이스를 검사합니다. 워크스페이스 **밖**에서
    실행되고 안으로 복사되지도 않으므로, 에이전트가 검사 항목에 맞춰 결과를 꾸밀 수
    없습니다.
 5. **리포트** — 성공 여부, 토큰 종류별 사용량, 소요 시간, 실패한 명령을 리포트로 남깁니다.
@@ -68,7 +68,8 @@ mcp: # 연결할 MCP 서버. agents 생략 시 모든 에이전트에 제공
     agents: [claude-code, codex]
 
 verify:
-  script: ./verify.sh
+  scripts: # 순서대로 실행. 각각 종료 코드 0이면 합격, 출력 형식은 자유
+    - ./verify.sh
 
 limits:
   timeout_seconds: 300
@@ -180,12 +181,11 @@ prompts:
 
 ### 검증 스크립트
 
-`verify.sh`는 `MOHAE_WORKSPACE` 환경 변수로 완료된 워크스페이스 경로를 받습니다.
-검사 결과를 다음 형식으로 출력하면 리포트가 표로 정리합니다.
-
-```text
-CHECK<TAB>이름<TAB>PASS|FAIL<TAB>비고
-```
+`verify.scripts`에는 스크립트를 여러 개 나열할 수 있고, 에이전트가 멈춘 뒤 순서대로
+실행됩니다. 각 스크립트는 `MOHAE_WORKSPACE` 환경 변수로 완료된 워크스페이스 경로를
+받고, **종료 코드가 판정입니다** — 0이면 합격, 그 외는 불합격. 출력 형식은 정해져
+있지 않습니다: 사람이 읽는 데 도움이 되는 내용을 자유롭게 출력하면 mohae가 그대로
+기록합니다.
 
 ## 사용법
 
@@ -223,7 +223,7 @@ mohae run -p '구현하세요' -p '빌드를 고치세요' \
 | `--prompt-when <EXPR>`   | 같은 순서의 프롬프트에 붙일 실행 조건 (반복 가능)          |
 | `--agent-md <PATH>`      | 설치할 `AGENTS.md` 대체                                    |
 | `--init-script <PATH>`   | 환경 구성 스크립트 대체                                    |
-| `--verify-script <PATH>` | 검증 스크립트 대체                                         |
+| `--verify-script <PATH>` | 검증 스크립트 목록 대체 (반복 가능)                        |
 | `-m, --mcp-config`       | MCP 서버 설정 주입                                         |
 | `-o, --output <FORMAT>`  | `terminal`, `json`, `markdown`, `html`                      |
 | `--report-dir <DIR>`     | 리포트 저장 위치 (기본 `.mohae/reports`)                   |
@@ -270,7 +270,7 @@ mohae verify --check-scripts --check-agent-md --strict
 | `--check-agent-md` | `AGENTS.md` 내용 유효성 검사                            |
 | `--strict`         | 경고도 실패로 처리                                      |
 
-경고와 실패를 구분합니다. `verify.script`가 없는 설정은 합격/불합격 판정 없이도 실행은
+경고와 실패를 구분합니다. `verify.scripts`가 없는 설정은 합격/불합격 판정 없이도 실행은
 되므로 경고이고, 경로가 존재하지 않으면 실패입니다.
 
 ### `mohae init`

@@ -149,9 +149,11 @@ prompts:
     after: [fix-build]
 
 verify:
-  # Runs outside the workspace once the agent stops, and is never copied in, so
-  # the agent cannot tailor its output to the checks.
-  script: ./verify.sh
+  # Run in order outside the workspace once the agent stops, and never copied
+  # in, so the agent cannot tailor its output to the checks. Each script exits
+  # zero to pass; what it prints is up to it.
+  scripts:
+    - ./verify.sh
 
 limits:
   timeout_seconds: 300
@@ -207,28 +209,18 @@ const verifyScriptTemplate = `#!/usr/bin/env bash
 # Runs after the agent stops, from a scratch directory outside the workspace.
 # $MOHAE_WORKSPACE points at the finished workspace.
 #
-# Print one line per check so mohae can tabulate them:
-#   CHECK<TAB>name<TAB>PASS|FAIL<TAB>detail
-# Exit non-zero if any check failed.
+# The exit status is the verdict: zero passes, anything else fails. Print
+# whatever helps a human read the result — mohae records the output verbatim
+# and imposes no format on it.
 
 set -uo pipefail
 
 workspace="${MOHAE_WORKSPACE:?MOHAE_WORKSPACE is not set}"
-failures=0
 
-check() {
-  local name="$1" status="$2" detail="${3:-}"
-  printf 'CHECK\t%s\t%s\t%s\n' "$name" "$status" "$detail"
-  [ "$status" = PASS ] || failures=$((failures + 1))
-}
-
-if [ -f "$workspace/README.md" ]; then
-  check readme PASS
-else
-  check readme FAIL "README.md is missing"
+if [ ! -f "$workspace/README.md" ]; then
+  echo "README.md is missing" >&2
+  exit 1
 fi
-
-exit $((failures > 0))
 `
 
 const agentMarkdownTemplate = `# Working instructions

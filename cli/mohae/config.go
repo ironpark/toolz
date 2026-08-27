@@ -97,12 +97,14 @@ func (m MCPServerConfig) EnabledFor(agentType string) bool {
 	return len(m.Agents) == 0 || contains(m.Agents, agentType)
 }
 
-// VerifyConfig grades the finished workspace. The script runs outside the
+// VerifyConfig grades the finished workspace. Scripts run in order once the
+// agent stops; each exits zero to pass, and what it prints is its own business
+// — mohae records the output but imposes no format on it. Scripts run outside the
 // workspace so grading cannot leave files behind that would be mistaken for the
 // agent's work, and it is never copied in, so the agent cannot tailor its
 // output to the checks.
 type VerifyConfig struct {
-	Script string `yaml:"script,omitempty"`
+	Scripts []string `yaml:"scripts,omitempty"`
 }
 
 type LimitsConfig struct {
@@ -248,7 +250,9 @@ func (c *Config) ReferencedPaths() []LabeledPath {
 		{"workspace.source", c.Workspace.Source},
 		{"workspace.init_script", c.Workspace.InitScript},
 		{"workspace.agent_md", c.Workspace.AgentMD},
-		{"verify.script", c.Verify.Script},
+	}
+	for index, script := range c.Verify.Scripts {
+		candidates = append(candidates, LabeledPath{fmt.Sprintf("verify.scripts[%d]", index), script})
 	}
 	for index, skill := range c.Skills {
 		candidates = append(candidates, LabeledPath{fmt.Sprintf("skills[%d].path", index), skill.Path})
