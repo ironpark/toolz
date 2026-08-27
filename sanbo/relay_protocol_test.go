@@ -342,6 +342,7 @@ func TestRelayOwnerCallWatchdogClosesEveryAttachedSocket(t *testing.T) {
 	// destination call is now stalled in the same place a slow owner operation
 	// would be, while the watchdog must still close the published peer snapshot.
 	relay.mu.Lock()
+	session := relay.sessions[serverID]
 	writeDone := make(chan error, 1)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -349,12 +350,7 @@ func TestRelayOwnerCallWatchdogClosesEveryAttachedSocket(t *testing.T) {
 		writeDone <- client.Write(ctx, websocket.MessageText, []byte("stalled"))
 	}()
 	eventually(t, time.Second, func() bool {
-		value, ok := relay.ownerSessions.Load(serverID)
-		if !ok {
-			return false
-		}
-		session, ok := value.(*relaySession)
-		return ok && session.ownerClosed.Load()
+		return session != nil && session.ownerClosed.Load()
 	})
 	assertRelayClose(t, daemon, websocket.StatusServiceRestart, "Session owner moved")
 	assertRelayClose(t, client, websocket.StatusServiceRestart, "Session owner moved")
@@ -487,4 +483,31 @@ func handshakePayload(t *testing.T, messageType string, key []byte) []byte {
 		t.Fatal(err)
 	}
 	return payload
+}
+
+// BenchmarkOwnerDestinations measures the per-frame cost of the owner-call
+// watchdog on the common path, where the guarded call is a mutex-and-map
+// lookup that returns long before the timer fires.
+func BenchmarkOwnerDestinations(b *testing.B) {
+	relay := mustNewRelay(b, DefaultConfig())
+	serverID := "bench-owner-destinations"
+	session := newRelaySession()
+	relay.sessions[serverID] = session
+	source := newRelayPeer(nil)
+	source.session = session
+	session.v1 = source
+	session.v1Client = newRelayPeer(nil)
+	session.v1Client.session = session
+	session.publishPeersLocked()
+	connection := Connection{ServerID: serverID, Role: RoleServer, Version: 1}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if result := relay.ownerDestinations(connection, source, relay.deliveryDeadline()); result.code != 0 {
+				b.Fatalf("owner call failed: %d %s", result.code, result.reason)
+			}
+		}
+	})
 }

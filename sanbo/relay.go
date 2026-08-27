@@ -31,15 +31,11 @@ import (
 type Relay struct {
 	Config Config
 
-	activeWebSockets atomic.Int64
-	serverMu         sync.Mutex
-	server           *http.Server
-	mu               sync.Mutex
-	sessions         map[string]*relaySession
-	// ownerSessions is the lock-free index used by the owner-call watchdog. A
-	// timeout must be able to find and close a session even when its owner call
-	// is the goroutine currently waiting for mu.
-	ownerSessions             sync.Map
+	activeWebSockets          atomic.Int64
+	serverMu                  sync.Mutex
+	server                    *http.Server
+	mu                        sync.Mutex
+	sessions                  map[string]*relaySession
 	framesForwarded           atomic.Int64
 	bytesForwarded            atomic.Int64
 	connectionRejections      atomic.Int64
@@ -93,6 +89,11 @@ type Relay struct {
 
 type relayPeer struct {
 	conn *websocket.Conn
+	// session is the session this peer was attached to, bound under Relay.mu
+	// before the peer is published and immutable afterwards. The owner-call
+	// watchdog needs the session handle without taking Relay.mu, because the
+	// call it guards may itself be the goroutine waiting for that mutex.
+	session *relaySession
 	// writeSlot serializes writers. A buffered channel rather than a mutex so a
 	// contended sender parks against its delivery deadline instead of spinning.
 	writeSlot chan struct{}
@@ -527,12 +528,10 @@ func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connec
 }
 
 func (r *Relay) sessionOwnerClosed(serverID string) bool {
-	value, ok := r.ownerSessions.Load(serverID)
-	if !ok {
-		return false
-	}
-	session, ok := value.(*relaySession)
-	return ok && session.ownerClosed.Load()
+	r.mu.Lock()
+	session := r.sessions[serverID]
+	r.mu.Unlock()
+	return session != nil && session.ownerClosed.Load()
 }
 
 // attach places an upgraded socket into its session topology and performs the
@@ -559,8 +558,8 @@ func (r *Relay) attach(connection Connection, conn *websocket.Conn) *relayPeer {
 	if s == nil {
 		s = newRelaySession()
 		r.sessions[connection.ServerID] = s
-		r.ownerSessions.Store(connection.ServerID, s)
 	}
+	peer.session = s
 	switch connection.kind() {
 	case peerV1Server, peerV1Client:
 		// One socket per role per session: attaching replaces whatever held the
@@ -901,20 +900,7 @@ func closeAsync(conn *websocket.Conn, code websocket.StatusCode, reason string) 
 // timeoutSessionOwner is the kill half of the owner-call watchdog. It closes
 // the published peer snapshot before taking Relay.mu, because the stalled
 // owner call may itself be waiting for that mutex.
-func (r *Relay) timeoutSessionOwner(serverID string, expected *relaySession) {
-	var session *relaySession
-	if expected != nil {
-		session = expected
-		if value, ok := r.ownerSessions.Load(serverID); ok && value != session {
-			return
-		}
-	} else {
-		value, ok := r.ownerSessions.Load(serverID)
-		if !ok {
-			return
-		}
-		session, _ = value.(*relaySession)
-	}
+func (r *Relay) timeoutSessionOwner(serverID string, session *relaySession) {
 	if session == nil || !session.ownerTimedOut.CompareAndSwap(false, true) {
 		return
 	}
@@ -955,7 +941,7 @@ func (r *Relay) finishTimedOutSession(serverID string, session *relaySession) {
 
 	r.mu.Lock()
 	if r.sessions[serverID] == session {
-		r.dropSessionLocked(serverID, session)
+		r.dropSessionLocked(serverID)
 	}
 	r.mu.Unlock()
 }
@@ -1152,33 +1138,34 @@ func ownerMovedResult() ownerDestinationsResult {
 // within five seconds; the timeout path therefore closes the whole session,
 // not only the source that happened to make the call.
 func (r *Relay) ownerDestinations(c Connection, source *relayPeer, deadline time.Time) ownerDestinationsResult {
-	var expected *relaySession
-	if value, ok := r.ownerSessions.Load(c.ServerID); ok {
-		expected, _ = value.(*relaySession)
-	}
-	result := make(chan ownerDestinationsResult, 1)
-	go func() {
-		result <- r.ownerDestinationsCall(c, source, deadline)
-	}()
 	timeout := r.ownerCallTimeout
 	if timeout <= 0 {
 		timeout = ownerCallTimeout
 	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case value := <-result:
-		return value
-	case <-timer.C:
-		r.timeoutSessionOwner(c.ServerID, expected)
+	// fired makes the kill and the result mutually exclusive: whichever side
+	// wins the swap decides what this call returns.
+	var fired atomic.Bool
+	session := source.session
+	watchdog := time.AfterFunc(timeout, func() {
+		if fired.CompareAndSwap(false, true) {
+			r.timeoutSessionOwner(c.ServerID, session)
+		}
+	})
+	result := r.ownerDestinationsCall(c, source, deadline)
+	watchdog.Stop()
+	if !fired.CompareAndSwap(false, true) {
+		// The watchdog already killed the session; the call's answer is stale.
 		return ownerMovedResult()
 	}
+	return result
 }
 
 func (r *Relay) ownerDestinationsCall(c Connection, source *relayPeer, deadline time.Time) ownerDestinationsResult {
 	r.mu.Lock()
 	s := r.sessions[c.ServerID]
-	if s == nil || s.ownerClosed.Load() || r.moved[c.ServerID] {
+	// A peer displaced by a re-attach keeps its dying session pointer: fail it
+	// closed rather than route through a new session with the same ID.
+	if s == nil || s != source.session || s.ownerClosed.Load() || r.moved[c.ServerID] {
 		r.mu.Unlock()
 		return ownerMovedResult()
 	}
@@ -1422,18 +1409,15 @@ func (r *Relay) reclaimSessionLocked(serverID string, s *relaySession) {
 		return
 	}
 	if s.v1 == nil && s.v1Client == nil && s.control == nil && len(s.clients) == 0 && len(s.data) == 0 && len(s.waiting) == 0 {
-		r.dropSessionLocked(serverID, s)
+		r.dropSessionLocked(serverID)
 		_ = r.ownership.release(serverID, r)
 	}
 }
 
 // dropSessionLocked removes every index entry for one session: the session
-// table, the watchdog's owner index, and the moved marker.
-func (r *Relay) dropSessionLocked(serverID string, s *relaySession) {
+// table and the moved marker.
+func (r *Relay) dropSessionLocked(serverID string) {
 	delete(r.sessions, serverID)
-	if value, ok := r.ownerSessions.Load(serverID); ok && value == s {
-		r.ownerSessions.Delete(serverID)
-	}
 	delete(r.moved, serverID)
 }
 
