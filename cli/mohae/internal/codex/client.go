@@ -34,6 +34,12 @@ type Options struct {
 	// Capabilities are the optional client capabilities sent at initialize.
 	Capabilities *ClientCapabilities
 
+	// Approvals answers server-initiated approval requests. When nil, command
+	// and file-change approvals are declined, permission requests grant
+	// nothing, and any other server request is answered with a
+	// method-not-found error, so a turn fails closed instead of hanging.
+	Approvals ApprovalHandler
+
 	// OnNotification, when set, receives every notification the server sends,
 	// including those routed to thread and turn subscribers.
 	OnNotification func(method string, params json.RawMessage)
@@ -52,6 +58,8 @@ type Client struct {
 	logger *slog.Logger
 	tr     *transport
 	info   InitializeResult
+
+	pending *pendingRequests
 
 	mu          sync.Mutex
 	initialized bool
@@ -84,12 +92,18 @@ func dial(ctx context.Context, opts Options, in io.Reader, out io.Writer, releas
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	c := &Client{opts: opts, logger: logger, threads: make(map[string]*threadSubscription)}
+	c := &Client{
+		opts:    opts,
+		logger:  logger,
+		pending: newPendingRequests(),
+		threads: make(map[string]*threadSubscription),
+	}
 	c.tr = newTransport(transportConfig{
-		in:             in,
-		out:            out,
-		release:        release,
-		onNotification: c.handleNotification,
+		in:              in,
+		out:             out,
+		release:         release,
+		onNotification:  c.handleNotification,
+		onServerRequest: c.handleServerRequest,
 	})
 
 	if err := c.handshake(ctx); err != nil {
@@ -98,6 +112,7 @@ func dial(ctx context.Context, opts Options, in io.Reader, out io.Writer, releas
 	}
 	go func() {
 		<-c.tr.Done()
+		c.pending.cancelAll()
 		c.shutdown()
 	}()
 	return c, nil

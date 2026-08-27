@@ -2,7 +2,7 @@
 depends_on:
 - "00-internal-codex#4"
 perf_phase: false
-status: planned
+status: in-progress
 ---
 > DONE-WHEN: A scripted turn requiring command approval completes when the handler
 > NEXT: none

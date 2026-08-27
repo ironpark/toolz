@@ -128,7 +128,7 @@ func (c *Client) routeThreadNotification(method string, params json.RawMessage, 
 	switch method {
 	case MethodThreadStarted, MethodThreadStatusChanged, MethodThreadArchived,
 		MethodThreadUnarchived, MethodThreadDeleted, MethodThreadClosed,
-		MethodThreadNameUpdated:
+		MethodThreadNameUpdated, MethodServerRequestResolved:
 	default:
 		return
 	}

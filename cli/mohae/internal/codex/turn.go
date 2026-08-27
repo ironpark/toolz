@@ -298,7 +298,13 @@ func (c *Client) deliverTurnEvent(sub *threadSubscription, note queuedNotificati
 		stream.closeEvents()
 		return
 	}
+	if event.Kind == EventTurnStarted {
+		// A new turn clears prompts left over from the previous one.
+		c.pending.cancelTurn(turnKey(event.ThreadID, event.TurnID))
+	}
 	if event.Kind == EventTurnCompleted {
+		// Pending approval prompts for this turn can no longer be answered.
+		c.pending.cancelTurn(turnKey(event.ThreadID, event.TurnID))
 		stream.finish(event.Turn, nil)
 		sub.removeStream(stream)
 		stream.closeEvents()
