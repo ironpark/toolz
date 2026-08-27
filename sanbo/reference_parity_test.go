@@ -196,7 +196,7 @@ func TestShedSocketRefusesFurtherFrames(t *testing.T) {
 		if s == nil || s.v1Client == nil {
 			return false
 		}
-		s.v1Client.shed = true
+		s.v1Client.shed.Store(true)
 		return true
 	})
 	writeRelayMessage(t, client, websocket.MessageBinary, []byte("blocked"))
@@ -264,7 +264,7 @@ func TestShedPicksLongestBlockedSourceBeforeNewestActiveSocket(t *testing.T) {
 func TestShedSkipsSocketsAlreadyChosen(t *testing.T) {
 	relay := NewRelay(DefaultConfig())
 	already, next := newRelayPeer(nil), newRelayPeer(nil)
-	already.shed = true
+	already.shed.Store(true)
 	next.attachSeq.Store(relay.nextSeq())
 	relay.mu.Lock()
 	relay.sessions["shed-skip"] = &relaySession{

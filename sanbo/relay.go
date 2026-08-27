@@ -80,8 +80,10 @@ type relayPeer struct {
 	// contended sender parks against its delivery deadline instead of spinning.
 	writeSlot chan struct{}
 	// shed marks a peer already chosen by memory-pressure shedding, which runs
-	// again before the closed socket has left the session. Guarded by Relay.mu.
-	shed bool
+	// again before the closed socket has left the session. Atomic rather than
+	// guarded by Relay.mu so inbound admission stays lock-free; shedding
+	// tolerates one extra frame racing through.
+	shed atomic.Bool
 	// attachSeq and blockSeq are the monotonic ordering keys memory-pressure
 	// shedding picks victims by: the longest-blocked source first, then the
 	// newest attached socket. blockSeq is zero while the socket has no delivery
@@ -811,9 +813,7 @@ func (r *Relay) admitsMessage(c Connection, typ websocket.MessageType, source *r
 	if r.memoryPressure.Load() {
 		return false
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return !source.shed
+	return !source.shed.Load()
 }
 
 func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType, b []byte) {
@@ -1197,7 +1197,7 @@ func (r *Relay) shedCandidatesLocked() []*relayPeer {
 	for _, session := range r.sessions {
 		for _, peer := range sessionPeers(session) {
 			switch {
-			case peer.shed:
+			case peer.shed.Load():
 			case peer.blockSeq.Load() != 0:
 				blocked = append(blocked, peer)
 			default:
@@ -1220,7 +1220,7 @@ func (r *Relay) shedForMemoryPressure(batch int) {
 		peers = peers[:batch]
 	}
 	for _, peer := range peers {
-		peer.shed = true
+		peer.shed.Store(true)
 	}
 	released := int64(0)
 	for _, session := range r.sessions {
