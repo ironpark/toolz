@@ -1,0 +1,8 @@
+.harness/
+bin/
+
+# The built CLI, which shares its name with a plausible package directory.
+# Without the exception a `rx/` package is silently untracked and the agent has
+# to fight `git add -f` over a fixture detail that has nothing to do with the task.
+/rx
+!/rx/

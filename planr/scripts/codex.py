@@ -68,6 +68,7 @@ DEFAULT_FIXTURE = "codex-harness"
 FIXTURE_LABELS = {
     "codex-harness": "codex",
     "codex-greenfield": "codex-greenfield",
+    "codex-regex": "codex-regex",
 }
 RUN_LABEL = FIXTURE_LABELS[DEFAULT_FIXTURE]
 # `FIXTURE.*` files configure the evaluation and must never reach the agent's

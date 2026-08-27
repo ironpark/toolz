@@ -47,3 +47,22 @@ fixtures:
           워크스페이스로 복사하지 않으므로 에이전트가 검사 내용을 보고 맞출 수 없다.
           `CHECK<TAB>이름<TAB>PASS|FAIL<TAB>비고` 줄을 출력하면 analyze.py가
           리포트의 "인수 검사" 표로 만든다.
+
+  - name: codex-regex
+    used_by: planr/scripts/codex.py --fixture codex-regex
+    workspace: 시스템 임시 디렉터리 (산출물은 planr/run/<timestamp>-codex-regex/)
+    description: >-
+      설명할 기능은 적지만 구현이 깊은 Codex 평가. 명령 표면은 `rx <pattern> <file>`과
+      플래그 두 개(-o, -c)뿐이고, 실제 과제는 `. * + ? [] ^ $ | () \`를 지원하는 정규식
+      엔진을 직접 만드는 것이다. `regexp` import를 인수 검사가 막으므로 표준 라이브러리
+      래핑으로 우회할 수 없다. codex-greenfield가 요구사항 개수로 phase를 나누게 한다면
+      이 픽스처는 파서·매처·앵커·오류 처리처럼 구현 난이도로 phase를 나누게 한다.
+    contents:
+      - .planr.yaml: 훅으로 planr 이벤트를 .harness/planr-events.log에 기록
+      - .gitignore: .harness/, bin/, 빌드된 rx 바이너리 제외
+      - FIXTURE.PROMPT.<언어>.md: 실행 언어에 맞는 파일이 에이전트에게 보내는 요청. 워크스페이스로 복사하지 않는다
+      - FIXTURE.AGENTS.<언어>.md: 실행 언어에 맞는 파일이 AGENTS.md로 설치되는 저장소 지침
+      - FIXTURE.TEST.sh: >-
+          문법 16종·탐욕 매칭·플래그·종료 코드·잘못된 패턴 5종을 검사하고,
+          `regexp` import 여부와 외부 의존성 유무도 함께 본다. 워크스페이스로
+          복사하지 않으므로 에이전트가 검사 내용을 보고 맞출 수 없다.

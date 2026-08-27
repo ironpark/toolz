@@ -1,0 +1,11 @@
+language: en
+plans_dirs:
+  - plans-active
+  - plans-archive
+ignore:
+  - .harness/**
+  - bin/**
+hooks:
+  after:
+    - on: [new, add, phase_add, start, done, reset, conditional, plan_done]
+      run: 'printf "%s|%s|%s|%s\\n" "$PLANR_EVENT" "$PLANR_PLAN" "$PLANR_PHASE" "$PLANR_STATUS" >> .harness/planr-events.log'

@@ -10,18 +10,25 @@ in memory; do not open plan documents or `.planr.yaml` directly.
 ## Commands
 
 ```sh
-planr schema --json # document contract and valid status/dependency values
+planr schema # document contract and valid status/dependency values
 planr new <kebab-name> --description "short description, 200 characters or fewer" --json
 planr apply --stdin # apply the completed Markdown sent on stdin
-planr overview --json # progress summary for every plan
-planr status --json # remaining phases and pending dependencies
-planr show <plan-name> --all --json # all plan documents and phase data
+planr overview # progress summary for every plan
+planr status # remaining phases and pending dependencies
+planr show <plan-name> [<number>] # one phase document
+planr show <plan-name> --all --json # every plan document at once
 planr edit <plan-name>#<number> --json # check out one phase into memory
 planr edit <plan-name> --section plan --json # check out an editable plan section
 planr new <plan-name>#<title> --json # produce a new phase draft
 planr phase start <plan-name> <number> # begin a phase
 planr phase done <plan-name> <number> # complete a phase
 ```
+
+Read the plain output; it carries the same facts as `--json` in fewer tokens.
+Reach for `--json` in the three places where structure earns its cost: `apply`
+when it fails, `show --all` (plan bodies contain their own Markdown headings, so
+only fields separate one document from the next), and `new` / `edit`, which
+return a document to work on rather than a summary to read.
 
 `new --json` returns a selector and a `template` string. Fill every
 `TODO(planr)` marker, then send that string to `planr apply --stdin`. A phase
@@ -67,15 +74,14 @@ rules, sections, phases, and line numbers.
    needed.
 2. Create a plan with `new --json`, fill its template, and apply it through
    stdin. Split phases into units that can each be verified independently.
-3. Check the result with `overview --json`, `status --json`, and
-   `show --all --json`.
+3. Check the result with `overview`, `status`, and `show`.
 4. For each phase, repeat:
    `planr phase start` → implement → verify (tests) → **commit the changes** →
    `planr phase done`.
 5. If the plan diverges, create a phase draft with `new plan#title`, or check
    out and apply the relevant section or phase with `edit`.
-6. When every phase is finished, confirm with `overview --json` that they are
-   all `done`.
+6. When every phase is finished, confirm with `overview` that they are all
+   `done`.
 
 ## Rules
 

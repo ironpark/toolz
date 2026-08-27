@@ -10,18 +10,24 @@ JSON과 stdin/stdout 인터페이스를 사용해 메모리에서 처리하고, 
 ## 명령
 
 ```sh
-planr schema --json # 문서 계약·상태·의존성 규칙
+planr schema # 문서 계약·상태·의존성 규칙
 planr new <kebab-name> --description "200 글자 이내 짧은 설명" --json
 planr apply --stdin # 완성한 Markdown을 표준 입력으로 적용
-planr overview --json # 모든 plan 진행률
-planr status --json # 남은 phase와 대기 중인 의존성
-planr show <plan-name> --all --json # plan 전체 문서와 phase 정보
+planr overview # 모든 plan 진행률
+planr status # 남은 phase와 대기 중인 의존성
+planr show <plan-name> [<number>] # phase 문서 하나
+planr show <plan-name> --all --json # plan 전체 문서를 한 번에
 planr edit <plan-name>#<number> --json # phase 하나를 메모리로 checkout
 planr edit <plan-name> --section plan --json # 편집할 plan section checkout
 planr new <plan-name>#<title> --json # 새 phase 초안 생성
 planr phase start <plan-name> <number> # phase 착수
 planr phase done <plan-name> <number> # phase 완료
 ```
+
+기본 출력을 그대로 읽으십시오. `--json`과 같은 사실을 더 적은 토큰으로 담고 있습니다.
+`--json`은 구조가 값을 하는 세 곳에서만 씁니다. 실패한 `apply`, `show --all`(문서 본문에
+Markdown 제목이 들어 있어 필드로만 문서 경계를 나눌 수 있습니다), 그리고 읽을 요약이
+아니라 다룰 문서를 돌려주는 `new`·`edit`입니다.
 
 `new --json`은 selector와 `template` 문자열을 반환합니다. 모든 `TODO(planr)` 표시를
 실제 내용으로 바꾼 뒤 그 문자열을 `planr apply --stdin`으로 보냅니다. phase 초안에는
@@ -61,12 +67,12 @@ plan 초안에는 `GOALS`, `SCOPE`, `CONTEXT`, `PHASES`, `VERIFICATION`, `ORDERI
 1. 요청과 기존 코드·테스트를 먼저 읽고 필요한 일을 파악합니다.
 2. `new --json`으로 plan을 만들고 template을 채운 뒤 stdin으로 적용합니다. 각 phase를
    독립적으로 검증할 수 있는 단위로 나눕니다.
-3. `overview --json`, `status --json`, `show --all --json`으로 결과를 확인합니다.
+3. `overview`, `status`, `show`로 결과를 확인합니다.
 4. phase마다 `planr phase start` → 구현 → 검증(테스트) → **변경 사항 커밋** →
    `planr phase done`을 반복합니다.
 5. 계획이 실제 작업과 달라지면 `new plan#title`로 phase 초안을 만들거나, `edit`로 해당
    phase/section을 checkout해 수정하고 적용합니다.
-6. 모든 phase가 끝나면 `overview --json`으로 모두 `done`인지 확인합니다.
+6. 모든 phase가 끝나면 `overview`로 모두 `done`인지 확인합니다.
 
 ## 규칙
 
