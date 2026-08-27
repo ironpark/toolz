@@ -328,6 +328,26 @@ func (r *Relay) handleNotFound(writer http.ResponseWriter, _ *http.Request) {
 }
 
 func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Request) {
+	connection, conn, release, ok := r.admit(writer, request)
+	if !ok {
+		return
+	}
+	defer release()
+	peer := r.attach(connection, conn)
+	if peer == nil {
+		return
+	}
+	defer func() { r.removePeer(connection, peer) }()
+	r.readLoop(connection, peer)
+}
+
+// admit runs every check between the request line and a live socket: query
+// parsing, reroute and drain policy, the session claim, the connection
+// reservation and the upgrade itself. It answers the request itself on every
+// rejection. On success it returns the upgraded socket and the release the
+// caller must defer, which retires the reservation and the socket; the session
+// claim is not released here because teardown reclaims it with the session.
+func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connection, *websocket.Conn, func(), bool) {
 	query := request.URL.Query()
 	connection, err := ParseConnectionQuery(map[string]string{
 		"serverId":     query.Get("serverId"),
@@ -337,7 +357,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 	})
 	if err != nil {
 		http.Error(writer, err.Error(), http.StatusBadRequest)
-		return
+		return Connection{}, nil, nil, false
 	}
 	// A route owned elsewhere must reroute even while this node is under local
 	// pressure, so ownership is consulted before any capacity rejection. When
@@ -348,11 +368,11 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 			r.rerouteResponses.Add(1)
 			writer.Header().Set(r.Config.RerouteHeader, owner.target)
 			writer.WriteHeader(http.StatusConflict)
-			return
+			return Connection{}, nil, nil, false
 		}
 		r.connectionRejections.Add(1)
 		http.Error(writer, "relay capacity unavailable", http.StatusServiceUnavailable)
-		return
+		return Connection{}, nil, nil, false
 	}
 	// A drain only refuses to claim a session this node does not already own;
 	// sockets joining an existing session keep being served so the node can be
@@ -360,22 +380,22 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 	if r.Draining() {
 		if _, owned, err := r.ownership.lookup(connection.ServerID); err != nil || !owned {
 			writeText(writer, http.StatusServiceUnavailable, "draining")
-			return
+			return Connection{}, nil, nil, false
 		}
 	}
 	owner, acquired, err := r.ownership.claim(connection.ServerID, r)
 	if err != nil {
 		r.connectionRejections.Add(1)
 		http.Error(writer, "cluster ownership unavailable", http.StatusServiceUnavailable)
-		return
+		return Connection{}, nil, nil, false
 	}
 	if !owner.ownedBy(r) {
 		r.rerouteResponses.Add(1)
 		writer.Header().Set(r.Config.RerouteHeader, owner.target)
 		writer.WriteHeader(http.StatusConflict)
-		return
+		return Connection{}, nil, nil, false
 	}
-	// Single undo path for every rejection between here and attach.
+	// Single undo path for every rejection between here and the upgrade.
 	attached, reserved := false, false
 	defer func() {
 		if attached {
@@ -391,7 +411,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 	if !r.reserveWebSocket() {
 		r.connectionRejections.Add(1)
 		http.Error(writer, "relay capacity unavailable", http.StatusServiceUnavailable)
-		return
+		return Connection{}, nil, nil, false
 	}
 	reserved = true
 	conn, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
@@ -402,13 +422,21 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 	if err != nil {
 		r.capacityEpoch.Add(1)
 		r.listenerEpoch.Add(1)
-		return
+		return Connection{}, nil, nil, false
 	}
 	attached = true
-	defer conn.CloseNow()
-	defer r.activeWebSockets.Add(-1)
-
 	conn.SetReadLimit(readLimit(connection))
+	return connection, conn, func() {
+		r.activeWebSockets.Add(-1)
+		conn.CloseNow()
+	}, true
+}
+
+// attach places an upgraded socket into its session topology and performs the
+// notification each kind owes on arrival. It returns nil when the socket was
+// refused after the upgrade, in which case it is already closed and has no
+// session state to tear down.
+func (r *Relay) attach(connection Connection, conn *websocket.Conn) *relayPeer {
 	peer := newRelayPeer(conn)
 	r.mu.Lock()
 	peer.attachSeq.Store(r.nextSeq())
@@ -441,7 +469,7 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		if r.moved[connection.ServerID] {
 			r.mu.Unlock()
 			_ = conn.Close(websocket.StatusServiceRestart, "Session expired")
-			return
+			return nil
 		}
 		// Clients coexist on one route, so a second client is an addition and
 		// never replaces the first.
@@ -470,7 +498,13 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 			m.source.releaseHeap(int64(len(m.payload)))
 		}
 	}
-	defer func() { r.removePeer(connection, peer) }()
+	return peer
+}
+
+// readLoop serves one attached socket until it closes or is closed. Every exit
+// is a return: the caller's deferred teardown retires the peer.
+func (r *Relay) readLoop(connection Connection, peer *relayPeer) {
+	conn := peer.conn
 	for {
 		typ, payload, err := conn.Read(context.Background())
 		if err != nil {
