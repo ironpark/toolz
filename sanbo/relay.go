@@ -13,6 +13,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"runtime"
 	"runtime/metrics"
 	"slices"
@@ -72,6 +73,9 @@ type Relay struct {
 	controlSyncDelay  time.Duration
 	controlCloseDelay time.Duration
 	ownerCallTimeout  time.Duration
+	// ownershipIdleDelay is how long an emptied session keeps its ownership
+	// claim before releasing it.
+	ownershipIdleDelay time.Duration
 	// connectionLimit is the capacity namespace's first observed limit. A
 	// later limit change is the Go equivalent of the reference capacity
 	// registry's configuration-mismatch response.
@@ -184,13 +188,14 @@ func NewRelay(config Config) (*Relay, error) {
 		return nil, fmt.Errorf("cluster ownership coordinator: %w", err)
 	}
 	relay := &Relay{
-		Config:            config,
-		sessions:          make(map[string]*relaySession),
-		moved:             make(map[string]bool),
-		controlSyncDelay:  controlSyncDelay,
-		controlCloseDelay: controlCloseDelay,
-		ownerCallTimeout:  ownerCallTimeout,
-		ownership:         ownership,
+		Config:             config,
+		sessions:           make(map[string]*relaySession),
+		moved:              make(map[string]bool),
+		controlSyncDelay:   controlSyncDelay,
+		controlCloseDelay:  controlCloseDelay,
+		ownerCallTimeout:   ownerCallTimeout,
+		ownershipIdleDelay: ownershipIdleDelay,
+		ownership:          ownership,
 	}
 	relay.connectionLimit, relay.connectionLimitValid = connectionCapacityLimit(config)
 	relay.draining.Store(config.Drain)
@@ -412,6 +417,36 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 	r.readLoop(connection, peer)
 }
 
+// lastQueryValues flattens a raw query into one value per parameter. The
+// reference collects parsed pairs with Map.new, so a duplicated parameter
+// resolves to its LAST occurrence rather than the first that url.Values.Get
+// would return.
+func lastQueryValues(rawQuery string) map[string]string {
+	values := make(map[string]string)
+	for rawQuery != "" {
+		pair := rawQuery
+		if i := strings.IndexAny(rawQuery, "&;"); i >= 0 {
+			pair, rawQuery = rawQuery[:i], rawQuery[i+1:]
+		} else {
+			rawQuery = ""
+		}
+		if pair == "" {
+			continue
+		}
+		key, value, _ := strings.Cut(pair, "=")
+		decodedKey, err := url.QueryUnescape(key)
+		if err != nil {
+			continue
+		}
+		decodedValue, err := url.QueryUnescape(value)
+		if err != nil {
+			continue
+		}
+		values[decodedKey] = decodedValue
+	}
+	return values
+}
+
 // admit runs every check between the request line and a live socket: upgrade
 // detection, query parsing, reroute and drain policy, the connection
 // reservation, the upgrade itself, and finally the session claim. It answers
@@ -423,15 +458,15 @@ func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connec
 		writeText(writer, http.StatusUpgradeRequired, "Expected WebSocket upgrade")
 		return Connection{}, nil, nil, false
 	}
-	query := request.URL.Query()
+	query := lastQueryValues(request.URL.RawQuery)
 	connection, err := ParseConnectionQuery(map[string]string{
-		"serverId":     query.Get("serverId"),
-		"role":         query.Get("role"),
-		"v":            query.Get("v"),
-		"connectionId": query.Get("connectionId"),
+		"serverId":     query["serverId"],
+		"role":         query["role"],
+		"v":            query["v"],
+		"connectionId": query["connectionId"],
 	})
 	if err != nil {
-		http.Error(writer, err.Error(), http.StatusBadRequest)
+		writeText(writer, http.StatusBadRequest, err.Error())
 		return Connection{}, nil, nil, false
 	}
 	owner, found, err := r.ownership.lookup(connection.ServerID)
@@ -633,19 +668,35 @@ func (r *Relay) readLoop(connection Connection, peer *relayPeer) {
 			_ = conn.Close(websocket.StatusTryAgainLater, "Relay ingress capacity")
 			return
 		}
+		// The reference reserves the weighted ingress budget for every admitted
+		// frame before it interprets the payload, so an exhausted node reports
+		// its own close reason ahead of the handshake and control paths.
+		weighted := int64(len(payload) * r.Config.IngressWeight)
+		if !r.reserveIngress(weighted) {
+			_ = conn.Close(websocket.StatusTryAgainLater, "Relay ingress capacity")
+			return
+		}
 		if connection.Role == RoleClient && !r.validateHandshake(connection.Version, payload) {
+			r.releaseInFlight(weighted)
 			_ = conn.Close(websocket.StatusPolicyViolation, "Invalid handshake key")
 			return
 		}
-		if connection.isControl() && typ == websocket.MessageText && controlPing(payload) {
-			pong := pongFrame(time.Now())
-			if err := r.sendPong(peer, pong); err != nil {
+		// A control frame has no destination: the reference answers a ping and
+		// discards everything else, retiring the reservation without ever
+		// starting a delivery, so the delivery gauges stay untouched.
+		if connection.isControl() {
+			err := error(nil)
+			if controlPing(payload) {
+				err = r.sendPong(peer, pongFrame(time.Now()))
+			}
+			r.releaseInFlight(weighted)
+			if err != nil {
 				_ = conn.Close(websocket.StatusTryAgainLater, "Delivery unavailable")
 				return
 			}
 			continue
 		}
-		r.route(connection, peer, typ, payload)
+		r.route(connection, peer, typ, payload, weighted)
 	}
 }
 
@@ -783,12 +834,18 @@ func (r *Relay) sendControl(p *relayPeer, b []byte) error {
 // lets the control reader report its own compatibility close reason instead of
 // racing a Slow consumer close from the queue implementation.
 func (r *Relay) sendPong(p *relayPeer, b []byte) error {
-	if err := r.sendControlWithFailure(p, b, false); err != nil {
-		return err
+	return r.sendControlWithFailure(p, b, false)
+}
+
+// countControlForward records a delivered control notification. The reference
+// writes every control frame through Writer.start_control, which counts it
+// against frames_forwarded and bytes_forwarded exactly like a payload.
+func (r *Relay) countControlForward(b []byte, err error) error {
+	if err == nil {
+		r.framesForwarded.Add(1)
+		r.bytesForwarded.Add(int64(len(b)))
 	}
-	r.framesForwarded.Add(1)
-	r.bytesForwarded.Add(int64(len(b)))
-	return nil
+	return err
 }
 
 func (r *Relay) sendControlWithFailure(p *relayPeer, b []byte, closeSlowConsumer bool) error {
@@ -804,7 +861,7 @@ func (r *Relay) sendControlWithFailure(p *relayPeer, b []byte, closeSlowConsumer
 		if err != nil && closeSlowConsumer {
 			r.dropSlowConsumer(p, true)
 		}
-		return err
+		return r.countControlForward(b, err)
 	default:
 	}
 	queued := int64(len(b))
@@ -835,7 +892,7 @@ func (r *Relay) sendControlWithFailure(p *relayPeer, b []byte, closeSlowConsumer
 	if err != nil && closeSlowConsumer {
 		r.dropSlowConsumer(p, true)
 	}
-	return err
+	return r.countControlForward(b, err)
 }
 
 // writeControl performs the write itself; callers hold the destination's write
@@ -1049,16 +1106,12 @@ func (r *Relay) admitsMessage(c Connection, typ websocket.MessageType, source *r
 	return !source.shed.Load()
 }
 
-// beginDelivery reserves ingress, re-checks admission, charges the source's
-// heap fuse, publishes the delivery gauges, and marks the source blocked. It
-// reports false once the source has already been closed or killed for whichever
-// rung it failed; on success release unwinds the accounting in LIFO order.
-func (r *Relay) beginDelivery(c Connection, source *relayPeer, typ websocket.MessageType, b []byte) (func(), bool) {
-	weighted := int64(len(b) * r.Config.IngressWeight)
-	if !r.reserveIngress(weighted) {
-		closeAsync(source.conn, websocket.StatusTryAgainLater, "Relay ingress capacity")
-		return nil, false
-	}
+// beginDelivery takes over the caller's ingress reservation, re-checks
+// admission, charges the source's heap fuse, publishes the delivery gauges, and
+// marks the source blocked. It reports false once the source has already been
+// closed or killed for whichever rung it failed; on success release unwinds the
+// accounting in LIFO order, the reservation last.
+func (r *Relay) beginDelivery(c Connection, source *relayPeer, typ websocket.MessageType, b []byte, weighted int64) (func(), bool) {
 	// Pressure that arrives between admission and delivery stops the message
 	// here instead, which the reference reports with its own close reason.
 	if !r.admitsMessage(c, typ, source) {
@@ -1094,8 +1147,8 @@ func (r *Relay) beginDelivery(c Connection, source *relayPeer, typ websocket.Mes
 	}, true
 }
 
-func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType, b []byte) {
-	release, ok := r.beginDelivery(c, source, typ, b)
+func (r *Relay) route(c Connection, source *relayPeer, typ websocket.MessageType, b []byte, weighted int64) {
+	release, ok := r.beginDelivery(c, source, typ, b, weighted)
 	if !ok {
 		return
 	}
@@ -1426,8 +1479,28 @@ func (r *Relay) reclaimSessionLocked(serverID string, s *relaySession) {
 	}
 	if s.v1 == nil && s.v1Client == nil && s.control == nil && len(s.clients) == 0 && len(s.data) == 0 && len(s.waiting) == 0 {
 		r.dropSessionLocked(serverID)
-		_ = r.ownership.release(serverID, r)
+		r.releaseOwnershipAfterIdle(serverID)
 	}
+}
+
+// releaseOwnershipAfterIdle keeps a serverId pinned to this node for the idle
+// window the reference owner process lives through after its last socket
+// detaches, so a quick reconnect lands here instead of racing a re-claim. The
+// timer re-checks the session table: a reconnect in the meantime keeps the
+// claim, and only a still-empty serverId is released.
+func (r *Relay) releaseOwnershipAfterIdle(serverID string) {
+	if r.ownershipIdleDelay <= 0 {
+		_ = r.ownership.release(serverID, r)
+		return
+	}
+	time.AfterFunc(r.ownershipIdleDelay, func() {
+		r.mu.Lock()
+		live := r.sessions[serverID] != nil
+		r.mu.Unlock()
+		if !live {
+			_ = r.ownership.release(serverID, r)
+		}
+	})
 }
 
 // dropSessionLocked removes every index entry for one session: the session
@@ -1560,6 +1633,9 @@ const (
 	controlSyncDelay  = 10 * time.Second
 	controlCloseDelay = 5 * time.Second
 	ownerCallTimeout  = 5 * time.Second
+	// ownershipIdleDelay mirrors the reference owner's idle timeout: an empty
+	// session holds its serverId claim this long before releasing it.
+	ownershipIdleDelay = 30 * time.Second
 )
 
 // readMemoryMetrics reads the named runtime/metrics uint64 samples in order.
@@ -1840,7 +1916,6 @@ func reserveCounter(counter *atomic.Int64, amount, limit int64) bool {
 // writeText writes an exact plain-text body, without http.Error's trailing
 // newline, so 503 diagnostics match the reference byte for byte.
 func writeText(writer http.ResponseWriter, status int, body string) {
-	writer.Header().Set("x-content-type-options", "nosniff")
 	writeBody(writer, status, "text/plain; charset=utf-8", body)
 }
 

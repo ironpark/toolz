@@ -827,6 +827,9 @@ func (r *Relay) runOwnershipScenario(name string) (relayScenarioResult, error) {
 		result.OwnerCount = 1
 
 	case "remote-reclaim":
+		// The reclaim is what this scenario exercises, not the idle hold that
+		// normally keeps the claim pinned for a reconnect window.
+		r.ownershipIdleDelay = time.Millisecond
 		conn, err := dialOwner(h, id)
 		if err != nil {
 			return result, err

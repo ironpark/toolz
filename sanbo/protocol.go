@@ -38,6 +38,11 @@ func pongFrame(at time.Time) []byte {
 
 // syncFrame publishes the client roster of a session to its control socket.
 func syncFrame(ids []string) []byte {
+	// An absent roster encodes as an empty list, never null: the reference
+	// always sends a JSON array.
+	if ids == nil {
+		ids = []string{}
+	}
 	b, _ := json.Marshal(struct {
 		Type          string   `json:"type"`
 		ConnectionIDs []string `json:"connectionIds"`

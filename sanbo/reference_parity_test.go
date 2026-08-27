@@ -214,7 +214,13 @@ func TestMemoryPressureAtDeliveryStartClosesWithPressureReason(t *testing.T) {
 
 	source := relayV1ClientPeer(t, relay, "pressure-delivery")
 	relay.memoryPressure.Store(true)
-	relay.route(Connection{ServerID: "pressure-delivery", Role: RoleClient, Version: 1}, source, websocket.MessageBinary, []byte("late"))
+	payload := []byte("late")
+	// route now inherits the reservation its caller took, as the read loop does.
+	weighted := int64(len(payload) * relay.Config.IngressWeight)
+	if !relay.reserveIngress(weighted) {
+		t.Fatal("reserve ingress")
+	}
+	relay.route(Connection{ServerID: "pressure-delivery", Role: RoleClient, Version: 1}, source, websocket.MessageBinary, payload, weighted)
 
 	assertRelayClose(t, client, websocket.StatusTryAgainLater, "Relay memory pressure")
 }

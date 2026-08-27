@@ -104,7 +104,9 @@ func TestBackpressureConcurrentProducersRetainPerSourceFIFO(t *testing.T) {
 
 func TestBackpressureControlNotificationsUpdateForwardedMetric(t *testing.T) {
 	r := backpressureScenario(t, "control-forwarded-metric")
-	if r.FramesForwarded != 1 || r.BytesForwarded <= 0 {
+	// The initial sync and the pong both go through the control writer, and the
+	// reference counts every control write as a forwarded frame.
+	if r.FramesForwarded != 2 || r.BytesForwarded <= 0 {
 		t.Fatalf("forward metrics = frames:%d bytes:%d", r.FramesForwarded, r.BytesForwarded)
 	}
 }
