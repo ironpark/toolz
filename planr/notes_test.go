@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/urfave/cli/v3"
 )
 
 // seedRepository builds a repository with one commit so notes have a target.
@@ -114,6 +116,44 @@ func TestCompletionStampsFrontmatter(t *testing.T) {
 	}
 	if got := frontmatterValue(t, filepath.Join(planRoot, "PLAN.md"), "completed_at"); got != "" {
 		t.Errorf("plan completed_at survived reopening: %q", got)
+	}
+}
+
+func TestPhaseStartRecordsNoteForCurrentHead(t *testing.T) {
+	root := seedRepository(t)
+	if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), []byte("plans_dir: plan\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	planRoot := filepath.Join(root, "plan", "00-checkout-v2")
+	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", languageEnglish); err != nil {
+		t.Fatal(err)
+	}
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	command := &cli.Command{
+		Name:   "start",
+		Flags:  []cli.Flag{&cli.BoolFlag{Name: "force"}},
+		Action: phaseShortcutCommand("in-progress"),
+	}
+	if err := command.Run(context.Background(), []string{"start", "checkout-v2", "0"}); err != nil {
+		t.Fatalf("phase start failed: %v", err)
+	}
+	notes, err := readPlanNotes(root, "checkout-v2")
+	if err != nil {
+		t.Fatalf("readPlanNotes() unexpected error: %v", err)
+	}
+	if len(notes) != 1 || notes[0].event != hookEventStart || notes[0].phase != "00" {
+		t.Fatalf("start notes = %#v, want one start note for phase 00", notes)
+	}
+	jsonNotes := makeNotesJSON(notes)
+	if len(jsonNotes.Notes) != 1 || jsonNotes.Notes[0].Event != hookEventStart || jsonNotes.Notes[0].Phase != "00" {
+		t.Fatalf("start JSON notes = %#v, want the start event", jsonNotes)
 	}
 }
 

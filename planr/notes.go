@@ -47,9 +47,9 @@ func noteLine(planDirectory, event, phase, at string) string {
 	return strings.Join(append(fields, "at="+at), " ")
 }
 
-// recordCompletionNote links the current HEAD commit to a completion event.
-// Completion is already written to disk by the time this runs, so a failure
-// here is reported to the caller but must not undo the status change.
+// recordCompletionNote links the current HEAD commit to a phase or plan event.
+// The state change is already written to disk by the time this runs, so a
+// failure here is reported to the caller but must not undo that change.
 func recordCompletionNote(repoRoot, planDirectory, event string, phaseID int) error {
 	repository, err := git.PlainOpen(repoRoot)
 	if err != nil {
@@ -319,6 +319,10 @@ func parseNoteLine(line string) (planNote, bool) {
 // command, since the plan or phase is already marked done on disk.
 func warnNoteFailure(err error) {
 	fmt.Fprintf(os.Stderr, "warning: completion recorded on disk but not linked to a commit: %v\n", err)
+}
+
+func warnStartNoteFailure(err error) {
+	fmt.Fprintf(os.Stderr, "warning: phase start recorded on disk but not linked to a commit: %v\n", err)
 }
 
 func notesCommand(_ context.Context, cmd *cli.Command) error {

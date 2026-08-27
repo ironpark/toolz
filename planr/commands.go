@@ -60,6 +60,7 @@ func newCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	settings = commandConfig(settings, cmd)
 	if err := runConfiguredHooks(repoRoot, settings, "before", hookEventNew, name, -1, "draft"); err != nil {
 		return err
 	}
@@ -184,8 +185,14 @@ func addCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	settings = commandConfig(settings, cmd)
 	planDirectories := settings.planDirs(repoRoot)
 	plans := planDirectories[0]
+	directoryLock, err := acquirePlansDirectoryLock(plans)
+	if err != nil {
+		return err
+	}
+	defer directoryLock.close()
 	planDirectory, err := nextPlanDirectory(planDirectories, d.Name)
 	if err != nil {
 		return err

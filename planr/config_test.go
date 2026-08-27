@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -289,6 +291,51 @@ func TestRunConfiguredHooksPreservesRuleOrder(t *testing.T) {
 	}
 	if got, want := string(output), "onetwo"; got != want {
 		t.Fatalf("hook output = %q, want %q", got, want)
+	}
+}
+
+func TestRunConfiguredHooksCanBeSkippedForOneInvocation(t *testing.T) {
+	root := t.TempDir()
+	settings := config{
+		skipHooks: true,
+		Hooks:     hookConfig{After: []hookRule{{On: []string{hookEventDone}, Run: "touch hook.out"}}},
+	}
+	if err := runConfiguredHooks(root, settings, "after", hookEventDone, "00-checkout-v2", 0, "done"); err != nil {
+		t.Fatalf("runConfiguredHooks() unexpected error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "hook.out")); !os.IsNotExist(err) {
+		t.Fatalf("skipHooks still ran the hook; stat error = %v", err)
+	}
+}
+
+func TestNoHooksGlobalFlagSkipsBeforeAndAfterHooks(t *testing.T) {
+	root := t.TempDir()
+	if _, err := git.PlainInit(root, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), []byte("plans_dir: plan\nhooks:\n  before:\n    - on: [start]\n      run: \"false\"\n  after:\n    - on: [start]\n      run: \"false\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	planRoot := filepath.Join(root, "plan", "00-checkout-v2")
+	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", languageEnglish); err != nil {
+		t.Fatal(err)
+	}
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	command := newRootCommand()
+	var output bytes.Buffer
+	command.Writer = &output
+	if err := command.Run(context.Background(), []string{"planr", "phase", "start", "checkout-v2", "0", "--no-hooks"}); err != nil {
+		t.Fatalf("phase start --no-hooks failed: %v", err)
+	}
+	if got := frontmatterValue(t, filepath.Join(planRoot, "phases", "00-api-contract.md"), "status"); got != "in-progress" {
+		t.Fatalf("phase status = %q, want in-progress", got)
 	}
 }
 

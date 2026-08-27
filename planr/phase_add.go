@@ -63,11 +63,17 @@ func phaseAddCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	settings = commandConfig(settings, cmd)
 	planDirectories := settings.planDirs(repoRoot)
 	planRoot, planDirectory, err := findPlanDirectory(planDirectories, cmd.Args().First())
 	if err != nil {
 		return err
 	}
+	planLock, err := acquirePlanLock(planRoot)
+	if err != nil {
+		return err
+	}
+	defer planLock.close()
 	planRaw, err := os.ReadFile(filepath.Join(planRoot, "PLAN.md"))
 	if err != nil {
 		return err

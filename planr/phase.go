@@ -53,11 +53,17 @@ func phaseCommand(cmd *cli.Command, status string) error {
 	if err != nil {
 		return err
 	}
+	settings = commandConfig(settings, cmd)
 	planDirectories := settings.planDirs(repoRoot)
 	planRoot, planDirectory, err := findPlanDirectory(planDirectories, cmd.Args().First())
 	if err != nil {
 		return err
 	}
+	planLock, err := acquirePlanLock(planRoot)
+	if err != nil {
+		return err
+	}
+	defer planLock.close()
 	event := phaseHookEvent(status)
 	willComplete := false
 	planWasDone := false
@@ -96,12 +102,17 @@ func phaseCommand(cmd *cli.Command, status string) error {
 		}
 	}
 	var completed bool
-	planDirectory, completed, err = updatePhaseStatus(planDirectories, cmd.Args().First(), phaseID, status)
+	planDirectory, completed, err = updatePhaseStatusLocked(planRoot, planDirectory, phaseID, status)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Updated %s phase %02d: %s\n", planDirectory, phaseID, status)
 	// Link the completion to the commit it landed on, for `planr notes`.
+	if status == "in-progress" {
+		if err := recordCompletionNote(repoRoot, planDirectory, hookEventStart, phaseID); err != nil {
+			warnStartNoteFailure(err)
+		}
+	}
 	if status == "done" {
 		if err := recordCompletionNote(repoRoot, planDirectory, hookEventDone, phaseID); err != nil {
 			warnNoteFailure(err)
@@ -426,6 +437,15 @@ func updatePhaseStatus(planDirectories []string, planArg string, phaseID int, st
 	if err != nil {
 		return "", false, err
 	}
+	planLock, err := acquirePlanLock(planRoot)
+	if err != nil {
+		return "", false, err
+	}
+	defer planLock.close()
+	return updatePhaseStatusLocked(planRoot, planDirectory, phaseID, status)
+}
+
+func updatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status string) (string, bool, error) {
 	phasePath, err := findPhaseFile(planRoot, phaseID)
 	if err != nil {
 		return "", false, fmt.Errorf("%s: %w", planDirectory, err)
