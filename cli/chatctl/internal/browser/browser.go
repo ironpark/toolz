@@ -18,7 +18,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 
-	"github.com/ironpark/toolz/chatctl/internal/session"
+	"github.com/ironpark/toolz/cli/chatctl/internal/session"
 )
 
 // Engine은 사용할 브라우저 실행 방식입니다.

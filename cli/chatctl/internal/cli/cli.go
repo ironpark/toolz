@@ -12,9 +12,9 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/urfave/cli/v3"
 
-	"github.com/ironpark/toolz/chatctl/internal/browser"
-	"github.com/ironpark/toolz/chatctl/internal/provider"
-	"github.com/ironpark/toolz/chatctl/internal/session"
+	"github.com/ironpark/toolz/cli/chatctl/internal/browser"
+	"github.com/ironpark/toolz/cli/chatctl/internal/provider"
+	"github.com/ironpark/toolz/cli/chatctl/internal/session"
 )
 
 // New는 루트 명령을 만듭니다.

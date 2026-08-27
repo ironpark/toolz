@@ -1067,7 +1067,7 @@ def markdown_report(
             "## 재현·원본 자료",
             "",
             "```sh",
-            "python3 planr/scripts/main.py codex analyze <run-directory>",
+            "python3 cli/planr/scripts/main.py codex analyze <run-directory>",
             "```",
             "",
             "- `transcript.md`: 대화 텍스트·명령 추출본",

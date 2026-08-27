@@ -1,8 +1,8 @@
 """Shared plumbing for the planr runners.
 
-Both runners build the ``planr`` binary, copy a fixture from ``planr/fixtures``
+Both runners build the ``planr`` binary, copy a fixture from ``cli/planr/fixtures``
 and drive the CLI against it.  Every invocation gets its own timestamped
-directory under ``planr/run`` holding that run's artifacts.  This module holds
+directory under ``cli/planr/run`` holding that run's artifacts.  This module holds
 the parts they have in common; it deliberately depends only on the standard
 library so the plan scenario runs without the Codex SDK installed.
 """

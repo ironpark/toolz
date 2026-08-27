@@ -1,4 +1,4 @@
-module github.com/ironpark/toolz/planr
+module github.com/ironpark/toolz/cli/planr
 
 go 1.26.3
 

@@ -31,7 +31,7 @@ planr requires a git repository, but /tmp/scratch is not inside one; run `git in
 Go가 설치되어 있다면 다음 명령으로 최신 버전을 설치할 수 있습니다.
 
 ```sh
-go install github.com/ironpark/toolz/planr@latest
+go install github.com/ironpark/toolz/cli/planr@latest
 ```
 
 Go의 바이너리 설치 경로가 `PATH`에 포함되어 있으면 어디서든 `planr` 명령을
@@ -650,8 +650,8 @@ phase 상태는 `planned`, `conditional`, `in-progress`, `done`을 사용합니�
 
 ### 실행기
 
-`planr`를 검증하는 스크립트는 모두 [`planr/scripts`](scripts)의 uv 프로젝트에 있고,
-단일 진입점 [`planr/scripts/main.py`](scripts/main.py)의 하위 명령으로 실행합니다.
+`planr`를 검증하는 스크립트는 모두 [`cli/planr/scripts`](scripts)의 uv 프로젝트에 있고,
+단일 진입점 [`cli/planr/scripts/main.py`](scripts/main.py)의 하위 명령으로 실행합니다.
 
 | 명령 | 하는 일 | 필요한 것 |
 | --- | --- | --- |
@@ -671,25 +671,25 @@ Codex SDK는 실제로 평가를 실행할 때만 불러오므로, `scenario`와
 
 ### 실행 디렉터리
 
-모든 실행은 `planr/run/` 아래에 자기 디렉터리를 하나 만들고 그 안에만 산출물을
+모든 실행은 `cli/planr/run/` 아래에 자기 디렉터리를 하나 만들고 그 안에만 산출물을
 남깁니다. 이름은 `<UTC 타임스탬프>-<실행기>` 형식이라 디렉터리 목록이 곧 시간순
 정렬입니다. 같은 초에 같은 종류의 실행이 겹칠 때만 뒤에 번호가 붙습니다.
 
 ```text
-planr/run/
+cli/planr/run/
 ├── 20260826-123846-scenario/   시나리오 작업 디렉터리 겸 산출물
 └── 20260826-123851-codex/      Codex 평가 산출물 (REPORT.md, transcript.md, session.jsonl, state/, metrics.json)
 ```
 
-Codex 평가에서 **에이전트의 작업공간은 `planr/run/` 밖**, 시스템 임시 디렉터리에
+Codex 평가에서 **에이전트의 작업공간은 `cli/planr/run/` 밖**, 시스템 임시 디렉터리에
 만들어집니다. 작업공간을 실행 디렉터리 안이나 옆에 두면 에이전트가 `..`를 읽어 자기
 평가 리포트와 transcript를 볼 수 있기 때문입니다. 작업공간 경로는 실행 디렉터리의
 `metadata.env`에 `workspace=`로 기록되고, `clean`이 이 기록을 따라가 작업공간까지 함께
-삭제합니다. `planr/run/`은 Git에서 제외됩니다.
+삭제합니다. `cli/planr/run/`은 Git에서 제외됩니다.
 
 ### 테스트 픽스처
 
-실행기가 사용하는 픽스처는 모두 [`planr/fixtures`](fixtures) 아래에 있습니다.
+실행기가 사용하는 픽스처는 모두 [`cli/planr/fixtures`](fixtures) 아래에 있습니다.
 
 | 픽스처 | 내용 |
 | --- | --- |
@@ -706,13 +706,13 @@ Codex 평가에서 **에이전트의 작업공간은 `planr/run/` 밖**, 시스�
 checkout 출시 시나리오의 복합 상태 출력을 재현하려면 다음을 실행합니다.
 
 ```sh
-python3 planr/scripts/main.py scenario
+python3 cli/planr/scripts/main.py scenario
 
 # 실행 결과 정리
-python3 planr/scripts/main.py scenario clean
+python3 cli/planr/scripts/main.py scenario clean
 ```
 
-시나리오는 `plan-scenario` 픽스처를 `planr/run/<타임스탬프>-scenario/`로 복사하고 git
+시나리오는 `plan-scenario` 픽스처를 `cli/planr/run/<타임스탬프>-scenario/`로 복사하고 git
 저장소로 초기화한 뒤, 다음 다섯 가지 plan을 만들고 상세한 `status`, 간단한 `overview`,
 `notes` 출력을 차례로 보여 줍니다.
 
@@ -739,14 +739,14 @@ go test ./...
 go vet ./...
 
 # 실행기의 Python 단위 테스트
-uv run --with pytest --project planr/scripts python -m pytest planr/scripts -q
+uv run --with pytest --project cli/planr/scripts python -m pytest cli/planr/scripts -q
 ```
 
 ### Codex 평가
 
 실행기는 매번 시스템 임시 디렉터리에 격리된 Git 리포지토리를 만들고, 그 안에
 `codex-harness` 픽스처의 `AGENTS.md`, 샘플 Go 프로젝트와 `planr` 바이너리를
-준비합니다. 산출물은 이 리포지토리가 아니라 `planr/run/<타임스탬프>-codex/`에
+준비합니다. 산출물은 이 리포지토리가 아니라 `cli/planr/run/<타임스탬프>-codex/`에
 쌓입니다.
 
 픽스처의 `FIXTURE.` 접두사 파일은 평가 설정이지 저장소 내용이 아니므로 워크스페이스로
@@ -846,7 +846,7 @@ A/B 비교는 나머지 조건(픽스처·모델·reasoning·언어)을 고정�
 처음 clone한 환경에서는 의존성을 동기화합니다.
 
 ```sh
-uv sync --project planr/scripts
+uv sync --project cli/planr/scripts
 ```
 
 Codex 인증은 로컬 Codex 설정을 사용하므로, 실제 실행 전 Codex 로그인이 되어 있어야
@@ -854,7 +854,7 @@ Codex 인증은 로컬 Codex 설정을 사용하므로, 실제 실행 전 Codex 
 
 ```sh
 # 아래 예시는 이 별칭을 사용합니다
-alias planr-codex='uv run --locked --project planr/scripts python planr/scripts/main.py codex'
+alias planr-codex='uv run --locked --project cli/planr/scripts python cli/planr/scripts/main.py codex'
 
 # 기본 실행 (에이전트가 완료를 판단할 때까지 진행)
 planr-codex
@@ -875,7 +875,7 @@ planr-codex --dry-run
 planr-codex --quiet
 
 # 이전 실행 재분석 또는 임시 실행공간 정리
-planr-codex analyze planr/run/20260826-123851-codex
+planr-codex analyze cli/planr/run/20260826-123851-codex
 planr-codex clean
 ```
 

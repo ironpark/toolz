@@ -1,4 +1,4 @@
-module github.com/ironpark/toolz/sanbo
+module github.com/ironpark/toolz/cli/sanbo
 
 go 1.26.3
 

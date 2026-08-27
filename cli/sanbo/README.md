@@ -21,7 +21,7 @@ Sanbo는 [`getpaseo/paseo-relay`](https://github.com/getpaseo/paseo-relay)의
 기본값으로 `127.0.0.1:4000`에서 실행합니다.
 
 ```sh
-cd sanbo
+cd cli/sanbo
 go run .
 ```
 

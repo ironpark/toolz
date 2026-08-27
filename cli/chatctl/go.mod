@@ -1,4 +1,4 @@
-module github.com/ironpark/toolz/chatctl
+module github.com/ironpark/toolz/cli/chatctl
 
 go 1.26.3
 

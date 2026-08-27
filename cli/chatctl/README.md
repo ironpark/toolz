@@ -6,7 +6,7 @@ ChatGPT, Gemini, Claude 의 **웹 세션** 대화 목록을 관리하는 Go CLI 
 ## 설치
 
 ```sh
-go install github.com/ironpark/toolz/chatctl@latest
+go install github.com/ironpark/toolz/cli/chatctl@latest
 ```
 
 로컬 Chrome / Chromium 이 설치되어 있어야 합니다.

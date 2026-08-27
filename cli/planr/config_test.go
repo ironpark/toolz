@@ -10,7 +10,7 @@ import (
 	"time"
 
 	git "github.com/go-git/go-git/v5"
-	"github.com/ironpark/toolz/planr/agentenv"
+	"github.com/ironpark/toolz/cli/planr/agentenv"
 )
 
 func TestLoadConfigHooks(t *testing.T) {

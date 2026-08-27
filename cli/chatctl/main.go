@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/signal"
 
-	appcli "github.com/ironpark/toolz/chatctl/internal/cli"
+	appcli "github.com/ironpark/toolz/cli/chatctl/internal/cli"
 )
 
 // version은 빌드 시 -ldflags 로 주입합니다.

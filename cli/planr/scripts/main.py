@@ -15,7 +15,7 @@ from common import HarnessError
 
 
 USAGE = """\
-Usage: python3 planr/scripts/main.py <command> [options]
+Usage: python3 cli/planr/scripts/main.py <command> [options]
 
 Commands:
   scenario [clean]      reproduce the checkout release status/overview output
@@ -25,7 +25,7 @@ Commands:
   codex variants        list each fixture's prompt/instructions variants
 
 The codex command needs the openai-codex SDK, so run it through uv:
-  uv run --locked --project planr/scripts python planr/scripts/main.py codex --dry-run
+  uv run --locked --project cli/planr/scripts python cli/planr/scripts/main.py codex --dry-run
 
 Pass --help to a command for its own options.\
 """
@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     except ImportError as exc:
         print(
             f"planr scripts: {exc.name} is not installed; run this command through uv:\n"
-            "  uv run --locked --project planr/scripts python planr/scripts/main.py codex ...",
+            "  uv run --locked --project cli/planr/scripts python cli/planr/scripts/main.py codex ...",
             file=sys.stderr,
         )
         return 2
