@@ -281,6 +281,22 @@ func getOnly(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func isWebSocketUpgradeRequest(request *http.Request) bool {
+	return headerContainsToken(request.Header.Values("Connection"), "Upgrade") &&
+		headerContainsToken(request.Header.Values("Upgrade"), "websocket")
+}
+
+func headerContainsToken(values []string, want string) bool {
+	for _, value := range values {
+		for _, token := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), want) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (r *Relay) handleHealth(writer http.ResponseWriter, _ *http.Request) {
 	writeJSON(writer, http.StatusOK, `{"status":"ok"}`)
 }
@@ -387,13 +403,18 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 	r.readLoop(connection, peer)
 }
 
-// admit runs every check between the request line and a live socket: query
-// parsing, reroute and drain policy, the session claim, the connection
-// reservation and the upgrade itself. It answers the request itself on every
-// rejection. On success it returns the upgraded socket and the release the
-// caller must defer, which retires the reservation and the socket; the session
-// claim is not released here because teardown reclaims it with the session.
+// admit runs every check between the request line and a live socket: upgrade
+// detection, query parsing, reroute and drain policy, the session claim, the
+// connection reservation and the upgrade itself. It answers the request itself
+// on every rejection. On success it returns the upgraded socket and the release
+// the caller must defer, which retires the reservation and the socket; the
+// session claim is not released here because teardown reclaims it with the
+// session.
 func (r *Relay) admit(writer http.ResponseWriter, request *http.Request) (Connection, *websocket.Conn, func(), bool) {
+	if !isWebSocketUpgradeRequest(request) {
+		writeText(writer, http.StatusUpgradeRequired, "Expected WebSocket upgrade")
+		return Connection{}, nil, nil, false
+	}
 	query := request.URL.Query()
 	connection, err := ParseConnectionQuery(map[string]string{
 		"serverId":     query.Get("serverId"),

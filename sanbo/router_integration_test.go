@@ -18,10 +18,18 @@ func TestRouterLocallyOwnedWebSocketUpgrades(t *testing.T) {
 }
 
 func TestRouterRejectsNonWebSocketBeforeClaimingOwnership(t *testing.T) {
-	server := newRelayTestServer(t, DefaultConfig())
-	status, _, _ := getResponse(t, server.URL+"/ws?serverId=plain&role=client&v=2")
+	relay := mustNewRelay(t, DefaultConfig())
+	server := httptestServerForRelay(t, relay)
+	serverID := "plain"
+	status, _, body := getResponse(t, server.URL+"/ws?serverId="+serverID+"&role=client&v=2")
 	if status != http.StatusUpgradeRequired {
 		t.Fatalf("status = %d, want %d", status, http.StatusUpgradeRequired)
+	}
+	if body != "Expected WebSocket upgrade" {
+		t.Fatalf("body = %q, want %q", body, "Expected WebSocket upgrade")
+	}
+	if _, owned, err := relay.ownership.lookup(serverID); err != nil || owned {
+		t.Fatalf("non-upgrade request claimed ownership: owned=%t err=%v", owned, err)
 	}
 }
 
@@ -45,10 +53,15 @@ func TestRouterRejectsIncompleteWebSocketHandshakeBeforeClaimingOwnership(t *tes
 }
 
 func TestRouterRejectsOversizedRouteIdentifiersBeforeClaimingOwnership(t *testing.T) {
-	server := newRelayTestServer(t, DefaultConfig())
-	status, _, _ := getResponse(t, server.URL+"/ws?serverId="+strings.Repeat("x", 257)+"&role=client&v=2")
-	if status != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", status, http.StatusBadRequest)
+	relay := mustNewRelay(t, DefaultConfig())
+	server := httptestServerForRelay(t, relay)
+	serverID := strings.Repeat("x", 257)
+	status, _, _ := getResponse(t, server.URL+"/ws?serverId="+serverID+"&role=client&v=2")
+	if status != http.StatusUpgradeRequired {
+		t.Fatalf("status = %d, want %d", status, http.StatusUpgradeRequired)
+	}
+	if _, owned, err := relay.ownership.lookup(serverID); err != nil || owned {
+		t.Fatalf("non-upgrade request with invalid query claimed ownership: owned=%t err=%v", owned, err)
 	}
 }
 

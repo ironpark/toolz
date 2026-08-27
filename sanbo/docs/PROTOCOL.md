@@ -38,6 +38,16 @@ WebSocket 공개 동작 계약이다. 구현 자체도 “internal protocols may
 즉 reroute(`409`) 판정은 연결 용량 검사보다 **먼저** 일어나므로, 노드가 포화
 상태여도 다른 노드 소유 세션은 `503`이 아니라 `409`로 안내된다.
 
+### Prometheus 메트릭
+
+`GET /metrics`는 참조 구현과 같은 17개 일반 metric family의 HELP/TYPE와
+handshake counter family를 포함한다. delivery 대기 시간 bucket은
+`0.001`, `0.01`, `0.1`, `1`, `10`초이고, frame 크기 bucket은 `1024`,
+`65536`, `1048576`, `8388608`, `33554418`바이트이며 모두 누적값이다.
+Capacity 상태를 사용할 수 없으면 다음 네 gauge family를 응답에서 완전히
+생략한다: `active_websockets`, `ingress_reserved_bytes`,
+`inflight_delivery_bytes`, `backpressured_sources`.
+
 이 릴레이 코드에는 TLS, Origin, Authorization/Bearer token, Cookie를 검증하는
 인증·인가 단계가 없다. 그런 보호가 필요하면 TLS 종료/인증 프록시 등 외부 계층이
 맡아야 한다.
