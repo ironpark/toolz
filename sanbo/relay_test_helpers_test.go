@@ -37,7 +37,7 @@ func getResponse(t *testing.T, url string) (int, http.Header, string) {
 	return response.StatusCode, response.Header, string(body)
 }
 
-func relayWebSocketURL(server *httptest.Server, serverID string, role Role, version int, connectionID string) string {
+func relayWebSocketQuery(serverID string, role Role, version int, connectionID string) url.Values {
 	query := url.Values{"serverId": {serverID}, "role": {string(role)}}
 	if version == 2 {
 		query.Set("v", "2")
@@ -45,7 +45,12 @@ func relayWebSocketURL(server *httptest.Server, serverID string, role Role, vers
 			query.Set("connectionId", connectionID)
 		}
 	}
-	return "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?" + query.Encode()
+	return query
+}
+
+func relayWebSocketURL(server *httptest.Server, serverID string, role Role, version int, connectionID string) string {
+	return "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?" +
+		relayWebSocketQuery(serverID, role, version, connectionID).Encode()
 }
 
 func dialRelay(t *testing.T, server *httptest.Server, serverID string, role Role, version int, connectionID string) *websocket.Conn {

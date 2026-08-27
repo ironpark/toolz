@@ -1116,24 +1116,7 @@ func (r *Relay) testStallOwner(id string) (func(), bool) {
 func (r *Relay) testKillOwner(id string) bool {
 	r.mu.Lock()
 	s := r.sessions[id]
-	var peers []*relayPeer
-	if s != nil {
-		if s.control != nil {
-			peers = append(peers, s.control)
-		}
-		if s.v1 != nil {
-			peers = append(peers, s.v1)
-		}
-		if s.v1Client != nil {
-			peers = append(peers, s.v1Client)
-		}
-		for _, peer := range s.clients {
-			peers = append(peers, peer)
-		}
-		for _, peer := range s.data {
-			peers = append(peers, peer)
-		}
-	}
+	peers := sessionPeers(s)
 	r.mu.Unlock()
 	if s == nil {
 		return false

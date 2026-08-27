@@ -6,10 +6,10 @@ Sanbo는 [`getpaseo/paseo-relay`](https://github.com/getpaseo/paseo-relay)의
 기준은 paseo-relay 커밋
 `3fc41c96c8c63f3a7109e832899cc57d473c4531`입니다.
 
-> Fly 배포 어댑터를 제외한 provider-neutral 호환 계약을 구현했습니다. v1/v2
-> 프레임 중계, 다중 relay 인스턴스의 세션 소유권과 opaque reroute, 엄격한
-> Capacity ledger, bounded delivery/backpressure, handshake 검증 및 운영 메트릭을
-> 실제 HTTP/WebSocket과 결정적 fault injection으로 검증합니다.
+> Fly 배포 어댑터를 제외한 provider-neutral 계약을 구현했습니다. v1/v2 프레임
+> 중계, 독립 relay 프로세스 사이의 lease 기반 소유권과 opaque reroute, Capacity,
+> bounded delivery/backpressure, handshake 및 운영 메트릭을 실제 HTTP/WebSocket과
+> 다중 프로세스 테스트로 검증합니다.
 
 ## 요구 사항
 
@@ -101,7 +101,7 @@ v2 client에서 `connectionId`를 생략하면 relay가 `conn_` 접두사의 ID�
 | `PASEO_RELAY_DRAIN` | `false` | 시작 시 신규 작업을 받지 않는 drain 모드 |
 | `PASEO_RELAY_OWNERSHIP_TARGET` | `local` | 다른 노드에 광고하는 opaque 소유권 대상 |
 | `PASEO_RELAY_REROUTE_HEADER` | `x-reroute-target` | 배포 어댑터가 읽는 reroute 응답 헤더 |
-| `PASEO_RELAY_CLUSTER_QUERY` | 빈 값 | 클러스터 peer 탐색용 DNS query |
+| `PASEO_RELAY_CLUSTER_QUERY` | 빈 값 | 클러스터 namespace를 구분하는 호환 query |
 | `PASEO_RELAY_MIN_CLUSTER_SIZE` | `1` | 신규 세션 수락에 필요한 최소 노드 수 |
 | `PASEO_RELAY_ACCEPTORS` | `100` | listener acceptor 수 |
 | `PASEO_RELAY_CONNECTIONS_PER_ACCEPTOR` | `200` | acceptor당 연결 수; 기본 WebSocket ceiling은 20,000 |
@@ -141,7 +141,7 @@ go test -count=1 ./...
 ```
 
 원본 109개 중 Fly 어댑터 전용 9개를 제외한 100개 테스트 계약을 포팅했으며,
-Go 전용 회귀 테스트를 포함해 총 124개 테스트와 5개 fuzz seed target이 있습니다.
+Go 전용 회귀 테스트를 포함해 총 133개 테스트와 5개 fuzz seed target이 있습니다.
 race detector까지 포함한 검증 명령은 다음과 같습니다.
 
 ```sh
@@ -167,11 +167,26 @@ go vet ./...
 - 가중 ingress reservation, data-route attach timeout 및 buffer 정리
 - 전달 deadline, slow-consumer fail-closed 처리 및 capacity reconciliation
 - 단일 프로세스 내 다중 relay node ownership, 원자적 claim 및 opaque reroute
+- query와 release cookie로 격리된 host-level 다중 프로세스 lease registry
+- 실제 member heartbeat 수를 사용하는 minimum-cluster readiness
+- process 종료 후 lease 만료와 remote ownership reclaim
+- 원자적 pre-upgrade claim과 소유권 상실 시 WebSocket `1012` 수렴
 - 연결 ceiling, memory-pressure admission/shedding 및 session reclamation
 - 전체 Prometheus counter/gauge/histogram surface
 - 실제 socket lifecycle을 사용하는 provider-neutral load 시나리오
 - TCP 수신 버퍼 및 전송 timeout 기반 listener wrapper
 - 정상 종료를 위한 `Shutdown`
+
+클러스터 설정(`PASEO_RELAY_CLUSTER_QUERY`, `RELEASE_NODE`, `RELEASE_COOKIE`)이 모두
+있으면 OS 임시 디렉터리의 locked lease registry를 사용합니다. cluster query와
+cookie 조합이 namespace이며, 100ms heartbeat와 750ms lease로 실제 membership과
+owner liveness를 판단합니다. 설정이 없으면 개발 및 단일 프로세스 호환을 위해
+기존 in-process registry를 사용합니다. 이 backend는 동일 호스트 또는 공유
+파일시스템을 사용하는 프로세스를 대상으로 하며, 공유 저장소가 없는 서로 다른
+호스트의 DNS transport는 현재 범위에 포함되지 않습니다.
+
+`multinode_integration_test.go`는 실제 relay subprocess 2~3개로 join/leave,
+동시 claim, opaque reroute, owner failover, 격리와 ownership surge를 검증합니다.
 
 Fly deployment adapter 동작은 의도적으로 범위에서 제외됩니다. 호환 테스트는
 skip하거나 기대값을 완화하지 않으며, scheduler·transport·memory fault는 실제

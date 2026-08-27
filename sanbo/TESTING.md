@@ -31,7 +31,13 @@ go test -race -count=1 ./...
 go vet ./...
 ```
 
-The 100 upstream ports are supplemented by 24 Go regression tests, for 124
+Run only the cross-process cluster contracts with:
+
+```sh
+go test -count=1 -run '^TestMultiNode' ./...
+```
+
+The 100 upstream ports are supplemented by 33 Go regression tests, for 133
 ordinary tests in total. `production_contract_test.go` adds real socket/state
 coverage for readiness at capacity, the complete metrics surface, session and
 buffer cleanup, handshake role boundaries, data-attach expiry, ingress budget
@@ -45,6 +51,27 @@ socket close frames, forwarded payloads, ownership records, and production
 counters/gauges; the boundary never selects expected values by scenario name.
 The assertions define the required public close codes, forwarding order,
 ownership cardinality, capacity gauges, and cleanup behavior and remain active.
+
+## Multi-process cluster tests
+
+`multinode_integration_test.go` launches the current Go test binary as two or
+three independent relay processes. The nodes share only public cluster
+configuration and a host-level locked lease registry keyed by cluster query and
+release cookie. Heartbeat leases drive membership and stale-owner reclamation;
+atomic owner records serialize claims before WebSocket upgrade. The suite checks:
+
+- readiness transitions as peers join and leave;
+- an opaque reroute response from a non-owner process;
+- exactly one winner for simultaneous claims;
+- remote reclaim after the owner process exits;
+- convergence of conflicting owners with a `1012` close for the loser;
+- ownership visibility during a three-node distinct-server surge;
+- isolation for different release cookies and cluster queries.
+
+The helper process test is inert during an ordinary in-process run and starts a
+real listener only when launched with its private test environment marker. The
+backend itself has no test-binary branch and is also selected by a normally
+started relay whenever cluster query, release node, and release cookie are set.
 
 ## Fuzzing
 

@@ -54,6 +54,7 @@ type Relay struct {
 	memoryPressure            atomic.Bool
 	stalled                   map[string]bool
 	moved                     map[string]bool
+	ownership                 ownershipCoordinator
 }
 
 type relayPeer struct {
@@ -77,7 +78,11 @@ type relayMessage struct {
 
 // NewRelay constructs a relay with validated runtime configuration.
 func NewRelay(config Config) *Relay {
-	return &Relay{Config: config, sessions: make(map[string]*relaySession), stalled: make(map[string]bool), moved: make(map[string]bool)}
+	ownership, err := newOwnershipCoordinator(config)
+	if err != nil {
+		ownership = &failedOwnershipCoordinator{err: err}
+	}
+	return &Relay{Config: config, sessions: make(map[string]*relaySession), stalled: make(map[string]bool), moved: make(map[string]bool), ownership: ownership}
 }
 
 // Start listens and blocks until the relay is stopped or fails.
@@ -85,6 +90,7 @@ func (r *Relay) Start() error {
 	address := net.JoinHostPort(r.Config.Host, strconv.Itoa(r.Config.Port))
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
+		r.closeCoordinator()
 		return fmt.Errorf("listen on %s: %w", address, err)
 	}
 
@@ -105,7 +111,10 @@ func (r *Relay) Start() error {
 	r.server = server
 	r.serverMu.Unlock()
 
+	stopWatching := r.watchOwnership()
 	err = server.Serve(listener)
+	stopWatching()
+	r.closeCoordinator()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
@@ -118,9 +127,16 @@ func (r *Relay) Shutdown(ctx context.Context) error {
 	server := r.server
 	r.serverMu.Unlock()
 	if server == nil {
+		r.closeCoordinator()
 		return nil
 	}
-	return server.Shutdown(ctx)
+	err := server.Shutdown(ctx)
+	r.closeCoordinator()
+	return err
+}
+
+func (r *Relay) closeCoordinator() {
+	_ = r.ownership.close()
 }
 
 // Handler returns the platform-neutral public HTTP handler.
@@ -203,7 +219,13 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		http.Error(writer, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if owner, ok := lookupOwner(connection.ServerID); ok && owner.relay != r {
+	// Checked before the capacity gate: a route owned elsewhere must reroute
+	// even while this node is under local pressure.
+	if owner, ok, err := r.ownership.lookup(connection.ServerID); err != nil {
+		r.connectionRejections.Add(1)
+		http.Error(writer, "cluster ownership unavailable", http.StatusServiceUnavailable)
+		return
+	} else if ok && !owner.ownedBy(r) {
 		r.rerouteResponses.Add(1)
 		writer.Header().Set(r.Config.RerouteHeader, owner.target)
 		writer.WriteHeader(http.StatusConflict)
@@ -214,10 +236,27 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 		http.Error(writer, "relay capacity unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	owner, acquired, err := r.ownership.claim(connection.ServerID, r)
+	if err != nil {
+		r.activeWebSockets.Add(-1)
+		r.connectionRejections.Add(1)
+		http.Error(writer, "cluster ownership unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !owner.ownedBy(r) {
+		r.activeWebSockets.Add(-1)
+		r.rerouteResponses.Add(1)
+		writer.Header().Set(r.Config.RerouteHeader, owner.target)
+		writer.WriteHeader(http.StatusConflict)
+		return
+	}
 	attached := false
 	defer func() {
 		if !attached {
 			r.activeWebSockets.Add(-1)
+			if acquired {
+				_ = r.ownership.release(connection.ServerID, r)
+			}
 		}
 	}()
 	conn, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
@@ -232,11 +271,6 @@ func (r *Relay) handleWebSocket(writer http.ResponseWriter, request *http.Reques
 	}
 	attached = true
 	defer conn.CloseNow()
-	if owner := claimOwner(connection.ServerID, r); owner.relay != r {
-		_ = conn.Close(websocket.StatusServiceRestart, "Session owner moved")
-		return
-	}
-
 	defer r.activeWebSockets.Add(-1)
 
 	readLimit := int64(MaximumFrameWireBytes)
@@ -583,7 +617,7 @@ func (r *Relay) reclaimSessionLocked(serverID string, s *relaySession) {
 		delete(r.sessions, serverID)
 		delete(r.stalled, serverID)
 		delete(r.moved, serverID)
-		releaseOwner(serverID, r)
+		_ = r.ownership.release(serverID, r)
 	}
 }
 
@@ -592,7 +626,81 @@ func (r *Relay) ready() bool {
 }
 
 func (r *Relay) readyForAdmission() bool {
-	return !r.Config.Drain && r.Config.MinimumClusterSize <= 1 && !r.capacityUnavailable.Load() && !r.memoryPressure.Load()
+	members, err := r.ownership.members()
+	return err == nil && !r.Config.Drain && members >= r.Config.MinimumClusterSize && !r.capacityUnavailable.Load() && !r.memoryPressure.Load()
+}
+
+// watchOwnership starts the cluster reconciler and returns a function that
+// stops it and waits for it to exit. Backends without a cluster identity have
+// nothing to reconcile, so the returned stop is a no-op.
+func (r *Relay) watchOwnership() func() {
+	if r.ownership.identity() == "" {
+		return func() {}
+	}
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(clusterHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				r.closeLostSessions()
+			case <-stop:
+				return
+			}
+		}
+	}()
+	return func() { close(stop); <-done }
+}
+
+func (r *Relay) closeLostSessions() {
+	r.mu.Lock()
+	serverIDs := make([]string, 0, len(r.sessions))
+	for serverID := range r.sessions {
+		serverIDs = append(serverIDs, serverID)
+	}
+	r.mu.Unlock()
+	if len(serverIDs) == 0 {
+		return
+	}
+	owned, err := r.ownership.ownedServers()
+	if err != nil {
+		return
+	}
+	for _, serverID := range serverIDs {
+		if owned[serverID] {
+			continue
+		}
+		r.mu.Lock()
+		session := r.sessions[serverID]
+		peers := sessionPeers(session)
+		r.moved[serverID] = true
+		r.mu.Unlock()
+		for _, peer := range peers {
+			_ = peer.conn.Close(websocket.StatusServiceRestart, "Session owner moved")
+		}
+	}
+}
+
+func sessionPeers(session *relaySession) []*relayPeer {
+	if session == nil {
+		return nil
+	}
+	peers := []*relayPeer{session.v1, session.v1Client, session.control}
+	for _, peer := range session.clients {
+		peers = append(peers, peer)
+	}
+	for _, peer := range session.data {
+		peers = append(peers, peer)
+	}
+	result := peers[:0]
+	for _, peer := range peers {
+		if peer != nil {
+			result = append(result, peer)
+		}
+	}
+	return result
 }
 
 func (r *Relay) reserveWebSocket() bool {
