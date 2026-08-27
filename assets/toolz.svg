@@ -39,13 +39,4 @@
     </g>
   </g>
 
-  <g fill="none" stroke="#30363d" stroke-width="2">
-    <path d="M711 74h54v54h54v54h54"/>
-  </g>
-  <g fill="#0d1117" stroke-width="3">
-    <circle cx="711" cy="74" r="8" stroke="#7ee787"/>
-    <circle cx="765" cy="128" r="8" stroke="#58a6ff"/>
-    <circle cx="819" cy="182" r="8" stroke="#d2a8ff"/>
-    <circle cx="873" cy="182" r="8" stroke="#f2cc60"/>
-  </g>
 </svg>
