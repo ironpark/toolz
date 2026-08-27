@@ -131,7 +131,11 @@ prompts:
   # The conversation, in order. Deliberately not placed in the workspace: the
   # agent works from what it was told, not from a task file it can re-read on
   # disk. More than one entry makes the trial multi-turn.
+  # timeout_seconds bounds one turn alone: the clock starts when the prompt is
+  # sent and the turn is cancelled once it runs out. Without it, only the
+  # trial-wide limits.timeout_seconds applies.
   - file: ./PROMPT.md
+    timeout_seconds: 120
   # A follow-up sent only when its condition holds. Conditions are expr
   # expressions over the conversation so far (turn, previous, responses,
   # elapsed_seconds, timed_out) and the workspace the agent

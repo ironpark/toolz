@@ -88,6 +88,47 @@ func TestPromptConditionsAreCheckedAtLoadTime(t *testing.T) {
 	}
 }
 
+func TestPromptTimeoutsAreReadAndValidated(t *testing.T) {
+	config, err := LoadConfig(writeConfig(t, `name: sample
+agent:
+  type: codex
+workspace:
+  source: ./fixture
+prompts:
+  - text: open the conversation
+    timeout_seconds: 60
+  - no limit of its own
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Prompts[0].TimeoutSeconds != 60 || config.Prompts[1].TimeoutSeconds != 0 {
+		t.Fatalf("prompts = %+v", config.Prompts)
+	}
+
+	bad := Prompt{Text: "x", TimeoutSeconds: -1}
+	if err := bad.Validate("prompts[0]"); err == nil || !strings.Contains(err.Error(), "prompts[0].timeout_seconds") {
+		t.Fatalf("err = %v, want one naming the field", err)
+	}
+}
+
+func TestTurnContextCancelsOnceThePromptTimeoutElapses(t *testing.T) {
+	// The countdown starts when the turn context is derived — the moment the
+	// prompt is sent — so a slow turn is cancelled without the runner watching
+	// the clock itself.
+	ctx, cancel := Prompt{Text: "x", TimeoutSeconds: 1}.TurnContext(t.Context())
+	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		t.Fatal("expected a deadline on a prompt with its own timeout")
+	}
+
+	ctx, cancel = Prompt{Text: "x"}.TurnContext(t.Context())
+	defer cancel()
+	if _, ok := ctx.Deadline(); ok {
+		t.Fatal("a prompt without a timeout must not invent a deadline")
+	}
+}
+
 func TestRunReplacesTheWholeConversation(t *testing.T) {
 	directory := chdir(t)
 	path := filepath.Join(directory, DefaultConfigName)

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
@@ -27,6 +29,10 @@ type Prompt struct {
 	Text string `yaml:"text,omitempty"`
 	File string `yaml:"file,omitempty"`
 	When string `yaml:"when,omitempty"`
+	// TimeoutSeconds bounds this turn alone: the clock starts when the prompt
+	// is sent, and the turn is cancelled once it runs out. Zero means the turn
+	// has no limit of its own and only the trial-wide timeout applies.
+	TimeoutSeconds int `yaml:"timeout_seconds,omitempty"`
 
 	// program is the compiled When, populated by Compile so a typo in a
 	// condition fails at load time rather than mid-trial after tokens are
@@ -62,6 +68,9 @@ func (p *Prompt) Validate(field string) error {
 		// Silently preferring one would make a trial measure a prompt nobody
 		// meant to send.
 		return fmt.Errorf("%s: text and file are mutually exclusive", field)
+	}
+	if p.TimeoutSeconds < 0 {
+		return fmt.Errorf("%s.timeout_seconds must not be negative", field)
 	}
 	if p.When == "" {
 		p.program = nil
@@ -157,16 +166,31 @@ func NewPromptEnv(workspace string) PromptEnv {
 	}
 }
 
+// TurnContext derives the context one turn runs under. The countdown starts
+// here — at the moment the prompt is sent — so the returned context cancels
+// the turn automatically once the prompt's own timeout elapses. A prompt
+// without a timeout only inherits whatever deadline the trial context carries.
+// The CancelFunc must be called once the turn ends to release the timer.
+func (p Prompt) TurnContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if p.TimeoutSeconds <= 0 {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, time.Duration(p.TimeoutSeconds)*time.Second)
+}
+
 // Describe renders a prompt for a plan listing: its source and its condition.
 func (p Prompt) Describe() string {
 	source := "file " + p.File
 	if p.File == "" {
 		source = fmt.Sprintf("text %q", truncate(p.Text, 40))
 	}
-	if p.When == "" {
-		return source
+	if p.When != "" {
+		source += " when " + p.When
 	}
-	return source + " when " + p.When
+	if p.TimeoutSeconds > 0 {
+		source += fmt.Sprintf(" (timeout %ds)", p.TimeoutSeconds)
+	}
+	return source
 }
 
 func truncate(value string, limit int) string {
