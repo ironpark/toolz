@@ -27,7 +27,6 @@ func newCompareCommand() *cli.Command {
 			// separate a real difference from noise.
 			&cli.IntFlag{Name: "repeat", Aliases: []string{"n"}, Value: 3, Usage: "repetitions per side"},
 			&cli.StringFlag{Name: "metric", Usage: "headline metric: success-rate, tokens, cost, duration"},
-			&cli.BoolFlag{Name: "diff-only", Usage: "show only the turns and results that differ"},
 			&cli.BoolFlag{Name: "web", Usage: "open the comparison in the dashboard's matrix view"},
 			&cli.StringFlag{Name: "report-dir", Value: DefaultReportDir, Usage: "directory to write reports into"},
 		},

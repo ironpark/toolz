@@ -254,7 +254,6 @@ mohae compare --a ./agents-en.md --b ./agents-strict.md --target agent-md -n 5
 | `--target <FIELD>`    | `auto`, `prompts`, `agent-md`, `agent`, `mcp`, `config`       |
 | `-n, --repeat <NUM>`  | 반복 횟수 (기본 3)                                          |
 | `--metric <TYPE>`     | `success-rate`, `tokens`, `cost`, `duration`                |
-| `--diff-only`         | 차이가 발생한 대화 턴과 결과만 출력                         |
 
 ### `mohae verify`
 
