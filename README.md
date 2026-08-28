@@ -52,20 +52,27 @@ toolz/
 
 - ![](assets/status/ready.svg) **commit** ([Codex](skillz/codex/commit/) · [Claude](skillz/claude/commit/)) — 변경 사항을 검토하고 의도한 변경만 스테이징해 정확한 Git 커밋을 만듭니다.
 
-### 스킬 설치
+### 스킬 설치와 제거
 
-[설치 스크립트](scripts/install-skills.sh)는 저장소의 스킬을 각 플랫폼 디렉터리에
-심볼릭 링크로 연결합니다. 인자 없이 실행하면 Codex와 Claude 스킬을 모두 설치합니다.
+[스킬 스크립트](scripts/skills.sh)는 저장소의 스킬을 각 플랫폼 디렉터리에
+심볼릭 링크로 연결합니다. 대상을 생략하면 Codex와 Claude 스킬을 모두 처리합니다.
 
 ```sh
-./scripts/install-skills.sh
+./scripts/skills.sh install
 ```
 
 특정 플랫폼만 선택해 설치할 수도 있습니다.
 
 ```sh
-./scripts/install-skills.sh codex
-./scripts/install-skills.sh claude
+./scripts/skills.sh install codex
+./scripts/skills.sh install claude
+```
+
+설치 상태를 확인하거나 다시 제거할 수 있습니다.
+
+```sh
+./scripts/skills.sh status
+./scripts/skills.sh uninstall
 ```
 
 |  대상  | 기본 설치 위치     | 경로 변경               |
@@ -74,7 +81,9 @@ toolz/
 | Claude | `~/.claude/skills` | `CLAUDE_HOME` 환경 변수 |
 
 기존의 일반 파일이나 디렉터리는 덮어쓰지 않습니다. 저장소를 다른 경로로 옮겼다면
-새 위치에서 설치 스크립트를 다시 실행해 심볼릭 링크를 갱신합니다.
+새 위치에서 `install`을 다시 실행해 심볼릭 링크를 갱신합니다. `uninstall`은 이
+저장소를 가리키는 링크만 제거하며, 다른 대상을 가리키는 링크나 일반 파일은 건드리지
+않습니다.
 
 ## 보너스 트랙
 
