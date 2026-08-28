@@ -3,7 +3,6 @@ package apply
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/planlock"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
 
 // Plan registers a plan draft as a new numbered plan directory.
@@ -43,15 +43,15 @@ func Plan(d draft.Draft, settings config.Config, repoRoot string, dryRun bool, o
 	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventAdd, planDirectory, -1, "registered", output); err != nil {
 		return Operation{}, err
 	}
-	temporary, err := os.MkdirTemp(planDirectories[0], ".planr-")
+	temporary, err := vfs.MkdirTemp(planDirectories[0], ".planr-")
 	if err != nil {
 		return Operation{}, err
 	}
-	defer os.RemoveAll(temporary)
+	defer vfs.RemoveAll(temporary)
 	if err := writeRenderedPlan(temporary, documents); err != nil {
 		return Operation{}, err
 	}
-	if err := os.Rename(temporary, target); err != nil {
+	if err := vfs.Rename(temporary, target); err != nil {
 		return Operation{}, err
 	}
 	fmt.Fprintf(output, "Registered %s\n", planDirectory)
@@ -62,7 +62,7 @@ func Plan(d draft.Draft, settings config.Config, repoRoot string, dryRun bool, o
 }
 
 func writeRenderedPlan(root string, documents map[string]string) error {
-	if err := os.MkdirAll(filepath.Join(root, "phases"), 0755); err != nil {
+	if err := vfs.MkdirAll(filepath.Join(root, "phases"), 0755); err != nil {
 		return err
 	}
 	paths := make([]string, 0, len(documents))
@@ -71,7 +71,7 @@ func writeRenderedPlan(root string, documents map[string]string) error {
 	}
 	sort.Strings(paths)
 	for _, path := range paths {
-		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(path)), []byte(documents[path]), 0644); err != nil {
+		if err := vfs.WriteFile(filepath.Join(root, filepath.FromSlash(path)), []byte(documents[path]), 0644); err != nil {
 			return err
 		}
 	}

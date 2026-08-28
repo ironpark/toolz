@@ -88,7 +88,7 @@ func newPlanCommand(cmd *ucli.Command) error {
 			return err
 		}
 	} else {
-		if err := os.WriteFile(absOutput, []byte(rendered), 0644); err != nil {
+		if err := vfs.WriteFile(absOutput, []byte(rendered), 0644); err != nil {
 			return err
 		}
 		fmt.Printf("Created %s\n", absOutput)
@@ -169,7 +169,7 @@ func newPhaseCommand(cmd *ucli.Command, selector string) error {
 			return err
 		}
 	} else {
-		if err := os.WriteFile(absOutput, []byte(rendered), 0644); err != nil {
+		if err := vfs.WriteFile(absOutput, []byte(rendered), 0644); err != nil {
 			return err
 		}
 		fmt.Printf("Created %s\n", absOutput)

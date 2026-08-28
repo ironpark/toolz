@@ -75,7 +75,7 @@ func editCommand(_ context.Context, cmd *ucli.Command) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(absOutput), 0755); err != nil {
+	if err := vfs.MkdirAll(filepath.Dir(absOutput), 0755); err != nil {
 		return err
 	}
 	if err := mdoc.WriteAtomically(absOutput, checkout.Document); err != nil {

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
 
 const (
@@ -59,11 +61,19 @@ func AcquireDirectory(plansRoot string, options ...Option) (*Lock, error) {
 
 func acquireAdvisoryLock(directory, kind string, createParent bool, config settings) (*Lock, error) {
 	if createParent {
-		if err := os.MkdirAll(directory, 0755); err != nil {
+		if err := vfs.MkdirAll(directory, 0755); err != nil {
 			return nil, fmt.Errorf("cannot prepare %s lock directory %s: %w", kind, directory, err)
 		}
 	}
 	path := filepath.Join(directory, FileName)
+	// An advisory lock is a flock on a real descriptor, which a filesystem
+	// swapped in through vfs cannot provide. Such a filesystem belongs to a
+	// single test process, where there is no competing planr to exclude, so the
+	// lock is skipped rather than faked. Creating the directory above still
+	// happens, because callers rely on it.
+	if !vfs.IsOS() {
+		return &Lock{path: path, kind: kind}, nil
+	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open %s lock %s: %w", kind, path, err)

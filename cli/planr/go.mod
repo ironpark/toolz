@@ -7,6 +7,7 @@ require github.com/urfave/cli/v3 v3.11.0
 require (
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/goccy/go-yaml v1.19.2
+	github.com/spf13/afero v1.15.0
 )
 
 require (
@@ -29,5 +30,6 @@ require (
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )

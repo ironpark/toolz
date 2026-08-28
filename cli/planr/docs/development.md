@@ -5,16 +5,27 @@
 이 문서는 `planr` 자체를 수정하고 검증하는 기여자를 위한 내용입니다. 일반적인 사용에는
 필요하지 않습니다.
 
-## 파일 읽기 경로
+## 파일 접근 경로
 
-planr이 읽는 모든 문서 — 설정, plan 디렉터리, phase 문서, 초안 — 는
-[`internal/vfs`](../internal/vfs)를 지나갑니다. `vfs.ReadFile`, `vfs.ReadDir`,
-`vfs.Stat`은 호스트 경로를 받아 `io/fs` 이름으로 옮긴 뒤 현재 `fs.FS`에서 읽고,
-`vfs.Use(fsys)`로 테스트가 인메모리 트리를 끼워 넣을 수 있습니다. 기본값은 os 패키지로
-곧장 넘기는 `hostFS`라 실제 실행에는 변환 비용이 없습니다.
+planr이 다루는 모든 문서 — 설정, plan 디렉터리, phase 문서, 초안 — 는 읽기와 쓰기 모두
+[`internal/vfs`](../internal/vfs)를 지나갑니다. 이 패키지는
+[afero](https://github.com/spf13/afero) 위에 얇게 얹혀 있고, 기본값은
+`afero.NewOsFs()`입니다. 경로는 os 패키지에 넘기던 호스트 경로 그대로라 변환이 없습니다.
 
-쓰기·잠금·git 접근은 `io/fs`가 읽기 전용이므로 os 패키지에 그대로 둡니다. 새 읽기를
-추가할 때 `os.ReadFile` 대신 `vfs.ReadFile`을 쓰면 이 경계가 유지됩니다.
+`vfs.Use(fsys)`로 파일시스템을 갈아끼우면 명령 전체가 디스크를 건드리지 않고 돕니다.
+[`cli/memfs_test.go`](../cli/memfs_test.go)가 `afero.NewMemMapFs()` 위에서
+`apply` → `status`를 끝까지 돌려 이 경계가 새지 않는지 확인합니다.
+
+파일 내용이 아닌 두 가지는 os에 남습니다.
+
+- [`internal/planlock`](../internal/planlock)의 advisory lock: flock에는 실제 파일
+  디스크립터가 필요합니다. `vfs.IsOS()`가 거짓이면 잠금을 흉내 내지 않고 건너뜁니다 —
+  교체된 파일시스템은 테스트 프로세스 하나만의 것이라 배제할 경쟁 프로세스가 없습니다.
+- go-git 저장소 접근(`internal/gitrepo`, `internal/notes`, `phase done`의 소스 검사).
+
+새 파일 접근을 추가할 때 `os.ReadFile`/`os.WriteFile` 대신 `vfs.*`를 쓰면 이 경계가
+유지됩니다. 상대 경로는 OS 파일시스템에서는 작업 디렉터리 기준, 인메모리 트리에서는
+트리 루트 기준으로 풀리므로 테스트에서는 절대 경로를 씁니다.
 
 ## 로컬 검증
 

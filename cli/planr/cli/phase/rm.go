@@ -98,7 +98,7 @@ func removeCommand(_ context.Context, cmd *ucli.Command) error {
 	if err := mdoc.WriteFile(planPath, planFront, updatedBody); err != nil {
 		return err
 	}
-	if err := os.Remove(phasePath); err != nil {
+	if err := vfs.Remove(phasePath); err != nil {
 		// Keep the documents consistent if the filesystem refuses the removal.
 		if restoreErr := mdoc.WriteAtomically(planPath, string(planRaw)); restoreErr != nil {
 			return fmt.Errorf("remove %s: %w; restore PLAN.md: %v", filepath.Base(phasePath), err, restoreErr)

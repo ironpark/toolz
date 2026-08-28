@@ -82,7 +82,7 @@ func archiveCommand(_ context.Context, cmd *ucli.Command) error {
 		return fmt.Errorf("plan %q is not done; only completed plans can be archived", sourceDirectory)
 	}
 
-	if err := os.MkdirAll(destination, 0755); err != nil {
+	if err := vfs.MkdirAll(destination, 0755); err != nil {
 		return fmt.Errorf("create archive directory %s: %w", destination, err)
 	}
 	target := filepath.Join(destination, sourceDirectory)
@@ -91,7 +91,7 @@ func archiveCommand(_ context.Context, cmd *ucli.Command) error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("inspect archive destination %s: %w", target, err)
 	}
-	if err := os.Rename(sourceRoot, target); err != nil {
+	if err := vfs.Rename(sourceRoot, target); err != nil {
 		return fmt.Errorf("archive plan %s to %s: %w", sourceDirectory, target, err)
 	}
 	fmt.Printf("Archived %s to %s\n", sourceDirectory, target)

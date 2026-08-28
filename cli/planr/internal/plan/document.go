@@ -104,11 +104,11 @@ func Write(root string, d draft.Draft, planDirectory, language string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(root, "phases"), 0755); err != nil {
+	if err := vfs.MkdirAll(filepath.Join(root, "phases"), 0755); err != nil {
 		return err
 	}
 	for relative, contents := range documents {
-		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(relative)), []byte(contents), 0644); err != nil {
+		if err := vfs.WriteFile(filepath.Join(root, filepath.FromSlash(relative)), []byte(contents), 0644); err != nil {
 			return err
 		}
 	}

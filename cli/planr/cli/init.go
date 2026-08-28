@@ -74,12 +74,12 @@ func initCommand(_ context.Context, cmd *ucli.Command) error {
 		case !errors.Is(statErr, os.ErrNotExist):
 			return statErr
 		}
-		if err := os.MkdirAll(path, 0755); err != nil {
+		if err := vfs.MkdirAll(path, 0755); err != nil {
 			return err
 		}
 		created = append(created, path)
 	}
-	if err := os.WriteFile(target, []byte(configTemplate(language, plansDirs)), 0644); err != nil {
+	if err := vfs.WriteFile(target, []byte(configTemplate(language, plansDirs)), 0644); err != nil {
 		return err
 	}
 	created = append(created, target)

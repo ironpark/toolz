@@ -1,119 +1,85 @@
-// Package vfs is the read side of planr's filesystem access. Every document
-// planr inspects — configuration, plan directories, phase documents, drafts —
-// is read through the io/fs interface held here, so a test can hand the
-// commands an in-memory tree instead of building a temporary directory.
+// Package vfs is planr's filesystem. Every document planr touches —
+// configuration, plan directories, phase documents, drafts — is read and
+// written through the afero.Fs held here, so a test can run a command against
+// an in-memory tree instead of a temporary directory.
 //
-// Writes, locks and git access stay on the os package: io/fs is read-only, and
-// pretending otherwise would only hide where planr mutates the repository.
+// Paths are ordinary host paths, the same ones planr resolves plan roots to
+// and reports back to the user; afero takes them as-is, so nothing has to be
+// translated on the way in or out. One difference is worth knowing: a relative
+// path resolves against the process working directory on the machine's
+// filesystem but against the root of an in-memory tree, so a test that swaps
+// one in names its files absolutely.
 //
-// Callers keep passing host paths, because planr resolves plan roots as host
-// paths and reports them back to the user. Name translates a host path into
-// the io/fs name it has in the FS below, and path reverses the translation.
-//
-// A filesystem swapped in through Use has to report a missing file the way the
-// os package does — as an error satisfying errors.Is(err, fs.ErrNotExist) —
-// because callers treat a missing plans directory as an empty one.
+// Two things stay on the os package because they are not file contents: the
+// advisory plan locks in internal/planlock, which need a real descriptor to
+// flock, and go-git's repository access. Both degrade explicitly rather than
+// silently when a filesystem is swapped in — see planlock.AcquirePlan.
 package vfs
 
 import (
-	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
-	"strings"
+
+	"github.com/spf13/afero"
 )
 
-// FS is the filesystem planr reads. Any fs.FS will do: the helpers below go
-// through fs.ReadFile, fs.ReadDir and fs.Stat, which use the optional io/fs
-// interfaces when the filesystem implements them. Keeping it to fs.FS is what
-// lets a test hand in an embed.FS or an fs.Sub of one.
-type FS = fs.FS
+// Fs is the filesystem planr runs on.
+type Fs = afero.Fs
 
-// current is the filesystem the package-level helpers read through.
-var current FS = hostFS{}
+// current is the filesystem the package-level helpers work through. The afero
+// wrapper is what supplies ReadFile/WriteFile/ReadDir on top of the interface.
+var current = &afero.Afero{Fs: afero.NewOsFs()}
 
 // Use swaps in a filesystem and returns a function restoring the previous one.
 // Tests use it; production code never calls it.
-func Use(fsys FS) func() {
+func Use(fsys Fs) func() {
 	previous := current
-	current = fsys
+	current = &afero.Afero{Fs: fsys}
 	return func() { current = previous }
 }
 
-// Name converts a host path into its io/fs name. Relative paths are resolved
-// against the working directory first, so the name does not depend on where
-// the process happens to be.
-func Name(hostPath string) (string, error) {
-	absolute, err := filepath.Abs(hostPath)
-	if err != nil {
-		return "", err
-	}
-	name := filepath.ToSlash(absolute)
-	if volume := filepath.VolumeName(absolute); volume == "" {
-		name = strings.TrimPrefix(name, "/")
-	}
-	name = strings.TrimSuffix(name, "/")
-	if name == "" {
-		name = "."
-	}
-	if !fs.ValidPath(name) {
-		return "", fmt.Errorf("%s: not a readable path", hostPath)
-	}
-	return name, nil
+// IsOS reports whether reads and writes reach the machine's filesystem. It is
+// how the parts that cannot go through afero — advisory locking, git — decide
+// whether they still have a real file to work with.
+func IsOS() bool {
+	_, ok := current.Fs.(*afero.OsFs)
+	return ok
 }
 
-// path reverses Name, turning an io/fs name back into a host path.
-func path(name string) string {
-	host := filepath.FromSlash(name)
-	if filepath.VolumeName(host) != "" {
-		return host
-	}
-	return string(filepath.Separator) + host
+// ReadFile returns the contents of a file.
+func ReadFile(path string) ([]byte, error) { return current.ReadFile(path) }
+
+// ReadDir lists a directory, sorted by filename.
+func ReadDir(path string) ([]fs.FileInfo, error) { return current.ReadDir(path) }
+
+// Stat reports the file information for a path.
+func Stat(path string) (fs.FileInfo, error) { return current.Stat(path) }
+
+// Open opens a file for reading.
+func Open(path string) (afero.File, error) { return current.Open(path) }
+
+// WriteFile writes a file, creating it when it does not exist.
+func WriteFile(path string, contents []byte, mode os.FileMode) error {
+	return current.WriteFile(path, contents, mode)
 }
 
-// ReadFile reads the file at a host path.
-func ReadFile(hostPath string) ([]byte, error) {
-	if _, ok := current.(hostFS); ok {
-		return os.ReadFile(hostPath)
-	}
-	name, err := Name(hostPath)
-	if err != nil {
-		return nil, err
-	}
-	return fs.ReadFile(current, name)
-}
+// MkdirAll creates a directory and any missing parent.
+func MkdirAll(path string, mode os.FileMode) error { return current.MkdirAll(path, mode) }
 
-// ReadDir lists the directory at a host path.
-func ReadDir(hostPath string) ([]fs.DirEntry, error) {
-	if _, ok := current.(hostFS); ok {
-		return os.ReadDir(hostPath)
-	}
-	name, err := Name(hostPath)
-	if err != nil {
-		return nil, err
-	}
-	return fs.ReadDir(current, name)
-}
+// MkdirTemp creates a uniquely named directory inside dir.
+func MkdirTemp(dir, prefix string) (string, error) { return current.TempDir(dir, prefix) }
 
-// Stat reports the file information for a host path.
-func Stat(hostPath string) (fs.FileInfo, error) {
-	if _, ok := current.(hostFS); ok {
-		return os.Stat(hostPath)
-	}
-	name, err := Name(hostPath)
-	if err != nil {
-		return nil, err
-	}
-	return fs.Stat(current, name)
-}
+// CreateTemp creates a uniquely named file inside dir, open for writing.
+func CreateTemp(dir, prefix string) (afero.File, error) { return current.TempFile(dir, prefix) }
 
-// hostFS is the machine's filesystem seen through io/fs, and the default the
-// helpers above short-circuit to: a host path needs no translation to reach
-// the os package, which is also what keeps its errors — and so os.IsNotExist
-// — intact for callers.
-type hostFS struct{}
+// Rename moves a file or directory.
+func Rename(oldPath, newPath string) error { return current.Rename(oldPath, newPath) }
 
-func (hostFS) Open(name string) (fs.File, error)          { return os.Open(path(name)) }
-func (hostFS) ReadFile(name string) ([]byte, error)       { return os.ReadFile(path(name)) }
-func (hostFS) ReadDir(name string) ([]fs.DirEntry, error) { return os.ReadDir(path(name)) }
-func (hostFS) Stat(name string) (fs.FileInfo, error)      { return os.Stat(path(name)) }
+// Chmod changes a file's mode.
+func Chmod(path string, mode os.FileMode) error { return current.Chmod(path, mode) }
+
+// Remove deletes a file or an empty directory.
+func Remove(path string) error { return current.Remove(path) }
+
+// RemoveAll deletes a path and anything beneath it.
+func RemoveAll(path string) error { return current.RemoveAll(path) }

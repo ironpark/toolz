@@ -6,12 +6,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 
 	"github.com/goccy/go-yaml"
+
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
 
 func Split(input string) (map[string]any, string, error) {
@@ -70,11 +71,11 @@ func WriteFile(path string, front map[string]any, body string) error {
 // interrupted write leaves the previous contents rather than a truncated
 // document.
 func WriteAtomically(path, contents string) error {
-	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".")
+	temporary, err := vfs.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".")
 	if err != nil {
 		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
 	}
-	defer os.Remove(temporary.Name())
+	defer vfs.Remove(temporary.Name())
 	if _, err := temporary.WriteString(contents); err != nil {
 		temporary.Close()
 		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
@@ -82,10 +83,10 @@ func WriteAtomically(path, contents string) error {
 	if err := temporary.Close(); err != nil {
 		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
 	}
-	if err := os.Chmod(temporary.Name(), 0644); err != nil {
+	if err := vfs.Chmod(temporary.Name(), 0644); err != nil {
 		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
 	}
-	if err := os.Rename(temporary.Name(), path); err != nil {
+	if err := vfs.Rename(temporary.Name(), path); err != nil {
 		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
 	}
 	return nil

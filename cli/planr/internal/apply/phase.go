@@ -3,7 +3,6 @@ package apply
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -92,14 +91,14 @@ func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun bool, o
 	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventPhaseAdd, planDirectory, phaseID, meta.Status, output); err != nil {
 		return Operation{}, err
 	}
-	if err := os.MkdirAll(filepath.Join(planRoot, "phases"), 0755); err != nil {
+	if err := vfs.MkdirAll(filepath.Join(planRoot, "phases"), 0755); err != nil {
 		return Operation{}, err
 	}
 	if err := mdoc.WriteAtomically(phasePath, phaseContents); err != nil {
 		return Operation{}, err
 	}
 	if err := mdoc.WriteAtomically(planPath, updatedPlanContents); err != nil {
-		_ = os.Remove(phasePath)
+		_ = vfs.Remove(phasePath)
 		return Operation{}, err
 	}
 	fmt.Fprintf(output, "Added %s phase %02d: %s\n", planDirectory, phaseID, phasePath)
