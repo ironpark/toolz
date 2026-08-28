@@ -1,0 +1,285 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly META_PURPOSE_KEY="devmeta.purpose"
+readonly META_DEV_DIR_KEY="devmeta.developmentDirectory"
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  scripts/gitwt-ctx status
+  scripts/gitwt-ctx set --purpose <text> --dev-dir <path>
+  scripts/gitwt-ctx check-path <path>
+
+Commands:
+  status      Show whether this is a Git worktree and print its metadata.
+  set         Save the worktree purpose and development directory.
+  check-path  Verify that a path is inside the configured development directory.
+EOF
+  exit 1
+}
+
+canonical_dir() {
+  (cd -- "$1" 2>/dev/null && pwd -P)
+}
+
+detect_context() {
+  CONTEXT_KIND="skip"
+  SKIP_REASON="not-inside-a-git-worktree"
+  WORKTREE_ROOT=""
+
+  if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null || true)" != "true" ]]; then
+    return
+  fi
+
+  WORKTREE_ROOT=$(canonical_dir "$(git rev-parse --show-toplevel)") ||
+    die "cannot resolve the worktree root"
+
+  CONTEXT_KIND="worktree"
+  SKIP_REASON=""
+}
+
+worktree_config_enabled() {
+  [[ "$(git config --local --bool --get extensions.worktreeConfig 2>/dev/null || true)" == "true" ]]
+}
+
+enable_worktree_config() {
+  worktree_config_enabled && return
+
+  # Git requires these values to be moved when worktreeConfig is enabled.
+  # Refuse the unusual case instead of silently changing repository semantics.
+  if git config --local --get core.worktree >/dev/null 2>&1; then
+    die "core.worktree is set; move it to the main worktree's config.worktree before enabling worktreeConfig"
+  fi
+
+  if [[ "$(git config --local --bool --get core.bare 2>/dev/null || true)" == "true" ]]; then
+    die "core.bare=true is set; move it to the main worktree's config.worktree before enabling worktreeConfig"
+  fi
+
+  git config --local extensions.worktreeConfig true
+}
+
+contains_newline() {
+  case "$1" in
+    *$'\n'*|*$'\r'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_within() {
+  local child=$1 parent=$2
+  [[ "$child" == "$parent" || "$child" == "$parent"/* ]]
+}
+
+resolve_dev_dir() {
+  local supplied=$1 candidate
+  if [[ "$supplied" == /* ]]; then
+    candidate=$supplied
+  else
+    candidate="$WORKTREE_ROOT/$supplied"
+  fi
+
+  [[ -d "$candidate" ]] || die "development directory does not exist: $candidate"
+  canonical_dir "$candidate"
+}
+
+load_metadata() {
+  META_STATE="missing"
+  PURPOSE=""
+  DEV_DIR_STORED=""
+  DEVELOPMENT_DIRECTORY=""
+  INVALID_REASON=""
+
+  if ! worktree_config_enabled; then
+    return
+  fi
+
+  PURPOSE=$(git config --worktree --get "$META_PURPOSE_KEY" 2>/dev/null || true)
+  DEV_DIR_STORED=$(git config --worktree --get "$META_DEV_DIR_KEY" 2>/dev/null || true)
+
+  if [[ -z "$PURPOSE" || -z "$DEV_DIR_STORED" ]]; then
+    return
+  fi
+
+  if [[ "$DEV_DIR_STORED" == /* ]]; then
+    INVALID_REASON="development-directory-must-be-relative"
+    META_STATE="invalid"
+    return
+  fi
+
+  if [[ ! -d "$WORKTREE_ROOT/$DEV_DIR_STORED" ]]; then
+    INVALID_REASON="development-directory-does-not-exist"
+    META_STATE="invalid"
+    return
+  fi
+
+  DEVELOPMENT_DIRECTORY=$(canonical_dir "$WORKTREE_ROOT/$DEV_DIR_STORED") || {
+    INVALID_REASON="development-directory-cannot-be-resolved"
+    META_STATE="invalid"
+    return
+  }
+
+  if ! is_within "$DEVELOPMENT_DIRECTORY" "$WORKTREE_ROOT"; then
+    INVALID_REASON="development-directory-is-outside-worktree"
+    META_STATE="invalid"
+    return
+  fi
+
+  META_STATE="ready"
+}
+
+print_status() {
+  detect_context
+
+  if [[ "$CONTEXT_KIND" == "skip" ]]; then
+    echo "STATUS: SKIP"
+    echo "REASON: $SKIP_REASON"
+    return
+  fi
+
+  load_metadata
+  case "$META_STATE" in
+    missing)
+      echo "STATUS: MISSING"
+      echo "WORKTREE_ROOT: $WORKTREE_ROOT"
+      echo "REQUIRED: purpose, development-directory"
+      ;;
+    invalid)
+      echo "STATUS: INVALID"
+      echo "WORKTREE_ROOT: $WORKTREE_ROOT"
+      echo "REASON: $INVALID_REASON"
+      echo "ACTION: run set again with a valid purpose and development directory"
+      ;;
+    ready)
+      echo "STATUS: READY"
+      echo "WORKTREE_ROOT: $WORKTREE_ROOT"
+      echo "PURPOSE: $PURPOSE"
+      echo "DEVELOPMENT_DIRECTORY: $DEVELOPMENT_DIRECTORY"
+      ;;
+  esac
+}
+
+set_metadata() {
+  detect_context
+  if [[ "$CONTEXT_KIND" == "skip" ]]; then
+    echo "STATUS: SKIP"
+    echo "REASON: $SKIP_REASON"
+    return
+  fi
+
+  local purpose="" dev_dir_input=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --purpose)
+        [[ $# -ge 2 ]] || usage
+        purpose=$2
+        shift 2
+        ;;
+      --dev-dir)
+        [[ $# -ge 2 ]] || usage
+        dev_dir_input=$2
+        shift 2
+        ;;
+      *) usage ;;
+    esac
+  done
+
+  [[ -n "$purpose" ]] || die "--purpose must not be empty"
+  [[ -n "$dev_dir_input" ]] || die "--dev-dir must not be empty"
+  contains_newline "$purpose" && die "purpose must be a single line"
+
+  local dev_dir_abs dev_dir_relative
+  dev_dir_abs=$(resolve_dev_dir "$dev_dir_input")
+  is_within "$dev_dir_abs" "$WORKTREE_ROOT" ||
+    die "development directory must be inside this worktree: $WORKTREE_ROOT"
+
+  if [[ "$dev_dir_abs" == "$WORKTREE_ROOT" ]]; then
+    dev_dir_relative="."
+  else
+    dev_dir_relative=${dev_dir_abs#"$WORKTREE_ROOT"/}
+  fi
+
+  enable_worktree_config
+  git config --worktree "$META_PURPOSE_KEY" "$purpose"
+  git config --worktree "$META_DEV_DIR_KEY" "$dev_dir_relative"
+
+  print_status
+}
+
+resolve_checked_path() {
+  local supplied=$1 candidate parent base resolved_parent
+  if [[ "$supplied" == /* ]]; then
+    candidate=$supplied
+  else
+    candidate="$PWD/$supplied"
+  fi
+
+  if [[ -L "$candidate" ]]; then
+    die "symbolic-link targets are not accepted: $candidate"
+  fi
+
+  if [[ -d "$candidate" ]]; then
+    canonical_dir "$candidate"
+    return
+  fi
+
+  parent=$(dirname -- "$candidate")
+  base=$(basename -- "$candidate")
+  [[ -d "$parent" ]] ||
+    die "parent directory does not exist; check its nearest existing parent first: $parent"
+  resolved_parent=$(canonical_dir "$parent") || die "cannot resolve parent directory: $parent"
+  printf '%s/%s\n' "$resolved_parent" "$base"
+}
+
+check_path() {
+  [[ $# -eq 1 ]] || usage
+  detect_context
+
+  if [[ "$CONTEXT_KIND" == "skip" ]]; then
+    echo "STATUS: SKIP"
+    echo "REASON: $SKIP_REASON"
+    return
+  fi
+
+  load_metadata
+  [[ "$META_STATE" == "ready" ]] || {
+    echo "REFUSED: worktree metadata is $META_STATE" >&2
+    exit 4
+  }
+
+  local checked
+  checked=$(resolve_checked_path "$1")
+  if is_within "$checked" "$DEVELOPMENT_DIRECTORY"; then
+    echo "ALLOWED: $checked"
+  else
+    echo "REFUSED: path is outside DEVELOPMENT_DIRECTORY: $checked" >&2
+    exit 3
+  fi
+}
+
+command=${1:-status}
+case "$command" in
+  status)
+    [[ $# -eq 1 ]] || usage
+    print_status
+    ;;
+  set)
+    shift
+    set_metadata "$@"
+    ;;
+  check-path)
+    shift
+    check_path "$@"
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage
+    ;;
+esac
