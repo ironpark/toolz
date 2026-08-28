@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
 )
 
 func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
@@ -27,7 +28,7 @@ func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
 			{Title: "Checkout UI", Meta: phaseMeta{Phase: 1, Slug: "checkout-ui", Status: "planned", DependsOn: []int{0}}, Planned: "Add the UI.", Completion: "UI tests pass."},
 		},
 	}
-	if err := writePlan(filepath.Join(plansRoot, "00-checkout-v2"), draft, "00-checkout-v2", languageKorean); err != nil {
+	if err := writePlan(filepath.Join(plansRoot, "00-checkout-v2"), draft, "00-checkout-v2", doc.Korean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 
@@ -61,7 +62,7 @@ func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
 func TestEnsureDependenciesMetBlocksOutOfOrderPhases(t *testing.T) {
 	plansRoot := t.TempDir()
 	planRoot := filepath.Join(plansRoot, "00-checkout-v2")
-	if err := writePlan(planRoot, dependentTestDraft(nil), "00-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(planRoot, dependentTestDraft(nil), "00-checkout-v2", doc.English); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 	directories := []string{plansRoot}
@@ -97,7 +98,7 @@ func TestEnsureDependenciesMetBlocksOutOfOrderPhases(t *testing.T) {
 func TestEnsureDependenciesMetBlocksOnUnfinishedPlans(t *testing.T) {
 	plansRoot := t.TempDir()
 	planRoot := filepath.Join(plansRoot, "01-checkout-v2")
-	if err := writePlan(planRoot, dependentTestDraft([]string{"api-foundation"}), "01-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(planRoot, dependentTestDraft([]string{"api-foundation"}), "01-checkout-v2", doc.English); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 	directories := []string{plansRoot}
@@ -109,7 +110,7 @@ func TestEnsureDependenciesMetBlocksOnUnfinishedPlans(t *testing.T) {
 	}
 
 	apiRoot := filepath.Join(plansRoot, "00-api-foundation")
-	if err := writePlan(apiRoot, dependentTestDraft(nil), "00-api-foundation", languageEnglish); err != nil {
+	if err := writePlan(apiRoot, dependentTestDraft(nil), "00-api-foundation", doc.English); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 	err = ensureDependenciesMet(directories, planRoot, "01-checkout-v2", 0, "in-progress")

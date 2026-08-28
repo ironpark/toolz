@@ -8,13 +8,14 @@ import (
 	"testing"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/urfave/cli/v3"
 )
 
 func TestDoctorCommandAcceptsAConsistentPlan(t *testing.T) {
 	repoRoot := doctorRepository(t)
 	planRoot := filepath.Join(repoRoot, "plan", "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 	withWorkingDirectory(t, repoRoot)
@@ -26,7 +27,7 @@ func TestDoctorCommandAcceptsAConsistentPlan(t *testing.T) {
 func TestDoctorDetectsAndFixesChecklistMismatch(t *testing.T) {
 	repoRoot := doctorRepository(t)
 	planRoot := filepath.Join(repoRoot, "plan", "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 	planPath := filepath.Join(planRoot, "PLAN.md")
@@ -71,7 +72,7 @@ func TestDoctorDetectsBrokenDependencyAndFrontmatter(t *testing.T) {
 	draft := testDraft()
 	draft.DependsOn = []string{"missing-plan"}
 	planRoot := filepath.Join(repoRoot, "plan", "00-checkout-v2")
-	if err := writePlan(planRoot, draft, "00-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(planRoot, draft, "00-checkout-v2", doc.English); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 	phasePath := filepath.Join(planRoot, "phases", "00-api-contract.md")

@@ -10,13 +10,15 @@ import (
 	"testing"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/validation"
 	"github.com/urfave/cli/v3"
 )
 
 func applyTestSettings() config {
 	return config{
 		PlansDirs: []string{"plans"},
-		Language:  languageEnglish,
+		Language:  doc.English,
 		Hooks:     hookConfig{Timeout: defaultHookTimeout},
 		skipHooks: true,
 	}
@@ -42,9 +44,9 @@ func applyTestDraft(name string) draft {
 
 func filledPhaseDraft(t *testing.T, language string) phaseDraftInput {
 	t.Helper()
-	raw, err := renderNewPhaseDraft(language, "checkout-v2", "Cache Warmup", "cache-warmup")
+	raw, err := doc.RenderNewPhaseDraft(language, "checkout-v2", "Cache Warmup", "cache-warmup")
 	if err != nil {
-		t.Fatalf("renderNewPhaseDraft() unexpected error: %v", err)
+		t.Fatalf("doc.RenderNewPhaseDraft() unexpected error: %v", err)
 	}
 	raw = strings.Replace(raw, "perf_phase: false", "perf_phase: true", 1)
 	raw = strings.Replace(raw, "depends_on: []", "depends_on: [1]", 1)
@@ -62,11 +64,11 @@ func TestApplyPhaseDraftAddsPhaseAndPreservesPhaseFlags(t *testing.T) {
 	root := t.TempDir()
 	settings := applyTestSettings()
 	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := writePlan(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 
-	draft := filledPhaseDraft(t, languageEnglish)
+	draft := filledPhaseDraft(t, doc.English)
 	if _, err := applyPhaseDraft(draft, settings, root, false, false); err != nil {
 		t.Fatalf("applyPhaseDraft() unexpected error: %v", err)
 	}
@@ -101,7 +103,7 @@ func TestApplyPhaseDraftRefusesCompletedPlan(t *testing.T) {
 	root := t.TempDir()
 	settings := applyTestSettings()
 	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := writePlan(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	planPath := filepath.Join(planRoot, "PLAN.md")
@@ -119,13 +121,13 @@ func TestApplyPhaseDraftRefusesCompletedPlan(t *testing.T) {
 	}
 
 	err = func() error {
-		_, err := applyPhaseDraft(filledPhaseDraft(t, languageEnglish), settings, root, false, false)
+		_, err := applyPhaseDraft(filledPhaseDraft(t, doc.English), settings, root, false, false)
 		return err
 	}()
 	if err == nil || !strings.Contains(err.Error(), "already done") {
 		t.Fatalf("applyPhaseDraft() error = %v, want already done", err)
 	}
-	records := validationRecords(err)
+	records := validation.Records(err)
 	if len(records) != 1 || records[0].Rule != "plan_done" {
 		t.Fatalf("validation records = %#v, want plan_done", records)
 	}
@@ -164,7 +166,7 @@ func TestEditPhaseBaseHashAndStatusSafety(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := writePlan(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	phasePath := filepath.Join(planRoot, "phases", "00-foundation.md")
@@ -189,7 +191,7 @@ func TestEditPhaseBaseHashAndStatusSafety(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("stale apply error = %v, want hash mismatch", err)
 	}
-	if records := validationRecords(err); len(records) != 1 || records[0].Rule != "base_mismatch" {
+	if records := validation.Records(err); len(records) != 1 || records[0].Rule != "base_mismatch" {
 		t.Fatalf("stale validation records = %#v, want base_mismatch", records)
 	}
 
@@ -199,7 +201,7 @@ func TestEditPhaseBaseHashAndStatusSafety(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "use `planr phase start`") {
 		t.Fatalf("status edit error = %v, want phase start guidance", err)
 	}
-	if records := validationRecords(err); len(records) != 1 || records[0].Rule != "status_transition" {
+	if records := validation.Records(err); len(records) != 1 || records[0].Rule != "status_transition" {
 		t.Fatalf("status validation records = %#v, want status_transition", records)
 	}
 }
@@ -211,7 +213,7 @@ func TestEditPlanSectionProtectsDerivedChecklist(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := writePlan(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	checkout := editDocumentForTest(t, root, "checkout-v2", "plan.md", "plan")
@@ -262,7 +264,7 @@ func TestStructuredValidationIncludesPlaceholderLocationAndCycle(t *testing.T) {
 	if err := checkDraftPlaceholders(raw); err == nil {
 		t.Fatal("placeholder draft unexpectedly passed")
 	} else {
-		records := validationRecords(err)
+		records := validation.Records(err)
 		if len(records) != 3 || records[0].Rule != "placeholder" || records[0].Section != "PHASES" || records[0].Phase == nil || records[0].Line == 0 {
 			t.Fatalf("placeholder records = %#v", records)
 		}
@@ -276,7 +278,7 @@ func TestStructuredValidationIncludesPlaceholderLocationAndCycle(t *testing.T) {
 	if err == nil {
 		t.Fatal("cycle unexpectedly passed")
 	}
-	records := validationRecords(err)
+	records := validation.Records(err)
 	if len(records) != 1 || records[0].Rule != "dependency_cycle" || len(records[0].Phases) != 2 {
 		t.Fatalf("cycle records = %#v", records)
 	}
@@ -311,7 +313,7 @@ func TestStdinOnlyLifecycleUsesNewEditAndApply(t *testing.T) {
 	}
 	withWorkingDirectory(t, root)
 
-	plan, err := renderNewDraft(languageEnglish, "stdin-plan", nil, "a plan applied over stdin")
+	plan, err := doc.RenderNewDraft(doc.English, "stdin-plan", nil, "a plan applied over stdin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +322,7 @@ func TestStdinOnlyLifecycleUsesNewEditAndApply(t *testing.T) {
 		t.Fatalf("apply plan over stdin: %v; output=%q", err, output)
 	}
 
-	phase, err := renderNewPhaseDraft(languageEnglish, "stdin-plan", "Second Phase", "second-phase")
+	phase, err := doc.RenderNewPhaseDraft(doc.English, "stdin-plan", "Second Phase", "second-phase")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +364,7 @@ func TestNewJSONProducesPlanAndPhaseTemplatesWithoutFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), []byte("plans_dir: plans\nlanguage: ko\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writePlan(filepath.Join(root, "plans", "00-checkout-v2"), applyTestDraft("checkout-v2"), "00-checkout-v2", languageKorean); err != nil {
+	if err := writePlan(filepath.Join(root, "plans", "00-checkout-v2"), applyTestDraft("checkout-v2"), "00-checkout-v2", doc.Korean); err != nil {
 		t.Fatal(err)
 	}
 	withWorkingDirectory(t, root)
@@ -410,7 +412,7 @@ func TestShowSectionsAllAndSchemaReturnMachineReadableDocuments(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), []byte("plans_dir: plans\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writePlan(filepath.Join(root, "plans", "00-checkout-v2"), applyTestDraft("checkout-v2"), "00-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(filepath.Join(root, "plans", "00-checkout-v2"), applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	withWorkingDirectory(t, root)
@@ -532,7 +534,7 @@ func newSchemaTestCommand() *cli.Command {
 
 func renderPlaceholderDraftForTest(t *testing.T) string {
 	t.Helper()
-	raw, err := renderNewDraft(languageEnglish, "demo", nil, "a demo plan")
+	raw, err := doc.RenderNewDraft(doc.English, "demo", nil, "a demo plan")
 	if err != nil {
 		t.Fatal(err)
 	}

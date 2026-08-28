@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -77,7 +78,7 @@ func newPlanCommand(cmd *cli.Command) error {
 	if err := runDocumentHooks(repoRoot, settings, "before", hookEventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
 		return err
 	}
-	draft, err := renderNewDraft(settings.Language, name, dependsOn, description)
+	draft, err := doc.RenderNewDraft(settings.Language, name, dependsOn, description)
 	if err != nil {
 		return err
 	}
@@ -231,7 +232,7 @@ func writePlan(root string, d draft, planDirectory, language string) error {
 // is registered. Keeping this separate from writePlan lets apply --dry-run
 // return the exact resulting documents without touching the repository.
 func renderPlanDocuments(d draft, planDirectory, language, registeredAt string) (map[string]string, error) {
-	text := documentStringsFor(language)
+	text := doc.StringsFor(language)
 	documents := map[string]string{
 		"GOALS.md":   "# GOALS\n\n" + d.Goals + "\n",
 		"CONTEXT.md": "# SCOPE\n\n" + d.Scope + "\n\n# CONTEXT\n\n" + d.Context + "\n",
@@ -259,9 +260,9 @@ func renderPlanDocuments(d draft, planDirectory, language, registeredAt string) 
 	}
 	documents["PLAN.md"] = fmt.Sprintf("---\n%s---\n> NEXT: %s ([Phase %d](%s))\n\n# Phases\n\n%s\n\n# %s\n\n%s\n\n# %s\n\n%s\n\n# %s\n\n%s\n",
 		header, d.NextText, d.NextPhase, nextDoc, strings.Join(checklist, "\n"),
-		text.verification, d.Verification,
-		text.ordering, d.Ordering,
-		text.nextTarget, d.NextText)
+		text.Verification, d.Verification,
+		text.Ordering, d.Ordering,
+		text.NextTarget, d.NextText)
 	return documents, nil
 }
 
@@ -339,9 +340,9 @@ func phaseFrontmatter(planDirectory string, meta phaseMeta) map[string]any {
 }
 
 func phaseDocumentBody(language, title, planned, completion string) string {
-	text := documentStringsFor(language)
+	text := doc.StringsFor(language)
 	return fmt.Sprintf("> DONE-WHEN: %s\n> NEXT: %s\n\n# %s\n\n## %s\n\n%s\n\n## %s\n\n%s\n",
-		firstPhaseLine(completion), text.noNext, title, text.plannedWork, planned, text.doneWhen, completion)
+		firstPhaseLine(completion), text.NoNext, title, text.PlannedWork, planned, text.DoneWhen, completion)
 }
 
 func firstPhaseLine(value string) string {

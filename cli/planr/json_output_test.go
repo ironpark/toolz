@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
 )
 
 func TestStatusJSONUsesStableSnakeCaseFields(t *testing.T) {
@@ -111,7 +113,7 @@ func TestDiagnosticJSONUsesStableStructuredFields(t *testing.T) {
 	config, err := json.Marshal(makeConfigJSON(config{
 		PlansDirs: []string{"plans-active", "plans-archive"},
 		Ignore:    []string{"tmp/**"},
-		Language:  languageKorean,
+		Language:  doc.Korean,
 		Hooks: hookConfig{
 			Timeout: 5,
 			Before:  []hookRule{{On: []string{hookEventDone}, Run: "go test ./..."}},

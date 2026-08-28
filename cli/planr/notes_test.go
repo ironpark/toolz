@@ -10,6 +10,7 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -59,7 +60,7 @@ func testDraft() draft {
 func TestFrontmatterOmitsEmptyMetadata(t *testing.T) {
 	plansRoot := t.TempDir()
 	planRoot := filepath.Join(plansRoot, "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", languageKorean); err != nil {
+	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", doc.Korean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 
@@ -94,7 +95,7 @@ func TestFrontmatterOmitsEmptyMetadata(t *testing.T) {
 func TestCompletionStampsFrontmatter(t *testing.T) {
 	plansRoot := t.TempDir()
 	planRoot := filepath.Join(plansRoot, "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", languageKorean); err != nil {
+	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", doc.Korean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 
@@ -125,7 +126,7 @@ func TestPhaseStartRecordsNoteForCurrentHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(root, "plan", "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	old, err := os.Getwd()

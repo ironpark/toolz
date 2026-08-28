@@ -10,6 +10,7 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/goccy/go-yaml"
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -160,7 +161,7 @@ func rootInStartPath(root, start string) string {
 }
 
 func defaultConfig() config {
-	return config{PlansDirs: []string{"plan"}, Language: defaultLanguage, Hooks: hookConfig{Timeout: defaultHookTimeout}}
+	return config{PlansDirs: []string{"plan"}, Language: doc.DefaultLanguage, Hooks: hookConfig{Timeout: defaultHookTimeout}}
 }
 
 func parseConfigFile(path string) (config, error) {
@@ -189,10 +190,10 @@ func normalizeConfig(value config) (config, error) {
 	if err := validatePlanDirs(value.PlansDirs); err != nil {
 		return config{}, err
 	}
-	if err := validateLanguage(value.Language); err != nil {
+	if err := doc.ValidateLanguage(value.Language); err != nil {
 		return config{}, err
 	}
-	value.Language = normalizeLanguage(value.Language)
+	value.Language = doc.NormalizeLanguage(value.Language)
 	if err := validateHooks(value.Hooks); err != nil {
 		return config{}, err
 	}

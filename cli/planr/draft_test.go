@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/validation"
 )
 
 func phaseForTest(id int, dependsOn ...int) draftPhase {
@@ -73,15 +76,15 @@ func TestValidatePhaseDependencies(t *testing.T) {
 // at once rather than one failed application at a time.
 func newDraftForTest(t *testing.T, language string) string {
 	t.Helper()
-	raw, err := renderNewDraft(language, "demo", nil, "a demo plan")
+	raw, err := doc.RenderNewDraft(language, "demo", nil, "a demo plan")
 	if err != nil {
-		t.Fatalf("renderNewDraft(%q) unexpected error: %v", language, err)
+		t.Fatalf("doc.RenderNewDraft(%q) unexpected error: %v", language, err)
 	}
 	return raw
 }
 
 func TestNewDraftReportsEveryPlaceholderAtOnce(t *testing.T) {
-	for _, language := range sortedLanguages() {
+	for _, language := range doc.SortedLanguages() {
 		t.Run(language, func(t *testing.T) {
 			_, err := parseDraft([]byte(newDraftForTest(t, language)), "demo.md")
 			if err == nil {
@@ -99,7 +102,7 @@ func TestNewDraftReportsEveryPlaceholderAtOnce(t *testing.T) {
 // error, so a section mismatch must name the offending sections rather than
 // restating what a correct draft looks like.
 func TestSectionMismatchNamesTheOffendingSections(t *testing.T) {
-	raw := newDraftForTest(t, languageEnglish)
+	raw := newDraftForTest(t, doc.English)
 	lines := []string{}
 	for _, line := range strings.Split(raw, "\n") {
 		if strings.HasPrefix(line, "# CONTEXT") {
@@ -119,7 +122,7 @@ func TestSectionMismatchNamesTheOffendingSections(t *testing.T) {
 			t.Errorf("error %q does not contain %q", err, want)
 		}
 	}
-	records := validationRecords(err)
+	records := validation.Records(err)
 	if len(records) != 1 || records[0].Rule != "sections" || !strings.Contains(records[0].Detail, "CONTEXT") {
 		t.Fatalf("validation records = %#v, want one sections record naming CONTEXT", records)
 	}
@@ -146,7 +149,7 @@ func TestDescribeSectionMismatch(t *testing.T) {
 // Every language's skeleton must parse, so a draft written against one
 // language is not silently unusable under another.
 func TestNewDraftRoundTripsInEveryLanguage(t *testing.T) {
-	for _, language := range sortedLanguages() {
+	for _, language := range doc.SortedLanguages() {
 		t.Run(language, func(t *testing.T) {
 			raw := newDraftForTest(t, language)
 			lines := strings.Split(raw, "\n")
@@ -163,7 +166,7 @@ func TestNewDraftRoundTripsInEveryLanguage(t *testing.T) {
 }
 
 func TestNewDraftRoundTripsOnceFilledIn(t *testing.T) {
-	raw := newDraftForTest(t, languageKorean)
+	raw := newDraftForTest(t, doc.Korean)
 	lines := strings.Split(raw, "\n")
 	for index, line := range lines {
 		if strings.Contains(line, draftPlaceholder) {

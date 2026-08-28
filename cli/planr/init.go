@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -39,8 +40,8 @@ func initCommand(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("configuration for this repository lives at %s, not %s", existing, target)
 	}
 
-	language := normalizeLanguage(cmd.String("language"))
-	if err := validateLanguage(language); err != nil {
+	language := doc.NormalizeLanguage(cmd.String("language"))
+	if err := doc.ValidateLanguage(language); err != nil {
 		return err
 	}
 	plansDirs := cmd.StringSlice("plans-dir")
@@ -129,7 +130,7 @@ func configTemplate(language string, plansDirs []string) string {
 	var builder strings.Builder
 	builder.WriteString("# planr configuration. See `planr config` for the values in effect.\n\n")
 	builder.WriteString("# Language of the plan documents planr writes. Command output and errors\n")
-	fmt.Fprintf(&builder, "# stay in English. Supported: %s\n", strings.Join(sortedLanguages(), ", "))
+	fmt.Fprintf(&builder, "# stay in English. Supported: %s\n", strings.Join(doc.SortedLanguages(), ", "))
 	fmt.Fprintf(&builder, "language: %s\n\n", language)
 	builder.WriteString("# Where plans are stored, relative to this file. List more than one to keep\n")
 	builder.WriteString("# active and archived plans apart.\n")

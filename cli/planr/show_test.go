@@ -3,10 +3,12 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
 )
 
 func TestSplitPhaseDocumentSectionsUsesConfiguredLanguageTable(t *testing.T) {
-	for _, language := range sortedLanguages() {
+	for _, language := range doc.SortedLanguages() {
 		t.Run(language, func(t *testing.T) {
 			body := phaseDocumentBody(language, "API Contract", "- add the contract", "- contract tests pass")
 			planned, done, err := splitPhaseDocumentSections("API Contract", body)
@@ -21,7 +23,7 @@ func TestSplitPhaseDocumentSectionsUsesConfiguredLanguageTable(t *testing.T) {
 }
 
 func TestSplitPhaseDocumentSectionsRejectsMissingSection(t *testing.T) {
-	body := "> NEXT: none\n\n# API Contract\n\n## " + documentStringsFor(languageEnglish).plannedWork + "\n\nwork\n"
+	body := "> NEXT: none\n\n# API Contract\n\n## " + doc.StringsFor(doc.English).PlannedWork + "\n\nwork\n"
 	_, _, err := splitPhaseDocumentSections("API Contract", body)
 	if err == nil || !strings.Contains(err.Error(), "Done When") {
 		t.Fatalf("splitPhaseDocumentSections() error = %v, want missing Done When", err)
@@ -29,7 +31,7 @@ func TestSplitPhaseDocumentSectionsRejectsMissingSection(t *testing.T) {
 }
 
 func TestSplitPhaseDocumentSectionsIgnoresMarkdownHeadingsInWorkBody(t *testing.T) {
-	body := phaseDocumentBody(languageEnglish, "API Contract", "work\n\n## Implementation detail\n\nmore work", "done")
+	body := phaseDocumentBody(doc.English, "API Contract", "work\n\n## Implementation detail\n\nmore work", "done")
 	planned, done, err := splitPhaseDocumentSections("API Contract", body)
 	if err != nil {
 		t.Fatalf("splitPhaseDocumentSections() unexpected error: %v", err)

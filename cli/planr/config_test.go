@@ -10,7 +10,8 @@ import (
 	"time"
 
 	git "github.com/go-git/go-git/v5"
-	"github.com/ironpark/toolz/cli/planr/agentenv"
+	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
 )
 
 func TestLoadConfigHooks(t *testing.T) {
@@ -60,7 +61,7 @@ func TestLoadConfigStopsAtGitRepositoryRoot(t *testing.T) {
 	if foundRoot != repoRoot {
 		t.Fatalf("loadConfig() root = %q, want %q", foundRoot, repoRoot)
 	}
-	if value.Language != defaultLanguage || len(value.PlansDirs) != 1 || value.PlansDirs[0] != "plan" {
+	if value.Language != doc.DefaultLanguage || len(value.PlansDirs) != 1 || value.PlansDirs[0] != "plan" {
 		t.Fatalf("loadConfig() crossed git root: %#v", value)
 	}
 	if value.configPath != "" {
@@ -108,9 +109,9 @@ func TestLoadConfigLanguage(t *testing.T) {
 		name, contents, want string
 		wantError            string
 	}{
-		{name: "defaults to english", contents: "plans_dir: plans\n", want: languageEnglish},
-		{name: "explicit korean", contents: "language: ko\n", want: languageKorean},
-		{name: "normalizes case and spacing", contents: "language: \" KO \"\n", want: languageKorean},
+		{name: "defaults to english", contents: "plans_dir: plans\n", want: doc.English},
+		{name: "explicit korean", contents: "language: ko\n", want: doc.Korean},
+		{name: "normalizes case and spacing", contents: "language: \" KO \"\n", want: doc.Korean},
 		{name: "rejects unknown", contents: "language: fr\n", wantError: "not supported"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -139,8 +140,8 @@ func TestLoadConfigLanguage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig() unexpected error: %v", err)
 	}
-	if value.Language != languageEnglish {
-		t.Fatalf("language without a config file = %q, want %q", value.Language, languageEnglish)
+	if value.Language != doc.English {
+		t.Fatalf("language without a config file = %q, want %q", value.Language, doc.English)
 	}
 	if value.Hooks.Timeout != defaultHookTimeout {
 		t.Fatalf("hook timeout without a config file = %s, want %s", value.Hooks.Timeout, defaultHookTimeout)
@@ -150,22 +151,22 @@ func TestLoadConfigLanguage(t *testing.T) {
 // The language setting picks the headings planr writes, and a draft using any
 // supported language's headings must still parse.
 func TestPlanDocumentsFollowConfiguredLanguage(t *testing.T) {
-	for _, language := range sortedLanguages() {
+	for _, language := range doc.SortedLanguages() {
 		t.Run(language, func(t *testing.T) {
-			text := documentStringsFor(language)
+			text := doc.StringsFor(language)
 			plansRoot := t.TempDir()
 			planRoot := filepath.Join(plansRoot, "00-checkout-v2")
 			if err := writePlan(planRoot, testDraft(), "00-checkout-v2", language); err != nil {
 				t.Fatalf("writePlan() unexpected error: %v", err)
 			}
 			phase := readFileString(t, filepath.Join(planRoot, "phases", "00-api-contract.md"))
-			for _, want := range []string{"## " + text.plannedWork, "## " + text.doneWhen, "> NEXT: " + text.noNext} {
+			for _, want := range []string{"## " + text.PlannedWork, "## " + text.DoneWhen, "> NEXT: " + text.NoNext} {
 				if !strings.Contains(phase, want) {
 					t.Errorf("phase document missing %q:\n%s", want, phase)
 				}
 			}
 			plan := readFileString(t, filepath.Join(planRoot, "PLAN.md"))
-			for _, want := range []string{"# " + text.verification, "# " + text.ordering, "# " + text.nextTarget} {
+			for _, want := range []string{"# " + text.Verification, "# " + text.Ordering, "# " + text.NextTarget} {
 				if !strings.Contains(plan, want) {
 					t.Errorf("PLAN.md missing %q:\n%s", want, plan)
 				}
@@ -317,7 +318,7 @@ func TestNoHooksGlobalFlagSkipsBeforeAndAfterHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(root, "plan", "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	old, err := os.Getwd()

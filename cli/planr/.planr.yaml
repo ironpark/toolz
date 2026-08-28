@@ -1,0 +1,22 @@
+# planr configuration. See `planr config` for the values in effect.
+
+# Language of the plan documents planr writes. Command output and errors
+# stay in English. Supported: en, ko
+language: en
+
+# Where plans are stored, relative to this file. List more than one to keep
+# active and archived plans apart.
+plans_dirs:
+  - plan
+
+# Paths the done-check ignores, so build output does not make a phase look
+# unfinished.
+# ignore:
+#   - bin/**
+
+# Commands to run around planr operations.
+# hooks:
+#   timeout: 10m
+#   after:
+#     - on: [done]
+#       run: go test ./...

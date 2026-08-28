@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -60,8 +61,8 @@ func TestInitWritesConfigAndPlansDirectory(t *testing.T) {
 	if settings.configPath != filepath.Join(root, ".planr.yaml") {
 		t.Fatalf("config path = %q", settings.configPath)
 	}
-	if settings.Language != defaultLanguage {
-		t.Fatalf("language = %q, want %q", settings.Language, defaultLanguage)
+	if settings.Language != doc.DefaultLanguage {
+		t.Fatalf("language = %q, want %q", settings.Language, doc.DefaultLanguage)
 	}
 	if len(settings.PlansDirs) != 1 || settings.PlansDirs[0] != "plan" {
 		t.Fatalf("plans_dirs = %#v", settings.PlansDirs)
@@ -79,8 +80,8 @@ func TestInitHonoursLanguageAndPlansDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig() after init: %v", err)
 	}
-	if settings.Language != languageKorean {
-		t.Fatalf("language = %q, want %q", settings.Language, languageKorean)
+	if settings.Language != doc.Korean {
+		t.Fatalf("language = %q, want %q", settings.Language, doc.Korean)
 	}
 	if len(settings.PlansDirs) != 2 || settings.PlansDirs[0] != "plans-active" || settings.PlansDirs[1] != "plans-archive" {
 		t.Fatalf("plans_dirs = %#v", settings.PlansDirs)
@@ -328,7 +329,7 @@ func TestInitRejectsPositionalArguments(t *testing.T) {
 }
 
 func TestMakeInitJSONEncodesEmptyListsNotNull(t *testing.T) {
-	output := makeInitJSON("/repo/.planr.yaml", "/repo", languageEnglish, []string{"plan"}, nil, nil)
+	output := makeInitJSON("/repo/.planr.yaml", "/repo", doc.English, []string{"plan"}, nil, nil)
 	if output.Created == nil || output.Existed == nil {
 		t.Fatalf("created/existed must encode as [], got %#v", output)
 	}

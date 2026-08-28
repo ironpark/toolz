@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ironpark/toolz/cli/planr/agentenv"
+	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
 )
 
 // planr reports the AI coding agent it is running under in two places: as

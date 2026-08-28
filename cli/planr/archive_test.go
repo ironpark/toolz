@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -25,7 +26,7 @@ func TestArchiveMovesCompletedPlanAndPreservesNumbering(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(active, "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := updatePhaseStatus([]string{active}, "checkout-v2", 0, "done"); err != nil {

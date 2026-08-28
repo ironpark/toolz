@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -22,7 +23,7 @@ func TestPhaseRemoveRefusesDependentsAndLeavesNumberGapWithForce(t *testing.T) {
 		Meta:    phaseMeta{Phase: 2, Slug: "rollout", Status: "planned", DependsOn: []int{1}},
 		Planned: "Roll out.", Completion: "Rollout is stable.",
 	})
-	if err := writePlan(planRoot, draft, "00-checkout-v2", languageEnglish); err != nil {
+	if err := writePlan(planRoot, draft, "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	old, err := os.Getwd()

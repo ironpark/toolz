@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/validation"
 	"github.com/urfave/cli/v3"
 )
 
@@ -114,7 +116,7 @@ func newPhaseCommand(cmd *cli.Command, selector string) error {
 			return err
 		}
 	}
-	draft, err := renderNewPhaseDraft(settings.Language, planName(planDirectory), strings.TrimSpace(title), slug)
+	draft, err := doc.RenderNewPhaseDraft(settings.Language, planName(planDirectory), strings.TrimSpace(title), slug)
 	if err != nil {
 		return err
 	}
@@ -240,9 +242,9 @@ func applyCommandError(cmd *cli.Command, err error) error {
 	if !cmd.Bool("json") {
 		return err
 	}
-	records := validationRecords(err)
+	records := validation.Records(err)
 	if len(records) == 0 {
-		records = []validationRecord{{Rule: "document", Detail: err.Error()}}
+		records = []validation.Record{{Rule: "document", Detail: err.Error()}}
 	}
 	if writeErr := writeJSON(applyFailureJSON{Ok: false, Errors: makeValidationJSON(records)}); writeErr != nil {
 		return writeErr
@@ -253,7 +255,7 @@ func applyCommandError(cmd *cli.Command, err error) error {
 func detectApplyDocument(raw []byte, fallback string) (string, any, error) {
 	front, _, err := frontmatter(string(raw))
 	if err != nil {
-		return "", nil, wrapValidationError(err, "frontmatter", "frontmatter")
+		return "", nil, validation.Wrap(err, "frontmatter", "frontmatter")
 	}
 	if value, ok := front["planr_edit"].(string); ok && strings.TrimSpace(value) != "" {
 		return applyKindEdit, raw, nil
@@ -281,7 +283,7 @@ func detectApplyDocument(raw []byte, fallback string) (string, any, error) {
 func parsePhaseDraft(raw []byte) (phaseDraftInput, error) {
 	front, body, err := frontmatter(string(raw))
 	if err != nil {
-		return phaseDraftInput{}, wrapValidationError(err, "frontmatter", "frontmatter")
+		return phaseDraftInput{}, validation.Wrap(err, "frontmatter", "frontmatter")
 	}
 	if err := checkDraftPlaceholders(string(raw)); err != nil {
 		return phaseDraftInput{}, err
@@ -341,7 +343,7 @@ func parsePhaseDraft(raw []byte) (phaseDraftInput, error) {
 }
 
 func phaseDraftValidationError(section, detail string) error {
-	return newValidationFailure(validationRecord{Rule: "phase_document", Section: section, Detail: detail}, detail)
+	return validation.NewFailure(validation.Record{Rule: "phase_document", Section: section, Detail: detail}, detail)
 }
 
 func applyPlanDraft(d draft, settings config, repoRoot string, dryRun, jsonOutput bool) (applyOperation, error) {
@@ -434,7 +436,7 @@ func applyPhaseDraft(d phaseDraftInput, settings config, repoRoot string, dryRun
 	}
 	if status, _ := planFront["plan_status"].(string); status == "done" {
 		detail := fmt.Sprintf("plan %q is already done; new phases can only be applied to open plans", planDirectory)
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "plan_done", Section: "frontmatter", Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "plan_done", Section: "frontmatter", Detail: detail}, detail)
 	}
 	phases, err := readPlanPhases(planRoot)
 	if err != nil {
@@ -444,7 +446,7 @@ func applyPhaseDraft(d phaseDraftInput, settings config, repoRoot string, dryRun
 	for _, phase := range phases {
 		if phase.slug == d.Meta.Slug {
 			detail := fmt.Sprintf("phase slug %q already exists in plan %q", d.Meta.Slug, planDirectory)
-			return applyOperation{}, newValidationFailure(validationRecord{Rule: "phase_slug_duplicate", Section: "frontmatter", Detail: detail}, detail)
+			return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_slug_duplicate", Section: "frontmatter", Detail: detail}, detail)
 		}
 	}
 	dependencies, err := resolvePhaseDraftDependencies(d.Meta.DependsOnRefs, phases)
@@ -520,16 +522,16 @@ func resolvePhaseDraftDependencies(refs []phaseRef, existing []storedPhase) ([]i
 			id, found = bySlug[ref.slug]
 			if !found {
 				detail := fmt.Sprintf("phase dependency %q is neither a phase number nor a slug of an existing phase; available slugs: %s", ref.slug, strings.Join(known, ", "))
-				return nil, newValidationFailure(validationRecord{Rule: "dependency_reference", Section: "frontmatter", Detail: detail}, detail)
+				return nil, validation.NewFailure(validation.Record{Rule: "dependency_reference", Section: "frontmatter", Detail: detail}, detail)
 			}
 		}
 		if id < 0 {
 			detail := fmt.Sprintf("phase dependency %d must be a non-negative phase number", id)
-			return nil, newValidationFailure(validationRecord{Rule: "dependency_reference", Section: "frontmatter", Detail: detail}, detail)
+			return nil, validation.NewFailure(validation.Record{Rule: "dependency_reference", Section: "frontmatter", Detail: detail}, detail)
 		}
 		if seen[id] {
 			detail := fmt.Sprintf("phase dependency %d is listed more than once", id)
-			return nil, newValidationFailure(validationRecord{Rule: "dependency_duplicate", Section: "frontmatter", Detail: detail}, detail)
+			return nil, validation.NewFailure(validation.Record{Rule: "dependency_duplicate", Section: "frontmatter", Detail: detail}, detail)
 		}
 		seen[id] = true
 		dependencies = append(dependencies, id)
@@ -604,11 +606,11 @@ func validateNewPhaseDependencies(planDirectory string, newPhase phaseMeta, titl
 	all = append(all, draftPhase{Title: title, Meta: newPhase})
 	if err := validatePhaseDependencies(all); err != nil {
 		message := fmt.Sprintf("invalid dependencies for new phase %d: %v", newPhase.Phase, err)
-		records := validationRecords(err)
+		records := validation.Records(err)
 		if len(records) == 0 {
-			records = []validationRecord{{Rule: "dependency", Section: "frontmatter", Phase: validationIntPointer(newPhase.Phase), Detail: err.Error()}}
+			records = []validation.Record{{Rule: "dependency", Section: "frontmatter", Phase: validation.IntPointer(newPhase.Phase), Detail: err.Error()}}
 		}
-		return newValidationFailures(records, message)
+		return validation.NewFailures(records, message)
 	}
 	return nil
 }
@@ -700,35 +702,35 @@ func documentHash(raw []byte) string {
 func applyEditDocument(raw []byte, settings config, repoRoot string, dryRun, jsonOutput bool) (applyOperation, error) {
 	front, _, err := frontmatter(string(raw))
 	if err != nil {
-		return applyOperation{}, wrapValidationError(err, "frontmatter", "frontmatter")
+		return applyOperation{}, validation.Wrap(err, "frontmatter", "frontmatter")
 	}
 	selector, ok := front["planr_edit"].(string)
 	if !ok || strings.TrimSpace(selector) == "" {
 		detail := "edit document requires planr_edit in frontmatter"
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "edit_identity", Section: "frontmatter", Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "edit_identity", Section: "frontmatter", Detail: detail}, detail)
 	}
 	targetValue, ok := front["planr_target"].(string)
 	if !ok || strings.TrimSpace(targetValue) == "" {
 		detail := "edit document requires planr_target in frontmatter"
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "target_required", Section: "frontmatter", Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "target_required", Section: "frontmatter", Detail: detail}, detail)
 	}
 	base, ok := front["planr_base"].(string)
 	if !ok || strings.TrimSpace(base) == "" {
 		detail := "edit document requires mandatory planr_base in frontmatter; run planr edit again"
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "base_required", Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "base_required", Detail: detail}, detail)
 	}
 	if !strings.HasPrefix(base, "sha256:") {
 		detail := "planr_base must be a sha256 hash; run planr edit again"
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "base_invalid", Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "base_invalid", Detail: detail}, detail)
 	}
 	decodedBase, decodeErr := hex.DecodeString(strings.TrimPrefix(base, "sha256:"))
 	if decodeErr != nil || len(decodedBase) != sha256.Size {
 		detail := "planr_base must be a sha256 hash; run planr edit again"
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "base_invalid", Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "base_invalid", Detail: detail}, detail)
 	}
 	planArg, targetKind, phaseID, section, err := parseEditDocumentSelector(selector, front)
 	if err != nil {
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "edit_selector", Section: "frontmatter", Detail: err.Error()}, err.Error())
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "edit_selector", Section: "frontmatter", Detail: err.Error()}, err.Error())
 	}
 	planDirectories := settings.planDirs(repoRoot)
 	planRoot, planDirectory, err := findPlanDirectory(planDirectories, planArg)
@@ -770,11 +772,11 @@ func applyEditDocument(raw []byte, settings config, repoRoot string, dryRun, jso
 	currentHash := documentHash(currentRaw)
 	if currentHash != base {
 		detail := fmt.Sprintf("cannot apply edit for %s: planr_base %s does not match the current on-disk document hash %s; run planr edit again", selector, base, currentHash)
-		record := validationRecord{Rule: "base_mismatch", Detail: detail}
+		record := validation.Record{Rule: "base_mismatch", Detail: detail}
 		if targetKind == "phase" {
-			record.Phase = validationIntPointer(phaseID)
+			record.Phase = validation.IntPointer(phaseID)
 		}
-		return applyOperation{}, newValidationFailure(record, detail)
+		return applyOperation{}, validation.NewFailure(record, detail)
 	}
 	if targetKind == "phase" {
 		return applyPhaseEdit(raw, front, currentRaw, target, planRoot, planDirectory, phaseID, dryRun, jsonOutput)
@@ -863,18 +865,18 @@ func applyPhaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte,
 	incomingStatus, _ := incomingFront["status"].(string)
 	if incomingStatus != currentStatus {
 		detail := fmt.Sprintf("cannot apply phase edit for %s phase %02d: status changed from %q to %q; use `planr phase %s` to change phase status", planDirectory, phaseID, currentStatus, incomingStatus, phaseStatusCommand(incomingStatus))
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "status_transition", Section: "frontmatter", Phase: validationIntPointer(phaseID), Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "status_transition", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
 	if !phaseStatusValues[currentStatus] {
 		detail := fmt.Sprintf("%s phase %02d has invalid status %q", planDirectory, phaseID, currentStatus)
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "status", Section: "frontmatter", Phase: validationIntPointer(phaseID), Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "status", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
 	if err := validatePhaseStatusChange(incomingFront, currentStatus); err != nil {
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "status_metadata", Section: "frontmatter", Phase: validationIntPointer(phaseID), Detail: err.Error()}, err.Error())
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "status_metadata", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: err.Error()}, err.Error())
 	}
 	if value, found := incomingFront["planr_phase"]; found && fmt.Sprint(value) != strconv.Itoa(phaseID) {
 		detail := fmt.Sprintf("edit document identifies phase %v, but target is phase %02d", value, phaseID)
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "phase_identity", Section: "frontmatter", Phase: validationIntPointer(phaseID), Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_identity", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
 	phases, err := readPlanPhases(planRoot)
 	if err != nil {
@@ -882,37 +884,37 @@ func applyPhaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte,
 	}
 	meta, normalizedFront, err := editablePhaseMeta(incomingFront, planDirectory, phaseID, phases)
 	if err != nil {
-		if len(validationRecords(err)) > 0 {
+		if len(validation.Records(err)) > 0 {
 			return applyOperation{}, err
 		}
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "phase_metadata", Section: "frontmatter", Phase: validationIntPointer(phaseID), Detail: err.Error()}, err.Error())
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_metadata", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: err.Error()}, err.Error())
 	}
 	if value, found := incomingFront["planr_slug"]; found && fmt.Sprint(value) != meta.Slug {
 		detail := fmt.Sprintf("edit document identifies slug %q, but target is %q", value, meta.Slug)
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "phase_identity", Section: "frontmatter", Phase: validationIntPointer(phaseID), Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_identity", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
 	if value, found := incomingFront["slug"]; found {
 		if fmt.Sprint(value) != meta.Slug {
 			detail := fmt.Sprintf("edit document cannot change phase slug from %q to %q", meta.Slug, value)
-			return applyOperation{}, newValidationFailure(validationRecord{Rule: "phase_identity", Section: "frontmatter", Phase: validationIntPointer(phaseID), Detail: detail}, detail)
+			return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_identity", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 		}
 	}
 	if meta.Slug != phaseSlugForID(phases, phaseID) {
 		detail := "phase edit cannot change the phase slug"
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "phase_identity", Section: "frontmatter", Phase: validationIntPointer(phaseID), Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_identity", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
 	title := markdownTitle(documentBody(raw))
 	if title == "unnamed phase" {
 		detail := "phase document must contain a Markdown title"
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "phase_document", Section: "phase", Phase: validationIntPointer(phaseID), Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_document", Section: "phase", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
 	planned, completion, err := splitPhaseDocumentSections(title, documentBody(raw))
 	if err != nil {
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "phase_document", Section: "phase", Phase: validationIntPointer(phaseID), Detail: err.Error()}, err.Error())
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_document", Section: "phase", Phase: validation.IntPointer(phaseID), Detail: err.Error()}, err.Error())
 	}
 	if planned == "" || completion == "" {
 		detail := fmt.Sprintf("phase %q work and completion must not be empty", title)
-		return applyOperation{}, newValidationFailure(validationRecord{Rule: "phase_document", Section: "phase", Phase: validationIntPointer(phaseID), Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_document", Section: "phase", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
 	for _, key := range editEnvelopeKeys {
 		delete(normalizedFront, key)
@@ -1148,12 +1150,12 @@ func applySectionEdit(raw []byte, currentRaw []byte, target, planDirectory, sect
 		incomingStart, incomingEnd, incomingFound := doctorChecklistBounds(incomingBody)
 		if !incomingFound || strings.TrimSpace(incomingBody[incomingStart:incomingEnd]) != planChecklistPlaceholder {
 			detail := "plan section checkout must keep the derived checklist region unchanged"
-			return applyOperation{}, newValidationFailure(validationRecord{Rule: "derived_region", Section: "PLAN", Detail: detail}, detail)
+			return applyOperation{}, validation.NewFailure(validation.Record{Rule: "derived_region", Section: "PLAN", Detail: detail}, detail)
 		}
 		start, end, found := doctorChecklistBounds(currentBody)
 		if !found {
 			detail := "PLAN.md does not contain a # Phases section"
-			return applyOperation{}, newValidationFailure(validationRecord{Rule: "derived_region", Section: "PLAN", Detail: detail}, detail)
+			return applyOperation{}, validation.NewFailure(validation.Record{Rule: "derived_region", Section: "PLAN", Detail: detail}, detail)
 		}
 		updatedBody = incomingBody[:incomingStart] + currentBody[start:end] + incomingBody[incomingEnd:]
 	default:

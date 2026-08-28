@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/ironpark/toolz/cli/planr/internal/validation"
 )
 
 type statusJSONOutput struct {
@@ -289,7 +291,7 @@ func makeApplyJSON(operation applyOperation) applyJSONOutput {
 	}
 }
 
-func makeValidationJSON(records []validationRecord) []validationErrorJSON {
+func makeValidationJSON(records []validation.Record) []validationErrorJSON {
 	result := make([]validationErrorJSON, 0, len(records))
 	for _, record := range records {
 		result = append(result, validationErrorJSON{

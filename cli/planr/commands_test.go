@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ironpark/toolz/cli/planr/internal/doc"
 )
 
 func TestNormalizeDescription(t *testing.T) {
@@ -92,7 +94,7 @@ func TestWritePlanStoresDescriptionAndRegisteredAt(t *testing.T) {
 		},
 	}
 
-	if err := writePlan(root, draft, "00-checkout-v2", languageKorean); err != nil {
+	if err := writePlan(root, draft, "00-checkout-v2", doc.Korean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(root, "PLAN.md"))
