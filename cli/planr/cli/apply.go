@@ -11,6 +11,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -35,7 +36,7 @@ func applyCommand(_ context.Context, cmd *ucli.Command) error {
 		raw = apply.UnwrapJSONDocument(raw)
 	} else {
 		fallback = cmd.Args().First()
-		raw, err = os.ReadFile(fallback)
+		raw, err = vfs.ReadFile(fallback)
 	}
 	if err != nil {
 		return applyCommandError(cmd, err)

@@ -22,6 +22,7 @@ type Profile struct {
 	Skills    []SkillConfig     `yaml:"skills,omitempty"`
 	MCP       []MCPServerConfig `yaml:"mcp,omitempty"`
 	Verify    *VerifyConfig     `yaml:"verify,omitempty"`
+	Artifacts []string          `yaml:"artifacts,omitempty"`
 	Limits    *LimitsConfig     `yaml:"limits,omitempty"`
 	Report    *ReportConfig     `yaml:"report,omitempty"`
 }
@@ -58,6 +59,9 @@ func (c *Config) ApplyProfile(name string) error {
 	}
 	if profile.Verify != nil {
 		c.Verify = *profile.Verify
+	}
+	if profile.Artifacts != nil {
+		c.Artifacts = profile.Artifacts
 	}
 	if profile.Limits != nil {
 		c.Limits = *profile.Limits

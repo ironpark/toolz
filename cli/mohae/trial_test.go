@@ -44,6 +44,63 @@ func TestRunTrialPassesWhenEveryVerifyCommandPasses(t *testing.T) {
 	}
 }
 
+func TestRunTrialCapturesArtifactsBeforeDeletingAPassingWorkspace(t *testing.T) {
+	config := trialConfig(t, "mkdir -p plans/hello .harness\necho plan > plans/hello/PLAN.md\necho event > .harness/events.log\n")
+	config.Verify.Commands = []string{"true"}
+	config.Artifacts = []string{"plans/**", ".harness/*.log", "missing/**"}
+
+	result := RunTrial(context.Background(), config, TrialOptions{})
+	if !result.Passed {
+		t.Fatalf("result = %+v, want a pass", result)
+	}
+	if result.Workspace != "" {
+		t.Fatalf("passing workspace was kept: %s", result.Workspace)
+	}
+	if result.ArtifactDir == "" {
+		t.Fatal("no artifact directory was recorded")
+	}
+	for path, want := range map[string]string{
+		filepath.Join("plans", "hello", "PLAN.md"): "plan\n",
+		filepath.Join(".harness", "events.log"):    "event\n",
+	} {
+		data, err := os.ReadFile(filepath.Join(result.ArtifactDir, path))
+		if err != nil || string(data) != want {
+			t.Errorf("artifact %s = %q, %v", path, data, err)
+		}
+	}
+	if len(result.Artifacts) != 3 || len(result.Artifacts[2].Paths) != 0 {
+		t.Errorf("artifact matches = %+v", result.Artifacts)
+	}
+	if !strings.HasPrefix(result.ArtifactDir, config.Resolve(config.Report.Dir)+string(os.PathSeparator)) {
+		t.Errorf("artifact dir %q is outside report.dir %q", result.ArtifactDir, config.Resolve(config.Report.Dir))
+	}
+}
+
+func TestArtifactCapturePreservesSymlinksWithoutFollowingThem(t *testing.T) {
+	config := trialConfig(t, "ln -s /etc/passwd outside-link\n")
+	config.Verify.Commands = []string{"true"}
+	config.Artifacts = []string{"outside-link"}
+
+	result := RunTrial(context.Background(), config, TrialOptions{})
+	if !result.Passed {
+		t.Fatalf("result = %+v, want a pass", result)
+	}
+	if result.ArtifactDir == "" {
+		t.Fatal("no artifact directory was recorded")
+	}
+	path := filepath.Join(result.ArtifactDir, "outside-link")
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("artifact capture followed the symlink into host data")
+	}
+	if destination, err := os.Readlink(path); err != nil || destination != "/etc/passwd" {
+		t.Errorf("captured link = %q, %v", destination, err)
+	}
+}
+
 func TestRunTrialFailsAndKeepsTheWorkspaceWhenVerificationFails(t *testing.T) {
 	config := trialConfig(t, "echo i did nothing\n")
 	config.Verify.Commands = []string{

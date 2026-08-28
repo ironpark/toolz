@@ -12,6 +12,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -53,7 +54,7 @@ func doctorCommand(_ context.Context, cmd *ucli.Command) error {
 	planDirectories := settings.PlanDirs(location.BaseRoot)
 	validDirectories := []string{}
 	for _, plans := range planDirectories {
-		info, statErr := os.Stat(plans)
+		info, statErr := vfs.Stat(plans)
 		switch {
 		case statErr != nil && os.IsNotExist(statErr):
 			reporter.Add(doctor.Issue{Location: "plans_dirs", Message: fmt.Sprintf("directory does not exist: %s", plans)})
@@ -69,7 +70,7 @@ func doctorCommand(_ context.Context, cmd *ucli.Command) error {
 
 	plans := []doctor.Inspection{}
 	for _, plansRoot := range validDirectories {
-		entries, readErr := os.ReadDir(plansRoot)
+		entries, readErr := vfs.ReadDir(plansRoot)
 		if readErr != nil {
 			reporter.Add(doctor.Issue{Location: filepath.Base(plansRoot), Message: fmt.Sprintf("cannot read plans directory: %v", readErr)})
 			continue

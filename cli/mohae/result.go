@@ -24,6 +24,15 @@ type TrialResult struct {
 	Turns  []TurnResult   `json:"turns"`
 	Verify []VerifyResult `json:"verify,omitempty"`
 	MCP    []MCPProbe     `json:"mcp,omitempty"`
+	// ArtifactDir is the persistent copy made before the temporary workspace
+	// was removed. Artifacts records what each configured pattern matched.
+	ArtifactDir string           `json:"artifact_dir,omitempty"`
+	Artifacts   []ArtifactResult `json:"artifacts,omitempty"`
+	// ArtifactError is kept apart from Error for the same reason TimedOut is:
+	// a trial whose conversation and verification both succeeded but whose
+	// artifact copy failed did not fail the same way as one whose agent
+	// errored.
+	ArtifactError string `json:"artifact_error,omitempty"`
 
 	Usage TokenUsage `json:"usage"`
 
@@ -37,6 +46,14 @@ type TrialResult struct {
 	// the trial failed: a passing trial's copy is deleted, and a failing one is
 	// kept because there is no other way to see what the agent actually did.
 	Workspace string `json:"workspace,omitempty"`
+}
+
+// ArtifactResult records the workspace-relative paths selected by one
+// configured artifact pattern. An empty Paths list means the pattern matched
+// nothing; artifact capture itself is observational and does not grade it.
+type ArtifactResult struct {
+	Pattern string   `json:"pattern"`
+	Paths   []string `json:"paths,omitempty"`
 }
 
 // TurnResult is one prompt and what it produced. A prompt that was never sent

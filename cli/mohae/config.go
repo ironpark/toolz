@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -42,8 +43,13 @@ type Config struct {
 	Skills  []SkillConfig     `yaml:"skills,omitempty"`
 	MCP     []MCPServerConfig `yaml:"mcp,omitempty"`
 	Verify  VerifyConfig      `yaml:"verify,omitempty"`
-	Limits  LimitsConfig      `yaml:"limits,omitempty"`
-	Report  ReportConfig      `yaml:"report,omitempty"`
+	// Artifacts are workspace-relative paths or glob patterns copied into the
+	// report directory after verification, before a passing workspace is
+	// deleted. They are observations, not grading rules: a pattern that matches
+	// nothing is recorded but does not fail the trial.
+	Artifacts []string     `yaml:"artifacts,omitempty"`
+	Limits    LimitsConfig `yaml:"limits,omitempty"`
+	Report    ReportConfig `yaml:"report,omitempty"`
 
 	// Profiles are named subsets of this configuration; `--profile` overwrites
 	// the base with one or more of them before the trial runs.
@@ -65,8 +71,12 @@ type AgentConfig struct {
 // an isolated directory before every trial, so a run can never modify the
 // source and two runs of the same config start from identical state.
 type WorkspaceConfig struct {
-	Source     string `yaml:"source"`
-	InitScript string `yaml:"init_script,omitempty"`
+	Source string `yaml:"source"`
+	// Exclude contains source-relative glob patterns omitted from the isolated
+	// copy. A pattern without a slash matches a basename at any depth; ** spans
+	// directory boundaries.
+	Exclude    []string `yaml:"exclude,omitempty"`
+	InitScript string   `yaml:"init_script,omitempty"`
 	// AgentMD is installed under the name the agent expects (AGENTS.md).
 	// Keeping it outside the workspace source means one document can be shared
 	// by every config instead of copied into each fixture.
@@ -185,6 +195,16 @@ func (c *Config) Validate() error {
 	if c.Workspace.Source == "" {
 		return fmt.Errorf("workspace.source is required")
 	}
+	for index, pattern := range c.Workspace.Exclude {
+		if err := validateWorkspacePattern(pattern); err != nil {
+			return fmt.Errorf("workspace.exclude[%d]: %w", index, err)
+		}
+	}
+	for index, pattern := range c.Artifacts {
+		if err := validateWorkspacePattern(pattern); err != nil {
+			return fmt.Errorf("artifacts[%d]: %w", index, err)
+		}
+	}
 	if len(c.Prompts) == 0 {
 		return fmt.Errorf("prompts is required and must list at least one prompt")
 	}
@@ -290,6 +310,32 @@ func validateAgents(field string, agents []string) error {
 	for _, agent := range agents {
 		if !slices.Contains(KnownAgentTypes, agent) {
 			return fmt.Errorf("%s.agents: unknown agent type %q (one of: %s)", field, agent, strings.Join(KnownAgentTypes, ", "))
+		}
+	}
+	return nil
+}
+
+// validateWorkspacePattern keeps matching and copying inside the isolated
+// workspace. Patterns use slash separators in configuration on every platform;
+// each non-** segment follows path.Match syntax. It walks the same segments
+// matchWorkspacePattern matches against, so the two cannot drift apart on what
+// a pattern means.
+func validateWorkspacePattern(pattern string) error {
+	if pattern == "" {
+		return fmt.Errorf("must not be empty")
+	}
+	if path.IsAbs(filepath.ToSlash(pattern)) {
+		return fmt.Errorf("must be relative to the workspace")
+	}
+	for _, segment := range splitWorkspacePattern(pattern) {
+		if segment == ".." {
+			return fmt.Errorf("must not leave the workspace")
+		}
+		if segment == "**" {
+			continue
+		}
+		if _, err := path.Match(segment, ""); err != nil {
+			return fmt.Errorf("invalid glob: %w", err)
 		}
 	}
 	return nil

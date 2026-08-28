@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,7 +13,9 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/planlock"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
 
 // Edit applies an edit checkout back onto the document it was checked out
@@ -58,7 +59,7 @@ func Edit(raw []byte, settings config.Config, repoRoot string, dryRun bool, outp
 		return Operation{}, err
 	}
 	if !dryRun {
-		lock, err := plan.AcquireLock(planRoot)
+		lock, err := planlock.AcquirePlan(planRoot)
 		if err != nil {
 			return Operation{}, err
 		}
@@ -79,7 +80,7 @@ func Edit(raw []byte, settings config.Config, repoRoot string, dryRun bool, outp
 	if expectedTarget != actualTarget {
 		return Operation{}, fmt.Errorf("planr_target %q does not identify %s", targetValue, actualTarget)
 	}
-	currentRaw, err := os.ReadFile(target)
+	currentRaw, err := vfs.ReadFile(target)
 	if err != nil {
 		return Operation{}, err
 	}
@@ -175,7 +176,7 @@ func phaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte, targ
 	diffs := []Diff{{Path: absolutePath(target), Before: string(currentRaw), After: newPhase}}
 	if title != mdoc.Title(currentBody) {
 		planPath := filepath.Join(planRoot, "PLAN.md")
-		planRaw, readErr := os.ReadFile(planPath)
+		planRaw, readErr := vfs.ReadFile(planPath)
 		if readErr != nil {
 			return Operation{}, readErr
 		}

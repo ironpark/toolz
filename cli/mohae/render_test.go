@@ -21,9 +21,11 @@ func sampleResults() []TrialResult {
 					Usage: TokenUsage{Input: 100, Output: 20, CacheRead: 5, CacheWrite: 1}, DurationSeconds: 1.2},
 				{Index: 2, Skipped: "when: false"},
 			},
-			Verify: []VerifyResult{{Command: "true", Passed: true}},
-			Usage:  TokenUsage{Input: 100, Output: 20, CacheRead: 5, CacheWrite: 1, CostUSD: 0.02},
-			Passed: true,
+			Verify:      []VerifyResult{{Command: "true", Passed: true}},
+			ArtifactDir: "/tmp/mohae-reports/passing.artifacts",
+			Artifacts:   []ArtifactResult{{Pattern: "plans/**", Paths: []string{"plans"}}},
+			Usage:       TokenUsage{Input: 100, Output: 20, CacheRead: 5, CacheWrite: 1, CostUSD: 0.02},
+			Passed:      true,
 		},
 		{
 			Name: "failing", Agent: "custom-cli", DurationSeconds: 3,
@@ -50,6 +52,7 @@ func TestTerminalReportLeadsWithTheVerdictAndExplainsOnlyFailures(t *testing.T) 
 		// A server that never came up explains a failure that would otherwise
 		// read as the agent's.
 		"mcp files unreachable: connection refused",
+		"/tmp/mohae-reports/passing.artifacts",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("terminal report is missing %q:\n%s", want, text)

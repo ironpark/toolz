@@ -5,6 +5,28 @@
 이 문서는 `planr` 자체를 수정하고 검증하는 기여자를 위한 내용입니다. 일반적인 사용에는
 필요하지 않습니다.
 
+## 파일 접근 경로
+
+planr이 다루는 모든 문서 — 설정, plan 디렉터리, phase 문서, 초안 — 는 읽기와 쓰기 모두
+[`internal/vfs`](../internal/vfs)를 지나갑니다. 이 패키지는
+[afero](https://github.com/spf13/afero) 위에 얇게 얹혀 있고, 기본값은
+`afero.NewOsFs()`입니다. 경로는 os 패키지에 넘기던 호스트 경로 그대로라 변환이 없습니다.
+
+`vfs.Use(fsys)`로 파일시스템을 갈아끼우면 명령 전체가 디스크를 건드리지 않고 돕니다.
+[`cli/memfs_test.go`](../cli/memfs_test.go)가 `afero.NewMemMapFs()` 위에서
+`apply` → `status`를 끝까지 돌려 이 경계가 새지 않는지 확인합니다.
+
+파일 내용이 아닌 두 가지는 os에 남습니다.
+
+- [`internal/planlock`](../internal/planlock)의 advisory lock: flock에는 실제 파일
+  디스크립터가 필요합니다. `vfs.IsOS()`가 거짓이면 잠금을 흉내 내지 않고 건너뜁니다 —
+  교체된 파일시스템은 테스트 프로세스 하나만의 것이라 배제할 경쟁 프로세스가 없습니다.
+- go-git 저장소 접근(`internal/gitrepo`, `internal/notes`, `phase done`의 소스 검사).
+
+새 파일 접근을 추가할 때 `os.ReadFile`/`os.WriteFile` 대신 `vfs.*`를 쓰면 이 경계가
+유지됩니다. 상대 경로는 OS 파일시스템에서는 작업 디렉터리 기준, 인메모리 트리에서는
+트리 루트 기준으로 풀리므로 테스트에서는 절대 경로를 씁니다.
+
 ## 로컬 검증
 
 Go 모듈은 [`cli/planr`](..)에 독립적으로 구성되어 있습니다.
@@ -29,15 +51,13 @@ uv run --with pytest --project cli/planr/scripts \
 
 | 명령 | 하는 일 | 필요한 도구 |
 | --- | --- | --- |
-| `main.py scenario` | checkout 출시 시나리오의 `status`, `overview`, `notes` 출력 재현 | Python, Go, Git |
-| `main.py scenario clean` | scenario 실행 디렉터리 삭제 | Python |
 | `main.py codex` | 격리 저장소에서 Codex 평가 실행 | uv, Go, Git, Codex 로그인 |
 | `main.py codex variants` | 픽스처별 요청·지침 변형 조회 | Python |
 | `main.py codex analyze <dir>` | 이전 실행 결과 재분석 | Python |
 | `main.py codex clean` | Codex 실행 디렉터리와 임시 작업공간 삭제 | Python |
 
-Codex SDK는 평가를 시작할 때만 불러옵니다. 따라서 `scenario`, `variants`, `analyze`,
-`clean`은 SDK 없이도 실행할 수 있습니다. 공통 준비·정리와 하네스 설정 처리는
+Codex SDK는 평가를 시작할 때만 불러옵니다. 따라서 `variants`, `analyze`, `clean`은
+SDK 없이도 실행할 수 있습니다. 공통 준비·정리와 하네스 설정 처리는
 [`scripts/common.py`](../scripts/common.py), Codex 세션은
 [`scripts/codex.py`](../scripts/codex.py), 결과 분석은
 [`scripts/analyze.py`](../scripts/analyze.py)에 있습니다.
@@ -49,7 +69,6 @@ Codex SDK는 평가를 시작할 때만 불러옵니다. 따라서 `scenario`, `
 
 ```text
 cli/planr/run/
-├── 20260826-123846-scenario/
 ├── 20260826-123851-codex/
 └── 20260826-124012-codex-regex/
 ```
@@ -68,7 +87,6 @@ Codex가 수정하는 작업공간은 `run/` 바깥의 시스템 임시 디렉�
 
 | 픽스처 | 목적 |
 | --- | --- |
-| `plan-scenario` | 완료·진행·대기·부분 완료 plan을 만들어 조회 출력을 재현 |
 | `codex-harness` | 기존의 작은 Go 프로젝트를 수정하는 기본 평가 |
 | `codex-greenfield` | 빈 저장소에서 다중 명령 할 일 CLI를 만드는 평가 |
 | `codex-regex` | 표준 regexp 없이 정규식 엔진을 구현하는 깊이 중심 평가 |
@@ -94,15 +112,18 @@ Codex가 수정하는 작업공간은 `run/` 바깥의 시스템 임시 디렉�
 요청 본문에 planr 워크플로를 반복해서 적지 않아야 에이전트가 저장소 지침을 발견하고
 따르는지 측정할 수 있습니다.
 
-## scenario 재현
+## checkout 출시 시나리오
+
+완료·진행·대기·부분 완료 plan이 섞인 상태에서 `status`, `overview`, `notes`가 무엇을
+보여주는지는 Go 테스트로 검증합니다. 에이전트가 필요 없는 순수 plan 생성 시나리오라
+픽스처와 Python 실행기 대신 [`cli/scenario_test.go`](../cli/scenario_test.go)에 있습니다.
 
 ```sh
-python3 cli/planr/scripts/main.py scenario
-python3 cli/planr/scripts/main.py scenario clean
+cd cli/planr
+go test ./cli/ -run Scenario -v
 ```
 
-scenario는 `plan-scenario`를 복사해 Git 저장소로 초기화하고 다음 상태를 실제 CLI 호출로
-만듭니다.
+테스트는 임시 Git 저장소에 다음 상태를 실제 명령 호출로 만듭니다.
 
 - 완료된 인증 기반 plan
 - 진행 중 checkout plan
@@ -110,9 +131,13 @@ scenario는 `plan-scenario`를 복사해 Git 저장소로 초기화하고 다음
 - 일부 phase만 완료된 rollout plan
 - `status`에서 숨겨지는 무관한 완료 plan
 
-의존성은 공개 인터페이스인 초안 frontmatter로 입력하고 상태는 `planr phase` 명령으로
-변경합니다. 생성된 내부 문서를 직접 치환하지 않으므로 실제 CLI가 거부할 상태를 억지로
-만들지 않으며, 초안 계약이 바뀌면 시나리오도 명확하게 실패합니다.
+다섯 plan은 모두 [`internal/plantest/fixtures/checkout-v2.md`](../internal/plantest/fixtures/checkout-v2.md)
+초안 본문 하나를 이름과 의존성만 바꿔 재사용합니다. 픽스처는 `embed`로 묶여
+`plantest.Fixtures()`가 `io/fs` 트리로 돌려주므로 테스트가 파일 경로가 아니라
+`fs.FS`를 읽습니다. 의존성은 공개 인터페이스인 초안 frontmatter로 입력하고 상태는
+`planr phase` 명령으로 변경합니다. 생성된 내부 문서를 직접 치환하지 않으므로 실제
+CLI가 거부할 상태를 억지로 만들지 않으며, 초안 계약이 바뀌면 시나리오도 명확하게
+실패합니다.
 
 ## Codex 평가
 

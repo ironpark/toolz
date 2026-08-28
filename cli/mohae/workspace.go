@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -45,7 +46,7 @@ func PrepareWorkspace(ctx context.Context, config *Config, agentType string) (*W
 		workspace.Cleanup()
 		return nil, err
 	}
-	if err := copyTree(config.Resolve(config.Workspace.Source), workspace.Root); err != nil {
+	if err := copyTreeExcluding(config.Resolve(config.Workspace.Source), workspace.Root, config.Workspace.Exclude); err != nil {
 		workspace.Cleanup()
 		return nil, fmt.Errorf("copying workspace.source: %w", err)
 	}
@@ -190,6 +191,14 @@ func PruneStaleWorkspaces(maxAge time.Duration) int {
 // own baseline commit, and inheriting the source repository's history would
 // make the agent's diff unreadable.
 func copyTree(source, target string) error {
+	return copyTreeExcluding(source, target, nil)
+}
+
+// copyTreeExcluding copies a tree while omitting entries matched by a
+// source-relative pattern. Matching a directory omits its whole subtree, so a
+// fixture can keep evaluation-only files out of the agent's workspace without
+// first making a second, filtered fixture.
+func copyTreeExcluding(source, target string, exclude []string) error {
 	info, err := os.Stat(source)
 	if err != nil {
 		return err
@@ -211,8 +220,57 @@ func copyTree(source, target string) error {
 		if entry.IsDir() && entry.Name() == ".git" {
 			return filepath.SkipDir
 		}
+		if matchesAnyWorkspacePattern(exclude, filepath.ToSlash(relative)) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		return copyEntry(path, filepath.Join(target, relative), entry)
 	})
+}
+
+func matchesAnyWorkspacePattern(patterns []string, candidate string) bool {
+	for _, pattern := range patterns {
+		if matchWorkspacePattern(pattern, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+// splitWorkspacePattern breaks a pattern into the segments matchWorkspaceSegments
+// walks and validateWorkspacePattern checks, so the two agree on what a
+// pattern's segments are. A slashless pattern is basename matching, expressed
+// here as an implicit leading **.
+func splitWorkspacePattern(pattern string) []string {
+	segments := strings.Split(filepath.ToSlash(pattern), "/")
+	if len(segments) == 1 {
+		return append([]string{"**"}, segments...)
+	}
+	return segments
+}
+
+// matchWorkspacePattern implements the small glob dialect used by excludes
+// and artifacts. A slashless pattern follows basename semantics, while ** is a
+// whole segment that consumes zero or more path segments.
+func matchWorkspacePattern(pattern, candidate string) bool {
+	return matchWorkspaceSegments(splitWorkspacePattern(pattern), strings.Split(filepath.ToSlash(candidate), "/"))
+}
+
+func matchWorkspaceSegments(pattern, candidate []string) bool {
+	if len(pattern) == 0 {
+		return len(candidate) == 0
+	}
+	if pattern[0] == "**" {
+		return matchWorkspaceSegments(pattern[1:], candidate) ||
+			(len(candidate) > 0 && matchWorkspaceSegments(pattern, candidate[1:]))
+	}
+	if len(candidate) == 0 {
+		return false
+	}
+	matched, _ := path.Match(pattern[0], candidate[0])
+	return matched && matchWorkspaceSegments(pattern[1:], candidate[1:])
 }
 
 func copyEntry(source, target string, entry os.DirEntry) error {
@@ -224,20 +282,24 @@ func copyEntry(source, target string, entry os.DirEntry) error {
 	case entry.IsDir():
 		return os.MkdirAll(target, info.Mode().Perm())
 	case info.Mode()&os.ModeSymlink != 0:
-		// Recreated as a link rather than followed: a fixture may point outside
-		// itself on purpose, and resolving the link would silently change what
-		// the agent sees.
-		destination, err := os.Readlink(source)
-		if err != nil {
-			return err
-		}
-		return os.Symlink(destination, target)
+		return copySymlink(source, target)
 	case !info.Mode().IsRegular():
 		// Sockets, devices and pipes have no meaning in a copied fixture.
 		return nil
 	default:
 		return copyFile(source, target, info.Mode().Perm())
 	}
+}
+
+// copySymlink recreates a link rather than following it: a fixture or a
+// workspace may point outside the tree being copied on purpose, and resolving
+// the link would silently change what gets copied.
+func copySymlink(source, target string) error {
+	destination, err := os.Readlink(source)
+	if err != nil {
+		return err
+	}
+	return os.Symlink(destination, target)
 }
 
 // copyPath copies either a file or a directory, which is what a skill may be.

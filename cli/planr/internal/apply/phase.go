@@ -3,7 +3,6 @@ package apply
 import (
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,7 +12,9 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/planlock"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
 
 // Phase adds a new phase to an existing plan from a new-phase draft.
@@ -24,7 +25,7 @@ func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun bool, o
 		return Operation{}, err
 	}
 	if !dryRun {
-		lock, err := plan.AcquireLock(planRoot)
+		lock, err := planlock.AcquirePlan(planRoot)
 		if err != nil {
 			return Operation{}, err
 		}
@@ -32,7 +33,7 @@ func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun bool, o
 	}
 
 	planPath := filepath.Join(planRoot, "PLAN.md")
-	planRaw, err := os.ReadFile(planPath)
+	planRaw, err := vfs.ReadFile(planPath)
 	if err != nil {
 		return Operation{}, err
 	}
@@ -90,14 +91,14 @@ func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun bool, o
 	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventPhaseAdd, planDirectory, phaseID, meta.Status, output); err != nil {
 		return Operation{}, err
 	}
-	if err := os.MkdirAll(filepath.Join(planRoot, "phases"), 0755); err != nil {
+	if err := vfs.MkdirAll(filepath.Join(planRoot, "phases"), 0755); err != nil {
 		return Operation{}, err
 	}
 	if err := mdoc.WriteAtomically(phasePath, phaseContents); err != nil {
 		return Operation{}, err
 	}
 	if err := mdoc.WriteAtomically(planPath, updatedPlanContents); err != nil {
-		_ = os.Remove(phasePath)
+		_ = vfs.Remove(phasePath)
 		return Operation{}, err
 	}
 	fmt.Fprintf(output, "Added %s phase %02d: %s\n", planDirectory, phaseID, phasePath)
