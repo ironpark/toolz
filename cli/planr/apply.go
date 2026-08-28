@@ -32,7 +32,7 @@ const (
 	planChecklistPlaceholder = "<!-- planr: phase checklist is derived; do not edit -->"
 )
 
-// editEnvelopeKeys are the mdoc.Split keys that belong to planr's document
+// editEnvelopeKeys are the frontmatter keys that belong to planr's document
 // envelopes (edit checkouts and new-phase drafts), not to the stored document.
 var editEnvelopeKeys = []string{
 	"planr_edit",

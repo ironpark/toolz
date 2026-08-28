@@ -141,6 +141,10 @@ func StringValue(value any) string {
 	return text
 }
 
+// PruneEmptyMeta drops keys whose value carries no information: nil, empty
+// strings, and empty collections. Plan documents are read by humans, so an
+// unset field is better left out than written as `key: null` or `key: []`.
+// Booleans and numbers are kept, since false and 0 are real values.
 func PruneEmptyMeta(front map[string]any) map[string]any {
 	for key, value := range front {
 		if IsEmptyMeta(value) {
