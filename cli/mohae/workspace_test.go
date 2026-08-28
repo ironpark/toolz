@@ -89,6 +89,56 @@ func TestPrepareWorkspaceSkipsTheSourceGitDirectory(t *testing.T) {
 	}
 }
 
+func TestPrepareWorkspaceExcludesEvaluationFilesAndMatchedDirectories(t *testing.T) {
+	directory := t.TempDir()
+	config := fixtureConfig(t, directory)
+	config.Workspace.Exclude = []string{"FIXTURE.*", "generated/**", "**/*.secret"}
+	writeFile(t, filepath.Join(directory, "fixture", "FIXTURE.PROMPT.ko.md"), "hidden\n", 0o644)
+	writeFile(t, filepath.Join(directory, "fixture", "nested", "FIXTURE.TEST.sh"), "hidden\n", 0o755)
+	writeFile(t, filepath.Join(directory, "fixture", "generated", "deep", "output.txt"), "hidden\n", 0o644)
+	writeFile(t, filepath.Join(directory, "fixture", "nested", "token.secret"), "hidden\n", 0o644)
+	writeFile(t, filepath.Join(directory, "fixture", "nested", "keep.txt"), "visible\n", 0o644)
+
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workspace.Cleanup()
+
+	for _, excluded := range []string{
+		"FIXTURE.PROMPT.ko.md",
+		filepath.Join("nested", "FIXTURE.TEST.sh"),
+		"generated",
+		filepath.Join("nested", "token.secret"),
+	} {
+		if _, err := os.Lstat(filepath.Join(workspace.Root, excluded)); !os.IsNotExist(err) {
+			t.Errorf("excluded path %q survived: %v", excluded, err)
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(workspace.Root, "nested", "keep.txt")); err != nil || string(data) != "visible\n" {
+		t.Fatalf("kept file = %q, %v", data, err)
+	}
+}
+
+func TestWorkspacePatternGlobstarCrossesDirectories(t *testing.T) {
+	cases := map[string]bool{
+		"plans/**|plans":                     true,
+		"plans/**|plans/one/PLAN.md":         true,
+		"**/*.log|events.log":                true,
+		"**/*.log|nested/events.log":         true,
+		"FIXTURE.*|nested/FIXTURE.TEST.sh":   true,
+		"plans/*.md|plans/one/PLAN.md":       false,
+		"plans/**/*.md|plans/one/PLAN.md":    true,
+		"plans/**/*.md|plans/one/state.json": false,
+	}
+	for value, want := range cases {
+		pattern, candidate, _ := strings.Cut(value, "|")
+		if got := matchWorkspacePattern(pattern, candidate); got != want {
+			t.Errorf("matchWorkspacePattern(%q, %q) = %v, want %v", pattern, candidate, got, want)
+		}
+	}
+}
+
 func TestPrepareWorkspaceRunsTheInitScriptInsideTheCopy(t *testing.T) {
 	directory := t.TempDir()
 	config := fixtureConfig(t, directory)

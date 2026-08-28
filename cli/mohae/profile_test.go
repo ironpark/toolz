@@ -15,6 +15,8 @@ const profiledConfig = minimalConfig + `profiles:
   quick:
     limits:
       timeout_seconds: 60
+  artifacts-only:
+    artifacts: [plans/**]
 `
 
 func TestProfilesOverwriteSectionsWholesale(t *testing.T) {
@@ -51,6 +53,19 @@ func TestProfilesLayerInOrder(t *testing.T) {
 	}
 	if config.Agent.Type != "claude-code" || config.Limits.TimeoutSeconds != 60 {
 		t.Errorf("layered config = agent %+v limits %+v", config.Agent, config.Limits)
+	}
+}
+
+func TestProfileCanReplaceArtifacts(t *testing.T) {
+	config, err := LoadConfig(writeConfig(t, profiledConfig+"artifacts: [base.log]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.ApplyProfile("artifacts-only"); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Artifacts) != 1 || config.Artifacts[0] != "plans/**" {
+		t.Errorf("artifacts = %v", config.Artifacts)
 	}
 }
 

@@ -110,6 +110,29 @@ func TestRunWritesTheReportsIntoTheConfiguredDirectory(t *testing.T) {
 	}
 }
 
+func TestWriteRunReportsResolvesTheDirectoryFromTheConfig(t *testing.T) {
+	directory := t.TempDir()
+	config := &Config{
+		Path: filepath.Join(directory, "nested", "trial.config.yaml"),
+		Name: "trial",
+		Report: ReportConfig{
+			Dir:     "reports",
+			Formats: []string{"json"},
+		},
+	}
+	result := TrialResult{Name: "trial", ConfigPath: config.Path, Passed: true}
+	if err := writeRunReports([]*Config{config}, []TrialResult{result}, "terminal", ReportOptions{}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(directory, "nested", "reports"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("wrote %d reports, want 1", len(entries))
+	}
+}
+
 func TestRunFailFastStopsAtTheFirstFailure(t *testing.T) {
 	chdir(t)
 	// Named so the glob picks the failing one up first: a fail-fast run that

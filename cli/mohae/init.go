@@ -139,6 +139,9 @@ workspace:
   # Copied into an isolated directory before every trial, so a run never
   # modifies the source and repeated runs start from identical state.
   source: ./fixture
+  # Source-relative globs omitted from the isolated copy. A slashless pattern
+  # matches a basename at any depth; ** crosses directory boundaries.
+  # exclude: [FIXTURE.*]
   init_script: ./init.sh
   # Installed as AGENTS.md in the workspace. Kept outside the fixture so one
   # document can be shared by every configuration.
@@ -173,6 +176,12 @@ verify:
   commands:
     - ./verify.sh
     - test -f "$MOHAE_WORKSPACE/README.md"
+
+# Preserve selected output after verification and before a passing workspace
+# is deleted. Paths and globs are relative to the workspace; missing matches
+# are reported but do not grade the trial.
+# artifacts:
+#   - .harness/*.log
 
 limits:
   timeout_seconds: 300

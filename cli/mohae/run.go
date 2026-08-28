@@ -199,7 +199,7 @@ func writeRunReports(configs []*Config, results []TrialResult, output string, op
 		// --output is written too, so `-o markdown` leaves the document it
 		// printed on disk rather than only on the terminal.
 		formats := append(append([]string{}, config.Report.Formats...), output)
-		written, err := WriteReports(config.Report.Dir, result.Name, formats, []TrialResult{result}, options)
+		written, err := WriteReports(config.Resolve(config.Report.Dir), result.Name, formats, []TrialResult{result}, options)
 		if err != nil {
 			return err
 		}
@@ -270,7 +270,7 @@ func applyRunOverrides(cmd *cli.Command, configs []*Config) error {
 			config.Limits.TimeoutSeconds = cmd.Int("timeout")
 		}
 		if cmd.IsSet("report-dir") {
-			config.Report.Dir = cmd.String("report-dir")
+			config.Report.Dir = absoluteOverride(cmd.String("report-dir"))
 		}
 		if err := config.Validate(); err != nil {
 			return fmt.Errorf("%s: %w", config.Path, err)

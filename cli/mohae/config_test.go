@@ -58,6 +58,50 @@ func TestLoadConfigRejectsUnknownKeys(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsWorkspaceExcludesAndArtifacts(t *testing.T) {
+	contents := strings.Replace(minimalConfig, "workspace:\n  source: ./fixture\n", `workspace:
+  source: ./fixture
+  exclude: [FIXTURE.*, tmp/**]
+`, 1)
+	config, err := LoadConfig(writeConfig(t, contents+`artifacts:
+  - plans/**
+  - .harness/events.log
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Workspace.Exclude) != 2 || config.Workspace.Exclude[0] != "FIXTURE.*" {
+		t.Errorf("workspace.exclude = %v", config.Workspace.Exclude)
+	}
+	if len(config.Artifacts) != 2 || config.Artifacts[0] != "plans/**" {
+		t.Errorf("artifacts = %v", config.Artifacts)
+	}
+	if err := config.Validate(); err != nil {
+		t.Fatalf("valid patterns were rejected: %v", err)
+	}
+}
+
+func TestValidateRejectsUnsafeOrMalformedWorkspacePatterns(t *testing.T) {
+	for name, section := range map[string]string{
+		"absolute exclude": "workspace:\n  source: ./fixture\n  exclude: [/private/data]\n",
+		"parent artifact":  "artifacts: [../outside]\n",
+		"broken artifact":  "artifacts: ['logs/[']\n",
+		"empty exclude":    "workspace:\n  source: ./fixture\n  exclude: ['']\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			contents := minimalConfig
+			if strings.HasPrefix(section, "workspace:") {
+				contents = strings.Replace(contents, "workspace:\n  source: ./fixture\n", section, 1)
+			} else {
+				contents += section
+			}
+			if _, err := LoadConfig(writeConfig(t, contents)); err == nil {
+				t.Fatal("expected the unsafe pattern to be rejected")
+			}
+		})
+	}
+}
+
 func TestValidateRejectsIncompleteConfigurations(t *testing.T) {
 	cases := map[string]string{
 		"missing agent type":  strings.Replace(minimalConfig, "  type: codex\n", "", 1),

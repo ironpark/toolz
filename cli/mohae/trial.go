@@ -107,7 +107,11 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 	// workspace is still there to be graded, and "the agent stopped early but
 	// the task was done" is a result worth telling apart from "it was not".
 	result.Verify = runVerifyCommands(ctx, config, workspace, options, out)
-	result.Passed = result.Error == "" && !result.TimedOut && result.VerifyPassed() == len(result.Verify)
+	result.ArtifactDir, result.Artifacts, err = captureArtifacts(config, workspace, started)
+	if err != nil {
+		result.ArtifactError = err.Error()
+	}
+	result.Passed = result.Error == "" && result.ArtifactError == "" && !result.TimedOut && result.VerifyPassed() == len(result.Verify)
 	return result
 }
 
