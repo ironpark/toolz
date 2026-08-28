@@ -3,7 +3,6 @@ package apply
 import (
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -54,62 +53,23 @@ func filledPhaseDraft(t *testing.T, language string) PhaseDraft {
 	raw = strings.Replace(raw, "status: planned", "status: conditional", 1)
 	raw = strings.Replace(raw, "entry_condition: null", "entry_condition: only after the cache API is ready", 1)
 	raw = strings.ReplaceAll(raw, draft.Placeholder, "filled")
-	parsed, err := ParsePhaseDraft([]byte(raw))
+	parsed, err := parsePhaseDraft([]byte(raw))
 	if err != nil {
-		t.Fatalf("ParsePhaseDraft() unexpected error: %v", err)
+		t.Fatalf("parsePhaseDraft() unexpected error: %v", err)
 	}
 	return parsed
 }
 
-// editCheckout renders the editable document that `planr edit` hands to Edit:
-// the target's own front matter plus the planr_edit/planr_target/planr_base
-// safety metadata, with the derived plan checklist blanked out.
+// editCheckout renders the editable document that `planr edit` hands to Edit,
+// through the same Checkout the command uses, so these tests exercise the
+// envelope the shipping code actually produces.
 func editCheckout(t *testing.T, repoRoot, planRoot, planDirectory string, phaseID int, section string) string {
 	t.Helper()
-	target := filepath.Join(planRoot, SectionFile(section))
-	if section == "" {
-		var err error
-		if target, err = plan.FindPhaseFile(planRoot, phaseID); err != nil {
-			t.Fatalf("plan.FindPhaseFile() unexpected error: %v", err)
-		}
-	}
-	raw, err := os.ReadFile(target)
+	checkout, err := Checkout(repoRoot, planRoot, planDirectory, phaseID, section)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Checkout() unexpected error: %v", err)
 	}
-	front, body, err := mdoc.Split(string(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	targetRelative, err := RelativeTargetPath(repoRoot, target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkoutFront := map[string]any{}
-	editSelector := draft.PlanName(planDirectory)
-	if section == "" {
-		checkoutFront = mdoc.CopyFront(front)
-		checkoutFront["planr_phase"] = phaseID
-		checkoutFront["planr_slug"] = strings.TrimSuffix(strings.SplitN(filepath.Base(target), "-", 2)[1], ".md")
-		editSelector += "#" + strconv.Itoa(phaseID)
-	} else {
-		checkoutFront["planr_section"] = section
-		if section == "plan" {
-			start, end, found := plan.ChecklistBounds(body)
-			if !found {
-				t.Fatal("PLAN.md does not contain a # Phases section")
-			}
-			body = body[:start] + "\n" + plan.ChecklistPlaceholder + "\n" + body[end:]
-		}
-	}
-	checkoutFront["planr_edit"] = editSelector
-	checkoutFront["planr_target"] = targetRelative
-	checkoutFront["planr_base"] = mdoc.Hash(raw)
-	document, err := mdoc.Render(checkoutFront, body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return document
+	return checkout.Document
 }
 
 func TestApplyPhaseDraftAddsPhaseAndPreservesPhaseFlags(t *testing.T) {

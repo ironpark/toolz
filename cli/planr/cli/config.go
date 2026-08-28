@@ -26,7 +26,7 @@ func configCommand(_ context.Context, cmd *ucli.Command) error {
 		return err
 	}
 	if cmd.Bool("json") {
-		return jsonout.Write(jsonout.Config(settings, root))
+		return jsonout.Write(jsonout.Config(settings, root, agentenv.CurrentDescription()))
 	}
 
 	if settings.Path == "" {

@@ -67,7 +67,7 @@ func Edit(raw []byte, settings config.Config, repoRoot string, dryRun, jsonOutpu
 	if targetKind == "phase" {
 		target, err = plan.FindPhaseFile(planRoot, phaseID)
 	} else {
-		target = filepath.Join(planRoot, SectionFile(section))
+		target = filepath.Join(planRoot, plan.SectionFile(section))
 		_, err = os.Stat(target)
 	}
 	if err != nil {

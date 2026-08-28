@@ -86,7 +86,7 @@ func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun, jsonOu
 	if dryRun {
 		return op, nil
 	}
-	if err := runDocumentHooks(repoRoot, settings, "before", hooks.EventPhaseAdd, planDirectory, phaseID, meta.Status, jsonOutput); err != nil {
+	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventPhaseAdd, planDirectory, phaseID, meta.Status, jsonOutput); err != nil {
 		return Operation{}, err
 	}
 	if err := os.MkdirAll(filepath.Join(planRoot, "phases"), 0755); err != nil {
@@ -102,7 +102,7 @@ func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun, jsonOu
 	if !jsonOutput {
 		fmt.Printf("Added %s phase %02d: %s\n", planDirectory, phaseID, phasePath)
 	}
-	if err := runDocumentHooks(repoRoot, settings, "after", hooks.EventPhaseAdd, planDirectory, phaseID, meta.Status, jsonOutput); err != nil {
+	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventPhaseAdd, planDirectory, phaseID, meta.Status, jsonOutput); err != nil {
 		return Operation{}, err
 	}
 	return op, nil

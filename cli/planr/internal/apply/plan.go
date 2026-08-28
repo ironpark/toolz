@@ -38,7 +38,7 @@ func Plan(d draft.Draft, settings config.Config, repoRoot string, dryRun, jsonOu
 	if dryRun {
 		return op, nil
 	}
-	if err := runDocumentHooks(repoRoot, settings, "before", hooks.EventAdd, planDirectory, -1, "registered", jsonOutput); err != nil {
+	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventAdd, planDirectory, -1, "registered", jsonOutput); err != nil {
 		return Operation{}, err
 	}
 	temporary, err := os.MkdirTemp(planDirectories[0], ".planr-")
@@ -55,14 +55,10 @@ func Plan(d draft.Draft, settings config.Config, repoRoot string, dryRun, jsonOu
 	if !jsonOutput {
 		fmt.Printf("Registered %s\n", planDirectory)
 	}
-	if err := runDocumentHooks(repoRoot, settings, "after", hooks.EventAdd, planDirectory, -1, "registered", jsonOutput); err != nil {
+	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventAdd, planDirectory, -1, "registered", jsonOutput); err != nil {
 		return Operation{}, err
 	}
 	return op, nil
-}
-
-func runDocumentHooks(repoRoot string, settings config.Config, when, event, planDirectory string, phaseID int, status string, jsonOutput bool) error {
-	return hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, when, event, planDirectory, phaseID, status, jsonOutput)
 }
 
 func writeRenderedPlan(root string, documents map[string]string) error {

@@ -123,7 +123,7 @@ func TestDiagnosticJSONUsesStableStructuredFields(t *testing.T) {
 			Timeout: 5,
 			Before:  []hooks.Rule{{On: []string{hooks.EventDone}, Run: "go test ./..."}},
 		},
-	}, "/repo"))
+	}, "/repo", "codex"))
 	if err != nil {
 		t.Fatal(err)
 	}

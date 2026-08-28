@@ -1,7 +1,6 @@
 package jsonout
 
 import (
-	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doctor"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
@@ -61,7 +60,7 @@ func Init(target, root, language string, plansDirs, created, existed []string) I
 	}
 }
 
-func Config(settings config.Config, root string) ConfigOutput {
+func Config(settings config.Config, root, agent string) ConfigOutput {
 	var configFile *string
 	if settings.Path != "" {
 		value := settings.Path
@@ -70,7 +69,7 @@ func Config(settings config.Config, root string) ConfigOutput {
 	return ConfigOutput{
 		ConfigFile:     configFile,
 		RepositoryRoot: root,
-		Agent:          agentenv.CurrentDescription(),
+		Agent:          agent,
 		Language:       settings.Language,
 		PlansDirs:      append([]string{}, settings.PlansDirs...),
 		Ignore:         append([]string{}, settings.Ignore...),

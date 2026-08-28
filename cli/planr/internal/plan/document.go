@@ -158,6 +158,33 @@ func PhaseDocumentPath(id int, slug string) string {
 	return fmt.Sprintf("phases/%02d-%s.md", id, slug)
 }
 
+// sectionFiles maps the editable/showable plan section names to the documents
+// they live in; it also serves as the section-name validation set.
+var sectionFiles = map[string]string{
+	"goals":   "GOALS.md",
+	"context": "CONTEXT.md",
+	"plan":    "PLAN.md",
+}
+
+// ValidSection reports whether section names an editable plan section.
+func ValidSection(section string) bool {
+	_, ok := sectionFiles[section]
+	return ok
+}
+
+// SectionFile returns the plan document a section lives in.
+func SectionFile(section string) string {
+	if file, ok := sectionFiles[section]; ok {
+		return file
+	}
+	return "PLAN.md"
+}
+
+// ChecklistPlaceholder marks the derived phase checklist region in a PLAN.md
+// checkout. `edit --section plan` swaps the real checklist for it, and `apply`
+// refuses the document unless it comes back untouched.
+const ChecklistPlaceholder = "<!-- planr: phase checklist is derived; do not edit -->"
+
 func ChecklistEntry(id int, title, slug string, done bool) string {
 	checkmark := " "
 	if done {
@@ -198,6 +225,51 @@ func TransformChecklistEntry(body string, phaseID int, transform func(line strin
 		return body, fmt.Errorf("multiple checklist entries found for phase %02d", phaseID)
 	}
 	return strings.Join(result, ""), nil
+}
+
+// AppendChecklistEntry inserts a checklist entry for a new phase at the end of
+// the `# Phases` section of a PLAN.md body.
+func AppendChecklistEntry(body string, phaseID int, title, slug string) (string, error) {
+	marker := fmt.Sprintf("[Phase %02d:", phaseID)
+	if strings.Contains(body, marker) {
+		return "", fmt.Errorf("checklist already contains phase %02d", phaseID)
+	}
+	lines := strings.SplitAfter(body, "\n")
+	offset := 0
+	phasesHeadingEnd := -1
+	insertion := len(body)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "# Phases" {
+			phasesHeadingEnd = offset + len(line)
+		} else if phasesHeadingEnd >= 0 && strings.HasPrefix(trimmed, "# ") {
+			insertion = offset
+			break
+		}
+		offset += len(line)
+	}
+	if phasesHeadingEnd < 0 {
+		return "", fmt.Errorf("PLAN.md does not contain a # Phases section")
+	}
+	entry := ChecklistEntry(phaseID, title, slug, false)
+	before := strings.TrimRight(body[:insertion], "\n")
+	after := strings.TrimLeft(body[insertion:], "\n")
+	if after == "" {
+		return before + "\n\n" + entry + "\n", nil
+	}
+	return before + "\n" + entry + "\n\n" + after, nil
+}
+
+// ReplaceChecklistEntry rewrites the checklist entry of an existing phase,
+// which is how a phase title change propagates back into PLAN.md.
+func ReplaceChecklistEntry(body string, phaseID int, title, slug string, done bool) (string, error) {
+	return TransformChecklistEntry(body, phaseID, func(line string) (string, bool) {
+		replacement := ChecklistEntry(phaseID, title, slug, done) + "\n"
+		if !strings.HasSuffix(line, "\n") {
+			replacement = strings.TrimSuffix(replacement, "\n")
+		}
+		return replacement, true
+	})
 }
 
 func PhaseFrontmatter(planDirectory string, meta draft.Meta) map[string]any {

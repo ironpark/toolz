@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 )
 
@@ -53,7 +54,7 @@ func Detect(raw []byte, fallback string) (string, any, error) {
 		if value != KindPhase {
 			return "", nil, fmt.Errorf("unknown planr_new document kind %q", value)
 		}
-		phase, err := ParsePhaseDraft(raw)
+		phase, err := parsePhaseDraft(raw)
 		if err != nil {
 			return "", nil, err
 		}
@@ -90,8 +91,8 @@ func UnwrapJSONDocument(raw []byte) []byte {
 	return raw
 }
 
-// ParsePhaseDraft validates a `planr_new: phase` draft document.
-func ParsePhaseDraft(raw []byte) (PhaseDraft, error) {
+// parsePhaseDraft validates a `planr_new: phase` draft document.
+func parsePhaseDraft(raw []byte) (PhaseDraft, error) {
 	front, body, err := mdoc.Split(string(raw))
 	if err != nil {
 		return PhaseDraft{}, validation.Wrap(err, "frontmatter", "frontmatter")
@@ -157,23 +158,23 @@ func phaseDraftValidationError(section, detail string) error {
 	return validation.NewFailure(validation.Record{Rule: "phase_document", Section: section, Detail: detail}, detail)
 }
 
-// ParseEditSelector splits a `<plan-name>#<phase-number>` edit selector into
-// the plan name, target kind, phase number and section.
-func ParseEditSelector(selector string) (string, string, int, string, error) {
+// ParseEditSelector splits a `<plan-name>#<phase-number>` phase edit selector
+// into the plan name and phase number.
+func ParseEditSelector(selector string) (string, int, error) {
 	if strings.Count(selector, "#") != 1 {
-		return "", "", 0, "", fmt.Errorf("planr_edit must use <plan-name>#<phase-number>")
+		return "", 0, fmt.Errorf("planr_edit must use <plan-name>#<phase-number>")
 	}
 	planName, suffix, _ := strings.Cut(selector, "#")
 	planName = strings.TrimSpace(planName)
 	suffix = strings.TrimSpace(suffix)
 	if planName == "" || suffix == "" {
-		return "", "", 0, "", fmt.Errorf("planr_edit has an empty plan or document selector")
+		return "", 0, fmt.Errorf("planr_edit has an empty plan or document selector")
 	}
 	phaseID, err := strconv.Atoi(suffix)
 	if err != nil || phaseID < 0 {
-		return "", "", 0, "", fmt.Errorf("edit phase number %q must be a non-negative integer", suffix)
+		return "", 0, fmt.Errorf("edit phase number %q must be a non-negative integer", suffix)
 	}
-	return planName, "phase", phaseID, "", nil
+	return planName, phaseID, nil
 }
 
 func parseEditDocumentSelector(selector string, front map[string]any) (string, string, int, string, error) {
@@ -183,7 +184,7 @@ func parseEditDocumentSelector(selector string, front map[string]any) (string, s
 			return "", "", 0, "", fmt.Errorf("planr_section must be goals, context, or plan")
 		}
 		section = strings.TrimSpace(section)
-		if !ValidSection(section) {
+		if !plan.ValidSection(section) {
 			return "", "", 0, "", fmt.Errorf("invalid edit section %q; use goals, context, or plan", section)
 		}
 		if strings.Contains(selector, "#") {
@@ -194,29 +195,11 @@ func parseEditDocumentSelector(selector string, front map[string]any) (string, s
 		}
 		return strings.TrimSpace(selector), "section", -1, section, nil
 	}
-	return ParseEditSelector(selector)
-}
-
-// sectionFiles maps the editable/showable plan section names to the documents
-// they live in; it also serves as the section-name validation set.
-var sectionFiles = map[string]string{
-	"goals":   "GOALS.md",
-	"context": "CONTEXT.md",
-	"plan":    "PLAN.md",
-}
-
-// ValidSection reports whether section names an editable plan section.
-func ValidSection(section string) bool {
-	_, ok := sectionFiles[section]
-	return ok
-}
-
-// SectionFile returns the plan document a section lives in.
-func SectionFile(section string) string {
-	if file, ok := sectionFiles[section]; ok {
-		return file
+	planName, phaseID, err := ParseEditSelector(selector)
+	if err != nil {
+		return "", "", 0, "", err
 	}
-	return "PLAN.md"
+	return planName, "phase", phaseID, "", nil
 }
 
 // RelativeTargetPath normalises a planr_target value into a repository-relative

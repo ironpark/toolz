@@ -15,6 +15,12 @@ const (
 	KindEdit  = "edit"
 )
 
+// Edit target kinds: which document inside a plan a checkout addresses.
+const (
+	TargetPhase   = "phase"
+	TargetSection = "section"
+)
+
 // Diff records the before/after contents of one document an operation touches.
 // Before is empty for documents the operation creates.
 type Diff struct {
