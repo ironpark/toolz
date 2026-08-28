@@ -75,7 +75,7 @@ func newPlanCommand(cmd *ucli.Command) error {
 		return err
 	}
 	settings = settings.WithSkipHooks(cmd.Bool("no-hooks"))
-	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
+	if err := hooks.RunTo(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventNew, name, -1, "draft", progressWriter(cmd)); err != nil {
 		return err
 	}
 	rendered, err := doc.RenderNewDraft(settings.Language, name, dependsOn, description)
@@ -92,7 +92,7 @@ func newPlanCommand(cmd *ucli.Command) error {
 		}
 		fmt.Printf("Created %s\n", absOutput)
 	}
-	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
+	if err := hooks.RunTo(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventNew, name, -1, "draft", progressWriter(cmd)); err != nil {
 		return err
 	}
 	return nil
@@ -160,7 +160,7 @@ func newPhaseCommand(cmd *ucli.Command, selector string) error {
 	if err != nil {
 		return err
 	}
-	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventNew, planDirectory, -1, "draft", cmd.Bool("json")); err != nil {
+	if err := hooks.RunTo(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventNew, planDirectory, -1, "draft", progressWriter(cmd)); err != nil {
 		return err
 	}
 	if cmd.Bool("json") {
@@ -173,5 +173,5 @@ func newPhaseCommand(cmd *ucli.Command, selector string) error {
 		}
 		fmt.Printf("Created %s\n", absOutput)
 	}
-	return hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventNew, planDirectory, -1, "draft", cmd.Bool("json"))
+	return hooks.RunTo(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventNew, planDirectory, -1, "draft", progressWriter(cmd))
 }

@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,7 +82,7 @@ func TestApplyPhaseDraftAddsPhaseAndPreservesPhaseFlags(t *testing.T) {
 	}
 
 	planDraft := filledPhaseDraft(t, doc.English)
-	if _, err := Phase(planDraft, settings, root, false, false); err != nil {
+	if _, err := Phase(planDraft, settings, root, false, io.Discard); err != nil {
 		t.Fatalf("Phase() unexpected error: %v", err)
 	}
 	phasePath := filepath.Join(planRoot, "phases", "02-cache-warmup.md")
@@ -133,7 +134,7 @@ func TestApplyPhaseDraftRefusesCompletedPlan(t *testing.T) {
 	}
 
 	err = func() error {
-		_, err := Phase(filledPhaseDraft(t, doc.English), settings, root, false, false)
+		_, err := Phase(filledPhaseDraft(t, doc.English), settings, root, false, io.Discard)
 		return err
 	}()
 	if err == nil || !strings.Contains(err.Error(), "already done") {
@@ -160,7 +161,7 @@ func TestApplyDryRunDoesNotCreatePlanFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse draft: %v", err)
 	}
-	if _, err := Plan(parsed, settings, root, true, false); err != nil {
+	if _, err := Plan(parsed, settings, root, true, io.Discard); err != nil {
 		t.Fatalf("Plan(dry-run): %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "plans")); !os.IsNotExist(err) {
@@ -184,7 +185,7 @@ func TestEditPhaseBaseHashAndStatusSafety(t *testing.T) {
 		t.Fatalf("checkout is missing safety metadata:\n%s", checkout)
 	}
 	updated := strings.Replace(checkout, "Build the foundation.", "Build the safer foundation.", 1)
-	if _, err := Edit([]byte(updated), settings, root, false, false); err != nil {
+	if _, err := Edit([]byte(updated), settings, root, false, io.Discard); err != nil {
 		t.Fatalf("Edit() unexpected error: %v", err)
 	}
 	changed, err := os.ReadFile(phasePath)
@@ -196,7 +197,7 @@ func TestEditPhaseBaseHashAndStatusSafety(t *testing.T) {
 	}
 
 	stale := strings.Replace(updated, "Build the safer foundation.", "A stale edit.", 1)
-	_, err = Edit([]byte(stale), settings, root, false, false)
+	_, err = Edit([]byte(stale), settings, root, false, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("stale apply error = %v, want hash mismatch", err)
 	}
@@ -206,7 +207,7 @@ func TestEditPhaseBaseHashAndStatusSafety(t *testing.T) {
 
 	statusCheckout := editCheckout(t, root, planRoot, "00-checkout-v2", 0, "")
 	statusEdited := strings.Replace(statusCheckout, "status: planned", "status: in-progress", 1)
-	_, err = Edit([]byte(statusEdited), settings, root, false, false)
+	_, err = Edit([]byte(statusEdited), settings, root, false, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "use `planr phase start`") {
 		t.Fatalf("status edit error = %v, want phase start guidance", err)
 	}
@@ -224,10 +225,10 @@ func TestEditPlanSectionProtectsDerivedChecklist(t *testing.T) {
 	}
 	checkout := editCheckout(t, root, planRoot, "00-checkout-v2", -1, "plan")
 	bad := strings.Replace(checkout, plan.ChecklistPlaceholder, "- [ ] a hand-written checklist", 1)
-	if _, err := Edit([]byte(bad), settings, root, false, false); err == nil || !strings.Contains(err.Error(), "derived checklist") {
+	if _, err := Edit([]byte(bad), settings, root, false, io.Discard); err == nil || !strings.Contains(err.Error(), "derived checklist") {
 		t.Fatalf("derived-region apply error = %v", err)
 	}
-	if _, err := Edit([]byte(checkout), settings, root, false, false); err != nil {
+	if _, err := Edit([]byte(checkout), settings, root, false, io.Discard); err != nil {
 		t.Fatalf("unchanged plan checkout apply: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".planr.lock")); err == nil {

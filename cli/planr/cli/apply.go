@@ -58,11 +58,11 @@ func applyCommand(_ context.Context, cmd *ucli.Command) error {
 	var operation apply.Operation
 	switch kind {
 	case apply.KindPlan:
-		operation, err = apply.Plan(document.(draft.Draft), settings, repoRoot, cmd.Bool("dry-run"), cmd.Bool("json"))
+		operation, err = apply.Plan(document.(draft.Draft), settings, repoRoot, cmd.Bool("dry-run"), progressWriter(cmd))
 	case apply.KindPhase:
-		operation, err = apply.Phase(document.(apply.PhaseDraft), settings, repoRoot, cmd.Bool("dry-run"), cmd.Bool("json"))
+		operation, err = apply.Phase(document.(apply.PhaseDraft), settings, repoRoot, cmd.Bool("dry-run"), progressWriter(cmd))
 	case apply.KindEdit:
-		operation, err = apply.Edit(raw, settings, repoRoot, cmd.Bool("dry-run"), cmd.Bool("json"))
+		operation, err = apply.Edit(raw, settings, repoRoot, cmd.Bool("dry-run"), progressWriter(cmd))
 	default:
 		err = fmt.Errorf("unsupported document kind %q", kind)
 	}

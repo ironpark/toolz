@@ -2,6 +2,7 @@ package apply
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,7 +17,7 @@ import (
 )
 
 // Phase adds a new phase to an existing plan from a new-phase draft.
-func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun, jsonOutput bool) (Operation, error) {
+func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun bool, output io.Writer) (Operation, error) {
 	planDirectories := settings.PlanDirs(repoRoot)
 	planRoot, planDirectory, err := plan.FindDirectory(planDirectories, d.Plan)
 	if err != nil {
@@ -86,7 +87,7 @@ func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun, jsonOu
 	if dryRun {
 		return op, nil
 	}
-	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventPhaseAdd, planDirectory, phaseID, meta.Status, jsonOutput); err != nil {
+	if err := hooks.RunTo(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventPhaseAdd, planDirectory, phaseID, meta.Status, output); err != nil {
 		return Operation{}, err
 	}
 	if err := os.MkdirAll(filepath.Join(planRoot, "phases"), 0755); err != nil {
@@ -99,10 +100,8 @@ func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun, jsonOu
 		_ = os.Remove(phasePath)
 		return Operation{}, err
 	}
-	if !jsonOutput {
-		fmt.Printf("Added %s phase %02d: %s\n", planDirectory, phaseID, phasePath)
-	}
-	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventPhaseAdd, planDirectory, phaseID, meta.Status, jsonOutput); err != nil {
+	fmt.Fprintf(output, "Added %s phase %02d: %s\n", planDirectory, phaseID, phasePath)
+	if err := hooks.RunTo(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventPhaseAdd, planDirectory, phaseID, meta.Status, output); err != nil {
 		return Operation{}, err
 	}
 	return op, nil

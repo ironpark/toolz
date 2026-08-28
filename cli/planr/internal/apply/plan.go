@@ -2,6 +2,7 @@ package apply
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,7 +14,7 @@ import (
 )
 
 // Plan registers a plan draft as a new numbered plan directory.
-func Plan(d draft.Draft, settings config.Config, repoRoot string, dryRun, jsonOutput bool) (Operation, error) {
+func Plan(d draft.Draft, settings config.Config, repoRoot string, dryRun bool, output io.Writer) (Operation, error) {
 	planDirectories := settings.PlanDirs(repoRoot)
 	if len(planDirectories) == 0 {
 		return Operation{}, fmt.Errorf("no plans directory is configured")
@@ -38,7 +39,7 @@ func Plan(d draft.Draft, settings config.Config, repoRoot string, dryRun, jsonOu
 	if dryRun {
 		return op, nil
 	}
-	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventAdd, planDirectory, -1, "registered", jsonOutput); err != nil {
+	if err := hooks.RunTo(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventAdd, planDirectory, -1, "registered", output); err != nil {
 		return Operation{}, err
 	}
 	temporary, err := os.MkdirTemp(planDirectories[0], ".planr-")
@@ -52,10 +53,8 @@ func Plan(d draft.Draft, settings config.Config, repoRoot string, dryRun, jsonOu
 	if err := os.Rename(temporary, target); err != nil {
 		return Operation{}, err
 	}
-	if !jsonOutput {
-		fmt.Printf("Registered %s\n", planDirectory)
-	}
-	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventAdd, planDirectory, -1, "registered", jsonOutput); err != nil {
+	fmt.Fprintf(output, "Registered %s\n", planDirectory)
+	if err := hooks.RunTo(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventAdd, planDirectory, -1, "registered", output); err != nil {
 		return Operation{}, err
 	}
 	return op, nil

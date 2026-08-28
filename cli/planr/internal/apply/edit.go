@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,7 +19,7 @@ import (
 
 // Edit applies an edit checkout back onto the document it was checked out
 // from, after verifying that the document has not changed in the meantime.
-func Edit(raw []byte, settings config.Config, repoRoot string, dryRun, jsonOutput bool) (Operation, error) {
+func Edit(raw []byte, settings config.Config, repoRoot string, dryRun bool, output io.Writer) (Operation, error) {
 	front, _, err := mdoc.Split(string(raw))
 	if err != nil {
 		return Operation{}, validation.Wrap(err, "frontmatter", "frontmatter")
@@ -98,12 +99,12 @@ func Edit(raw []byte, settings config.Config, repoRoot string, dryRun, jsonOutpu
 		return Operation{}, validation.NewFailure(record, detail)
 	}
 	if targetKind == "phase" {
-		return phaseEdit(raw, front, currentRaw, target, planRoot, planDirectory, phaseID, dryRun, jsonOutput)
+		return phaseEdit(raw, front, currentRaw, target, planRoot, planDirectory, phaseID, dryRun, output)
 	}
-	return sectionEdit(raw, currentRaw, target, planDirectory, section, dryRun, jsonOutput)
+	return sectionEdit(raw, currentRaw, target, planDirectory, section, dryRun, output)
 }
 
-func phaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte, target, planRoot, planDirectory string, phaseID int, dryRun, jsonOutput bool) (Operation, error) {
+func phaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte, target, planRoot, planDirectory string, phaseID int, dryRun bool, output io.Writer) (Operation, error) {
 	currentFront, currentBody, err := mdoc.Split(string(currentRaw))
 	if err != nil {
 		return Operation{}, fmt.Errorf("parse %s: %w", filepath.Base(target), err)
@@ -211,9 +212,7 @@ func phaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte, targ
 			return Operation{}, err
 		}
 	}
-	if !jsonOutput {
-		fmt.Printf("Updated %s\n", target)
-	}
+	fmt.Fprintf(output, "Updated %s\n", target)
 	return op, nil
 }
 
@@ -337,7 +336,7 @@ func validateNewPhaseEditDependencies(planDirectory string, edited draft.Meta, p
 	return draft.ValidatePhaseDependencies(all)
 }
 
-func sectionEdit(raw []byte, currentRaw []byte, target, planDirectory, section string, dryRun, jsonOutput bool) (Operation, error) {
+func sectionEdit(raw []byte, currentRaw []byte, target, planDirectory, section string, dryRun bool, output io.Writer) (Operation, error) {
 	_, incomingBody, err := mdoc.Split(string(raw))
 	if err != nil {
 		return Operation{}, err
@@ -372,8 +371,6 @@ func sectionEdit(raw []byte, currentRaw []byte, target, planDirectory, section s
 	if dryRun || !op.Changed {
 		return op, nil
 	}
-	if !jsonOutput {
-		fmt.Printf("Updated %s\n", target)
-	}
+	fmt.Fprintf(output, "Updated %s\n", target)
 	return op, mdoc.WriteAtomically(target, updated)
 }

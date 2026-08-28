@@ -179,12 +179,3 @@ func phaseEnvironmentValue(phaseID int) string {
 	}
 	return strconv.Itoa(phaseID)
 }
-
-// RunDocument runs document hooks, discarding their output when the caller is
-// producing machine-readable output on stdout.
-func RunDocument(repoRoot string, c Config, skip bool, when, event, planDirectory string, phaseID int, status string, quiet bool) error {
-	if quiet {
-		return RunTo(repoRoot, c, skip, when, event, planDirectory, phaseID, status, io.Discard)
-	}
-	return Run(repoRoot, c, skip, when, event, planDirectory, phaseID, status)
-}

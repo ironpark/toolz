@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"io"
 	"os"
 
 	"github.com/ironpark/toolz/cli/planr/cli/phase"
@@ -174,4 +175,14 @@ func newRootCommand() *ucli.Command {
 			phase.Command(planNameShellComplete),
 		},
 	}
+}
+
+// progressWriter is where a command sends its human-readable progress
+// messages and its hook output. With --json, stdout carries a single machine
+// readable document, so everything else is discarded.
+func progressWriter(cmd *ucli.Command) io.Writer {
+	if cmd.Bool("json") {
+		return io.Discard
+	}
+	return os.Stdout
 }
