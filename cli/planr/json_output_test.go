@@ -9,6 +9,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/notes"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 )
 
@@ -60,17 +61,17 @@ func TestOverviewAndNotesJSONKeepEmptyArrays(t *testing.T) {
 	if string(overview) != `{"plans":[]}` {
 		t.Fatalf("empty overview JSON = %s, want an empty plans array", overview)
 	}
-	notes, err := json.Marshal(makeNotesJSON(nil))
+	empty, err := json.Marshal(makeNotesJSON(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(notes) != `{"notes":[]}` {
-		t.Fatalf("empty notes JSON = %s, want an empty notes array", notes)
+	if string(empty) != `{"notes":[]}` {
+		t.Fatalf("empty notes JSON = %s, want an empty notes array", empty)
 	}
 
-	value, err := json.Marshal(makeNotesJSON([]planNote{{
-		at: "2026-08-27T00:00:00Z", plan: "00-demo", event: hooks.EventDone,
-		phase: "01", commit: "0123456789abcdef", shortHash: "0123456", subject: "finish phase",
+	value, err := json.Marshal(makeNotesJSON([]notes.Note{{
+		At: "2026-08-27T00:00:00Z", Plan: "00-demo", Event: hooks.EventDone,
+		Phase: "01", Commit: "0123456789abcdef", ShortHash: "0123456", Subject: "finish phase",
 	}}))
 	if err != nil {
 		t.Fatal(err)

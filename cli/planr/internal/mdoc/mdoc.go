@@ -1,4 +1,4 @@
-// Package mdoc reads and writes the Markdown-with-YAML-Split documents
+// Package mdoc reads and writes the Markdown-with-YAML-frontmatter documents
 // that make up a plan.
 package mdoc
 
@@ -99,8 +99,8 @@ func Body(raw []byte) string {
 	return body
 }
 
-// WithBody replaces only the body of a Split document. Edits to
-// a derived or prose section must not reserialize unrelated Split and
+// WithBody replaces only the body of a frontmatter document. Edits to
+// a derived or prose section must not reserialize unrelated frontmatter and
 // accidentally create a noisy change.
 func WithBody(raw, body string) (string, error) {
 	if !strings.HasPrefix(raw, "---\n") {
@@ -134,7 +134,7 @@ func FrontString(front map[string]any, key string) string {
 	return StringValue(front[key])
 }
 
-// StringValue is the shared coercion of a Split value into a string; a
+// StringValue is the shared coercion of a frontmatter value into a string; a
 // non-string value reads as empty.
 func StringValue(value any) string {
 	text, _ := value.(string)

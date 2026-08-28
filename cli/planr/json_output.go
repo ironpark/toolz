@@ -9,6 +9,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/notes"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 )
@@ -240,17 +241,17 @@ func makeOverviewJSON(summaries []plan.Summary) overviewJSONOutput {
 	return overviewJSONOutput{Plans: plans}
 }
 
-func makeNotesJSON(notes []planNote) notesJSONOutput {
+func makeNotesJSON(notes []notes.Note) notesJSONOutput {
 	values := make([]noteJSON, 0, len(notes))
 	for _, note := range notes {
 		values = append(values, noteJSON{
-			CompletedAt: note.at,
-			Plan:        note.plan,
-			Event:       note.event,
-			Phase:       note.phase,
-			Commit:      note.commit,
-			ShortCommit: note.shortHash,
-			Subject:     note.subject,
+			CompletedAt: note.At,
+			Plan:        note.Plan,
+			Event:       note.Event,
+			Phase:       note.Phase,
+			Commit:      note.Commit,
+			ShortCommit: note.ShortHash,
+			Subject:     note.Subject,
 		})
 	}
 	return notesJSONOutput{Notes: values}

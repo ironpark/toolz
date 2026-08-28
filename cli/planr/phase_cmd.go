@@ -9,6 +9,7 @@ import (
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/notes"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
@@ -98,20 +99,20 @@ func phaseCommand(cmd *cli.Command, status string) error {
 	fmt.Printf("Updated %s phase %02d: %s\n", planDirectory, phaseID, status)
 	// Link the completion to the commit it landed on, for `planr notes`.
 	if status == "in-progress" {
-		if err := recordCompletionNote(repoRoot, planDirectory, hooks.EventStart, phaseID); err != nil {
-			warnStartNoteFailure(err)
+		if err := notes.RecordCompletion(repoRoot, planDirectory, hooks.EventStart, phaseID); err != nil {
+			notes.WarnStartFailure(err)
 		}
 	}
 	if status == "done" {
-		if err := recordCompletionNote(repoRoot, planDirectory, hooks.EventDone, phaseID); err != nil {
-			warnNoteFailure(err)
+		if err := notes.RecordCompletion(repoRoot, planDirectory, hooks.EventDone, phaseID); err != nil {
+			notes.WarnFailure(err)
 		}
 	}
 	if completed {
 		fmt.Printf("Plan %s marked done\n", planDirectory)
 		if !planWasDone {
-			if err := recordCompletionNote(repoRoot, planDirectory, hooks.EventPlanDone, -1); err != nil {
-				warnNoteFailure(err)
+			if err := notes.RecordCompletion(repoRoot, planDirectory, hooks.EventPlanDone, -1); err != nil {
+				notes.WarnFailure(err)
 			}
 		}
 	}

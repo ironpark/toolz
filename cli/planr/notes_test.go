@@ -15,6 +15,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/notes"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
@@ -150,14 +151,14 @@ func TestPhaseStartRecordsNoteForCurrentHead(t *testing.T) {
 	if err := command.Run(context.Background(), []string{"start", "checkout-v2", "0"}); err != nil {
 		t.Fatalf("phase start failed: %v", err)
 	}
-	notes, err := readPlanNotes(root, "checkout-v2")
+	recorded, err := notes.Read(root, "checkout-v2")
 	if err != nil {
-		t.Fatalf("readPlanNotes() unexpected error: %v", err)
+		t.Fatalf("notes.Read() unexpected error: %v", err)
 	}
-	if len(notes) != 1 || notes[0].event != hooks.EventStart || notes[0].phase != "00" {
-		t.Fatalf("start notes = %#v, want one start note for phase 00", notes)
+	if len(recorded) != 1 || recorded[0].Event != hooks.EventStart || recorded[0].Phase != "00" {
+		t.Fatalf("start notes = %#v, want one start note for phase 00", recorded)
 	}
-	jsonNotes := makeNotesJSON(notes)
+	jsonNotes := makeNotesJSON(recorded)
 	if len(jsonNotes.Notes) != 1 || jsonNotes.Notes[0].Event != hooks.EventStart || jsonNotes.Notes[0].Phase != "00" {
 		t.Fatalf("start JSON notes = %#v, want the start event", jsonNotes)
 	}
@@ -180,30 +181,30 @@ func frontmatterValue(t *testing.T, path, key string) string {
 func TestRecordAndReadCompletionNotes(t *testing.T) {
 	repoRoot := seedRepository(t)
 
-	if err := recordCompletionNote(repoRoot, "00-checkout-v2", hooks.EventDone, 3); err != nil {
+	if err := notes.RecordCompletion(repoRoot, "00-checkout-v2", hooks.EventDone, 3); err != nil {
 		t.Fatalf("record phase note: %v", err)
 	}
-	if err := recordCompletionNote(repoRoot, "00-checkout-v2", hooks.EventPlanDone, -1); err != nil {
+	if err := notes.RecordCompletion(repoRoot, "00-checkout-v2", hooks.EventPlanDone, -1); err != nil {
 		t.Fatalf("record plan note: %v", err)
 	}
-	if err := recordCompletionNote(repoRoot, "01-other", hooks.EventPlanDone, -1); err != nil {
+	if err := notes.RecordCompletion(repoRoot, "01-other", hooks.EventPlanDone, -1); err != nil {
 		t.Fatalf("record other plan note: %v", err)
 	}
 
-	notes, err := readPlanNotes(repoRoot, "")
+	recorded, err := notes.Read(repoRoot, "")
 	if err != nil {
-		t.Fatalf("readPlanNotes() unexpected error: %v", err)
+		t.Fatalf("notes.Read() unexpected error: %v", err)
 	}
-	if len(notes) != 3 {
-		t.Fatalf("expected 3 notes, got %d: %#v", len(notes), notes)
+	if len(recorded) != 3 {
+		t.Fatalf("expected 3 notes, got %d: %#v", len(recorded), recorded)
 	}
-	for _, note := range notes {
-		if note.subject != "seed commit" || note.shortHash == "" {
+	for _, note := range recorded {
+		if note.Subject != "seed commit" || note.ShortHash == "" {
 			t.Errorf("note not linked to the commit: %#v", note)
 		}
 	}
 
-	filtered, err := readPlanNotes(repoRoot, "00-checkout-v2")
+	filtered, err := notes.Read(repoRoot, "00-checkout-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,8 +213,8 @@ func TestRecordAndReadCompletionNotes(t *testing.T) {
 	}
 	var phase string
 	for _, note := range filtered {
-		if note.event == hooks.EventDone {
-			phase = note.phase
+		if note.Event == hooks.EventDone {
+			phase = note.Phase
 		}
 	}
 	if phase != "03" {
@@ -225,28 +226,28 @@ func TestRecordAndReadCompletionNotes(t *testing.T) {
 // name previously returned an empty result instead of the plan's records.
 func TestReadPlanNotesAcceptsBarePlanName(t *testing.T) {
 	repoRoot := seedRepository(t)
-	if err := recordCompletionNote(repoRoot, "00-checkout-v2", hooks.EventDone, 1); err != nil {
+	if err := notes.RecordCompletion(repoRoot, "00-checkout-v2", hooks.EventDone, 1); err != nil {
 		t.Fatalf("record phase note: %v", err)
 	}
-	if err := recordCompletionNote(repoRoot, "01-other", hooks.EventPlanDone, -1); err != nil {
+	if err := notes.RecordCompletion(repoRoot, "01-other", hooks.EventPlanDone, -1); err != nil {
 		t.Fatalf("record other plan note: %v", err)
 	}
 
 	for _, filter := range []string{"checkout-v2", "00-checkout-v2"} {
-		notes, err := readPlanNotes(repoRoot, filter)
+		notes, err := notes.Read(repoRoot, filter)
 		if err != nil {
-			t.Fatalf("readPlanNotes(%q) unexpected error: %v", filter, err)
+			t.Fatalf("notes.Read(%q) unexpected error: %v", filter, err)
 		}
-		if len(notes) != 1 || notes[0].plan != "00-checkout-v2" {
-			t.Fatalf("readPlanNotes(%q) = %#v, want the one checkout-v2 note", filter, notes)
+		if len(notes) != 1 || notes[0].Plan != "00-checkout-v2" {
+			t.Fatalf("notes.Read(%q) = %#v, want the one checkout-v2 note", filter, notes)
 		}
 	}
-	notes, err := readPlanNotes(repoRoot, "nonexistent")
+	notes, err := notes.Read(repoRoot, "nonexistent")
 	if err != nil {
-		t.Fatalf("readPlanNotes() unexpected error: %v", err)
+		t.Fatalf("notes.Read() unexpected error: %v", err)
 	}
 	if len(notes) != 0 {
-		t.Fatalf("readPlanNotes(\"nonexistent\") = %#v, want none", notes)
+		t.Fatalf("notes.Read(\"nonexistent\") = %#v, want none", notes)
 	}
 }
 
@@ -255,12 +256,12 @@ func TestReadPlanNotesWithoutRecords(t *testing.T) {
 	if _, err := git.PlainInit(repoRoot, false); err != nil {
 		t.Fatal(err)
 	}
-	notes, err := readPlanNotes(repoRoot, "")
+	recorded, err := notes.Read(repoRoot, "")
 	if err != nil {
 		t.Fatalf("empty notes ref should not error: %v", err)
 	}
-	if len(notes) != 0 {
-		t.Fatalf("expected no notes, got %d", len(notes))
+	if len(recorded) != 0 {
+		t.Fatalf("expected no notes, got %d", len(recorded))
 	}
 }
 

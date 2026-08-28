@@ -1,13 +1,11 @@
-package main
+package notes
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
 	"sort"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	git "github.com/go-git/go-git/v5"
@@ -15,30 +13,28 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
-	"github.com/urfave/cli/v3"
 )
 
-// planNotesRef is the git notes ref planr writes completion records into.
+// notesRef is the git notes ref planr writes completion records into.
 // Notes live outside the commit, so recording one never rewrites history.
-const planNotesRef = plumbing.ReferenceName("refs/notes/planr")
+const notesRef = plumbing.ReferenceName("refs/notes/planr")
 
-// planNote is one completion recorded against a commit.
-type planNote struct {
-	commit    string
-	shortHash string
-	subject   string
-	plan      string
-	event     string
-	phase     string
-	at        string
+// Note is one completion recorded against a commit.
+type Note struct {
+	Commit    string
+	ShortHash string
+	Subject   string
+	Plan      string
+	Event     string
+	Phase     string
+	At        string
 }
 
-// noteLine is the single line appended to a commit's note. It is written as
+// line is the single line appended to a commit's note. It is written as
 // key=value pairs so `planr notes` can read it back without a parser.
-func noteLine(planDirectory, event, phase, at string) string {
+func line(planDirectory, event, phase, at string) string {
 	fields := []string{
 		"planr",
 		"plan=" + planDirectory,
@@ -50,10 +46,10 @@ func noteLine(planDirectory, event, phase, at string) string {
 	return strings.Join(append(fields, "at="+at), " ")
 }
 
-// recordCompletionNote links the current HEAD commit to a phase or plan event.
+// RecordCompletion links the current HEAD commit to a phase or plan event.
 // The state change is already written to disk by the time this runs, so a
 // failure here is reported to the caller but must not undo that change.
-func recordCompletionNote(repoRoot, planDirectory, event string, phaseID int) error {
+func RecordCompletion(repoRoot, planDirectory, event string, phaseID int) error {
 	repository, err := git.PlainOpenWithOptions(repoRoot, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
 	if err != nil {
 		return fmt.Errorf("open repository: %w", err)
@@ -66,8 +62,8 @@ func recordCompletionNote(repoRoot, planDirectory, event string, phaseID int) er
 	if phaseID >= 0 {
 		phase = fmt.Sprintf("%02d", phaseID)
 	}
-	line := noteLine(planDirectory, event, phase, plan.CompletionTimestamp())
-	return appendNote(repository, head.Hash(), line)
+	entry := line(planDirectory, event, phase, plan.CompletionTimestamp())
+	return appendNote(repository, head.Hash(), entry)
 }
 
 // appendNote adds a line to the note attached to target, creating the notes
@@ -134,8 +130,8 @@ func appendNote(repository *git.Repository, target plumbing.Hash, line string) e
 	if err != nil {
 		return fmt.Errorf("write notes commit: %w", err)
 	}
-	if err := repository.Storer.SetReference(plumbing.NewHashReference(planNotesRef, commitHash)); err != nil {
-		return fmt.Errorf("update %s: %w", planNotesRef, err)
+	if err := repository.Storer.SetReference(plumbing.NewHashReference(notesRef, commitHash)); err != nil {
+		return fmt.Errorf("update %s: %w", notesRef, err)
 	}
 	return nil
 }
@@ -143,12 +139,12 @@ func appendNote(repository *git.Repository, target plumbing.Hash, line string) e
 // notesRefCommit returns the commit the notes ref points at, or nil when no
 // note has ever been recorded.
 func notesRefCommit(repository *git.Repository) (*object.Commit, error) {
-	reference, err := repository.Reference(planNotesRef, true)
+	reference, err := repository.Reference(notesRef, true)
 	if err != nil {
 		if err == plumbing.ErrReferenceNotFound {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("read %s: %w", planNotesRef, err)
+		return nil, fmt.Errorf("read %s: %w", notesRef, err)
 	}
 	commit, err := repository.CommitObject(reference.Hash())
 	if err != nil {
@@ -235,9 +231,9 @@ func encodeObject(repository *git.Repository, encode func(plumbing.EncodedObject
 	return repository.Storer.SetEncodedObject(encoded)
 }
 
-// readPlanNotes returns every recorded completion, newest first.
+// Read returns every recorded completion, newest first.
 // planFilter limits the result to one plan directory when it is not empty.
-func readPlanNotes(repoRoot, planFilter string) ([]planNote, error) {
+func Read(repoRoot, planFilter string) ([]Note, error) {
 	repository, err := git.PlainOpenWithOptions(repoRoot, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
 	if err != nil {
 		return nil, fmt.Errorf("open repository: %w", err)
@@ -251,7 +247,7 @@ func readPlanNotes(repoRoot, planFilter string) ([]planNote, error) {
 		return nil, fmt.Errorf("read notes tree: %w", err)
 	}
 
-	var notes []planNote
+	var notes []Note
 	for _, entry := range tree.Entries {
 		target := plumbing.NewHash(noteTargetHash(entry.Name))
 		body, err := readBlob(repository, entry.Hash)
@@ -260,21 +256,21 @@ func readPlanNotes(repoRoot, planFilter string) ([]planNote, error) {
 		}
 		shortHash, subject := commitSummary(repository, target)
 		for _, line := range strings.Split(body, "\n") {
-			note, ok := parseNoteLine(line)
+			note, ok := parseLine(line)
 			if !ok {
 				continue
 			}
 			// Notes record the numbered directory, but every other command
 			// accepts the bare plan name too, so both are matched here.
-			if planFilter != "" && note.plan != planFilter && draft.Name(note.plan) != planFilter {
+			if planFilter != "" && note.Plan != planFilter && draft.Name(note.Plan) != planFilter {
 				continue
 			}
-			note.commit, note.shortHash, note.subject = target.String(), shortHash, subject
+			note.Commit, note.ShortHash, note.Subject = target.String(), shortHash, subject
 			notes = append(notes, note)
 		}
 	}
 
-	sort.SliceStable(notes, func(i, j int) bool { return notes[i].at > notes[j].at })
+	sort.SliceStable(notes, func(i, j int) bool { return notes[i].At > notes[j].At })
 	return notes, nil
 }
 
@@ -293,12 +289,12 @@ func commitSummary(repository *git.Repository, hash plumbing.Hash) (string, stri
 	return short, subject
 }
 
-func parseNoteLine(line string) (planNote, bool) {
+func parseLine(line string) (Note, bool) {
 	fields := strings.Fields(strings.TrimSpace(line))
 	if len(fields) == 0 || fields[0] != "planr" {
-		return planNote{}, false
+		return Note{}, false
 	}
-	note := planNote{}
+	note := Note{}
 	for _, field := range fields[1:] {
 		key, value, found := strings.Cut(field, "=")
 		if !found {
@@ -306,61 +302,24 @@ func parseNoteLine(line string) (planNote, bool) {
 		}
 		switch key {
 		case "plan":
-			note.plan = value
+			note.Plan = value
 		case "event":
-			note.event = value
+			note.Event = value
 		case "phase":
-			note.phase = value
+			note.Phase = value
 		case "at":
-			note.at = value
+			note.At = value
 		}
 	}
-	return note, note.plan != "" && note.event != ""
+	return note, note.Plan != "" && note.Event != ""
 }
 
-// warnNoteFailure reports a note that could not be written without failing the
+// WarnFailure reports a note that could not be written without failing the
 // command, since the plan or phase is already marked done on disk.
-func warnNoteFailure(err error) {
+func WarnFailure(err error) {
 	fmt.Fprintf(os.Stderr, "warning: completion recorded on disk but not linked to a commit: %v\n", err)
 }
 
-func warnStartNoteFailure(err error) {
+func WarnStartFailure(err error) {
 	fmt.Fprintf(os.Stderr, "warning: phase start recorded on disk but not linked to a commit: %v\n", err)
-}
-
-func notesCommand(_ context.Context, cmd *cli.Command) error {
-	if cmd.NArg() > 1 {
-		return fmt.Errorf("notes command takes at most one plan name")
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	_, repoRoot, err := config.Load(cwd)
-	if err != nil {
-		return err
-	}
-
-	notes, err := readPlanNotes(repoRoot, cmd.Args().First())
-	if err != nil {
-		return err
-	}
-	if cmd.Bool("json") {
-		return writeJSON(makeNotesJSON(notes))
-	}
-	if len(notes) == 0 {
-		fmt.Println("no completions recorded")
-		return nil
-	}
-
-	writer := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(writer, "COMPLETED\tPLAN\tEVENT\tCOMMIT\tSUBJECT")
-	for _, note := range notes {
-		event := note.event
-		if note.phase != "" {
-			event = fmt.Sprintf("%s %s", event, note.phase)
-		}
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", note.at, note.plan, event, note.shortHash, note.subject)
-	}
-	return writer.Flush()
 }
