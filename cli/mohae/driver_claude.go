@@ -23,8 +23,17 @@ func newClaudeDriver(ctx context.Context, options DriverOptions) (Driver, error)
 	sdkOptions := &claude.Options{
 		Model:  config.Agent.Model,
 		Effort: config.Agent.Effort,
-		// The agent works in the trial's copy and nowhere else; nothing outside
-		// it is added, so a trial cannot read the machine it runs on.
+		// The agent starts in the trial's copy, and nothing outside it is added
+		// to the session.
+		//
+		// TODO(sandbox): this is where the agent begins, not a boundary it is
+		// held to. With permission prompts bypassed below, nothing stops the
+		// agent from reading or writing anywhere on the host — a prompt that
+		// does not name a directory has been seen to leave its work outside the
+		// workspace, which then fails verification for the wrong reason. The
+		// codex driver constrains writes with SandboxWorkspaceWrite; this one
+		// has no equivalent yet, so the two agents are not measured under the
+		// same rules.
 		Cwd:        options.Workspace.Root,
 		Env:        options.Env,
 		MCPServers: claudeMCPServers(servers),

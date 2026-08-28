@@ -104,8 +104,13 @@ func TestTurnStreamEndToEnd(t *testing.T) {
 	server.notify(MethodTurnPlan, map[string]any{"threadId": "thr_1", "turnId": "turn_1",
 		"explanation": "why", "plan": []any{map[string]any{"step": "a", "status": "completed"}}})
 	server.notify(MethodTurnDiff, map[string]any{"threadId": "thr_1", "turnId": "turn_1", "diff": "@@ -1 +1 @@"})
+	// The shape the app-server actually sends: a tokenUsage object holding the
+	// thread's running total and the last request's own spend.
 	server.notify(MethodTokenUsageUpdated, map[string]any{"threadId": "thr_1", "turnId": "turn_1",
-		"usage": map[string]any{"inputTokens": 10, "outputTokens": 5, "totalTokens": 15}})
+		"tokenUsage": map[string]any{
+			"total": map[string]any{"inputTokens": 10, "cachedInputTokens": 4, "outputTokens": 5, "totalTokens": 15},
+			"last":  map[string]any{"inputTokens": 6, "outputTokens": 2, "totalTokens": 8},
+		}})
 	server.notify(MethodItemCompleted, map[string]any{"threadId": "thr_1", "turnId": "turn_1",
 		"item": map[string]any{"type": "agentMessage", "id": "item_1", "text": "Hello"}})
 	server.notify(MethodTurnCompleted, map[string]any{"threadId": "thr_1",
@@ -146,7 +151,7 @@ func TestTurnStreamEndToEnd(t *testing.T) {
 				t.Error("empty diff")
 			}
 		case EventTokenUsageUpdated:
-			if event.Usage == nil || event.Usage.TotalTokens != 15 {
+			if event.Usage == nil || event.Usage.Total.TotalTokens != 15 || event.Usage.Last.TotalTokens != 8 {
 				t.Errorf("usage = %+v", event.Usage)
 			}
 		}

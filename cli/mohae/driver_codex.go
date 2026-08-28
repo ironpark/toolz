@@ -20,7 +20,12 @@ type codexDriver struct {
 	thread *codex.Thread
 	model  string
 	effort string
+	cwd    string
 	onText func(string)
+	// spent is the thread's cumulative usage as of the end of the last turn.
+	// The server reports running totals for the whole thread, so a turn's own
+	// spend is what the total grew by while it ran.
+	spent codex.TokenUsage
 }
 
 func newCodexDriver(ctx context.Context, options DriverOptions) (Driver, error) {
@@ -52,7 +57,8 @@ func newCodexDriver(ctx context.Context, options DriverOptions) (Driver, error) 
 		Model: config.Agent.Model,
 		Cwd:   options.Workspace.Root,
 		// The trial's workspace is the only thing the agent may write to, and
-		// it is a copy, so full access inside it costs nothing.
+		// it is a copy, so full access inside it costs nothing. Every turn
+		// repeats this: the thread's policy is not what a turn runs under.
 		ApprovalPolicy: codex.ApprovalNever,
 		SandboxPolicy:  codex.SandboxWorkspaceWrite([]string{options.Workspace.Root}, true, nil),
 		ServiceName:    "mohae",
@@ -66,6 +72,7 @@ func newCodexDriver(ctx context.Context, options DriverOptions) (Driver, error) 
 		thread: thread,
 		model:  config.Agent.Model,
 		effort: config.Agent.Effort,
+		cwd:    options.Workspace.Root,
 		onText: options.OnText,
 	}, nil
 }
@@ -109,9 +116,17 @@ func tomlStringList(values []string) string {
 }
 
 func (d *codexDriver) Send(ctx context.Context, prompt string) (Response, error) {
+	// The sandbox and approval policy are set per turn, not just on the thread:
+	// the app-server applies its own defaults to a turn that does not carry
+	// them, and its default leaves the workspace read-only — the agent then
+	// reports it cannot write and the trial fails for a reason that has nothing
+	// to do with the agent.
 	stream, err := d.client.StartTurn(ctx, d.thread.ID, codex.Text(prompt), &codex.TurnOptions{
-		Model:  d.model,
-		Effort: d.effort,
+		Model:          d.model,
+		Effort:         d.effort,
+		Cwd:            d.cwd,
+		ApprovalPolicy: codex.ApprovalNever,
+		SandboxPolicy:  codex.SandboxWorkspaceWrite([]string{d.cwd}, true, nil),
 	})
 	if err != nil {
 		return Response{}, fmt.Errorf("codex: %w", err)
@@ -120,6 +135,9 @@ func (d *codexDriver) Send(ctx context.Context, prompt string) (Response, error)
 
 	response := Response{Model: d.model}
 	var text strings.Builder
+	// The last cumulative reading seen during the turn. One turn produces one
+	// update per model request, so only the final reading matters.
+	var total *codex.TokenUsage
 	for event := range stream.Events() {
 		switch event.Kind {
 		case codex.EventAgentMessageDelta:
@@ -132,23 +150,28 @@ func (d *codexDriver) Send(ctx context.Context, prompt string) (Response, error)
 			if event.Item == nil {
 				continue
 			}
-			if message, ok := event.Item.Item.(codex.AgentMessageItem); ok {
+			if message, ok := event.Item.Item.(*codex.AgentMessageItem); ok {
 				text.WriteString(message.Text)
 				text.WriteString("\n")
 			}
 		case codex.EventTokenUsageUpdated:
 			if event.Usage != nil {
-				response.Usage = codexUsage(event.Usage)
+				total = &event.Usage.Total
 			}
 		}
+	}
+	if total != nil {
+		response.Usage = codexUsage(total.Sub(d.spent))
+		d.spent = *total
 	}
 	turn, err := stream.Wait(ctx)
 	if err != nil {
 		return response, fmt.Errorf("codex: %w", err)
 	}
 	if turn != nil && turn.Usage != nil {
-		// The turn's own total supersedes the running updates.
-		response.Usage = codexUsage(turn.Usage)
+		// A server version that reports the turn's own usage is believed over
+		// the running totals. The current one does not send this.
+		response.Usage = codexUsage(*turn.Usage)
 	}
 	response.Text = strings.TrimRight(text.String(), "\n")
 	if turn != nil && turn.Status == codex.TurnFailed {
@@ -167,15 +190,16 @@ func (d *codexDriver) Send(ctx context.Context, prompt string) (Response, error)
 // codexUsage maps codex's counters onto mohae's. Codex reports cached input as
 // part of the input total, so the cached share is subtracted back out to keep
 // "input" meaning tokens that were actually paid for at full price.
-func codexUsage(usage *codex.TokenUsage) TokenUsage {
+func codexUsage(usage codex.TokenUsage) TokenUsage {
 	input := int(usage.InputTokens - usage.CachedInputTokens)
 	if input < 0 {
 		input = int(usage.InputTokens)
 	}
 	return TokenUsage{
-		Input:     input,
-		Output:    int(usage.OutputTokens),
-		CacheRead: int(usage.CachedInputTokens),
+		Input:      input,
+		Output:     int(usage.OutputTokens),
+		CacheRead:  int(usage.CachedInputTokens),
+		CacheWrite: int(usage.CacheWriteTokens),
 	}
 }
 

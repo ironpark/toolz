@@ -294,7 +294,9 @@ type Turn struct {
 	Items []ThreadItem `json:"items,omitempty"`
 	// Error is set when Status is TurnFailed.
 	Error *TurnError `json:"error,omitempty"`
-	// Usage is the token usage recorded for the turn, when reported.
+	// Usage is the token usage recorded for the turn, when reported. The
+	// app-server does not send it on turn/completed as of codex-cli 0.150;
+	// thread/tokenUsage/updated is where usage actually arrives.
 	Usage *TokenUsage `json:"usage,omitempty"`
 }
 
@@ -367,16 +369,43 @@ func (e *TurnError) HTTPStatusCode() (int, bool) {
 	return *obj.HTTPStatusCode, true
 }
 
-// TokenUsage reports token consumption for a thread or turn.
+// TokenUsage reports token consumption for a thread or turn. InputTokens
+// includes CachedInputTokens rather than excluding it.
 type TokenUsage struct {
 	InputTokens         int64 `json:"inputTokens,omitempty"`
 	CachedInputTokens   int64 `json:"cachedInputTokens,omitempty"`
+	CacheWriteTokens    int64 `json:"cacheWriteInputTokens,omitempty"`
 	OutputTokens        int64 `json:"outputTokens,omitempty"`
 	ReasoningTokens     int64 `json:"reasoningOutputTokens,omitempty"`
 	TotalTokens         int64 `json:"totalTokens,omitempty"`
 	ContextWindow       int64 `json:"contextWindow,omitempty"`
 	ContextWindowUsed   int64 `json:"contextWindowUsed,omitempty"`
 	ContextWindowRemain int64 `json:"contextWindowRemaining,omitempty"`
+}
+
+// ThreadTokenUsage is the tokenUsage object carried by
+// thread/tokenUsage/updated. Total accumulates over the whole thread while Last
+// is only the request that triggered the update, and a single turn triggers one
+// update per model request — so a turn's own spend is the change in Total
+// across it, not any one Last.
+type ThreadTokenUsage struct {
+	Total TokenUsage `json:"total"`
+	Last  TokenUsage `json:"last"`
+	// ModelContextWindow is the context window of the model the thread is
+	// using, when the server reports one.
+	ModelContextWindow int64 `json:"modelContextWindow,omitempty"`
+}
+
+// Sub returns the usage spent between an earlier reading of Total and this one.
+func (u TokenUsage) Sub(earlier TokenUsage) TokenUsage {
+	return TokenUsage{
+		InputTokens:       u.InputTokens - earlier.InputTokens,
+		CachedInputTokens: u.CachedInputTokens - earlier.CachedInputTokens,
+		CacheWriteTokens:  u.CacheWriteTokens - earlier.CacheWriteTokens,
+		OutputTokens:      u.OutputTokens - earlier.OutputTokens,
+		ReasoningTokens:   u.ReasoningTokens - earlier.ReasoningTokens,
+		TotalTokens:       u.TotalTokens - earlier.TotalTokens,
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -967,9 +996,9 @@ func (p CommandOutputDeltaParams) Text() string {
 
 // TokenUsageParams is the payload of thread/tokenUsage/updated.
 type TokenUsageParams struct {
-	ThreadID string     `json:"threadId,omitempty"`
-	TurnID   string     `json:"turnId,omitempty"`
-	Usage    TokenUsage `json:"usage"`
+	ThreadID string           `json:"threadId,omitempty"`
+	TurnID   string           `json:"turnId,omitempty"`
+	Usage    ThreadTokenUsage `json:"tokenUsage"`
 }
 
 // ServerRequestResolvedParams is the payload of serverRequest/resolved.

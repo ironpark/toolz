@@ -330,3 +330,18 @@ func TestRunTrialGivesVerifyTheTrialEnvironment(t *testing.T) {
 		t.Errorf("verify did not see the trial environment: %+v", result.Verify)
 	}
 }
+
+// TestMain points the whole package's temporary files at one directory and
+// removes it afterwards. Trials keep the workspace of anything that failed, and
+// the suite runs failing trials on purpose, so without this every `go test`
+// leaves a handful of directories behind in the real temporary directory.
+func TestMain(m *testing.M) {
+	base, err := os.MkdirTemp("", "mohae-tests-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("TMPDIR", base)
+	code := m.Run()
+	os.RemoveAll(base)
+	os.Exit(code)
+}

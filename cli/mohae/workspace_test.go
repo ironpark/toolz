@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // writeFile writes one file, creating its parents, and fails the test if it
@@ -214,5 +215,35 @@ func TestCleanupRemovesEverythingAndIsRepeatable(t *testing.T) {
 	}
 	if err := workspace.Cleanup(); err != nil {
 		t.Errorf("a second cleanup should be a no-op: %v", err)
+	}
+}
+
+func TestPruneStaleWorkspacesRemovesOnlyOldTrialDirectories(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	old := time.Now().Add(-48 * time.Hour)
+	for name, modTime := range map[string]time.Time{
+		"mohae-old-1":   old,
+		"mohae-fresh-1": time.Now(),
+		"unrelated-1":   old,
+	} {
+		path := filepath.Join(os.TempDir(), name)
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if removed := PruneStaleWorkspaces(24 * time.Hour); removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	if _, err := os.Stat(filepath.Join(os.TempDir(), "mohae-old-1")); err == nil {
+		t.Error("a stale workspace survived the prune")
+	}
+	for _, kept := range []string{"mohae-fresh-1", "unrelated-1"} {
+		if _, err := os.Stat(filepath.Join(os.TempDir(), kept)); err != nil {
+			t.Errorf("%s should have been left alone: %v", kept, err)
+		}
 	}
 }

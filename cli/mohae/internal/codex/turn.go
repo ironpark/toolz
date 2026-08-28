@@ -59,8 +59,9 @@ type Event struct {
 	Explanation string
 	// Diff is the aggregated unified diff for EventDiffUpdated.
 	Diff string
-	// Usage is set for EventTokenUsageUpdated.
-	Usage *TokenUsage
+	// Usage is set for EventTokenUsageUpdated. Total is cumulative for the
+	// thread; see ThreadTokenUsage for what one update covers.
+	Usage *ThreadTokenUsage
 	// Params is the raw notification payload.
 	Params json.RawMessage
 }
