@@ -16,6 +16,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/schema"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 	"github.com/urfave/cli/v3"
 )
@@ -450,7 +451,7 @@ func TestShowSectionsAllAndSchemaReturnMachineReadableDocuments(t *testing.T) {
 		t.Fatalf("show all = %+v", all)
 	}
 
-	var schema schemaOutput
+	var schema schema.Output
 	output, err = captureOutput(t, func() error {
 		return newSchemaTestCommand().Run(context.Background(), []string{"schema", "--json"})
 	})
