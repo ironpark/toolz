@@ -153,7 +153,7 @@ func TestRenderReportRejectsAnUnknownFormat(t *testing.T) {
 
 func TestWriteReportsWritesOneFilePerFormat(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "reports")
-	paths, err := WriteReports(directory, []string{"terminal", "json", "markdown", "html", "json"}, sampleResults(), ReportOptions{})
+	paths, err := WriteReports(directory, "", []string{"terminal", "json", "markdown", "html", "json"}, sampleResults(), ReportOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,5 +174,33 @@ func TestWriteReportsWritesOneFilePerFormat(t *testing.T) {
 		if !strings.HasPrefix(filepath.Base(path), "run-") {
 			t.Errorf("%s is not named for its run", path)
 		}
+	}
+}
+
+// TestWriteReportsDoesNotOverwriteAnotherTrialsReport pins the naming: several
+// configurations share one report.dir by default, so two trials finishing in
+// the same second must not resolve to the same file.
+func TestWriteReportsDoesNotOverwriteAnotherTrialsReport(t *testing.T) {
+	directory := t.TempDir()
+	paths := map[string]bool{}
+	for _, name := range []string{"first", "second", "first"} {
+		written, err := WriteReports(directory, name, []string{"json"}, sampleResults(), ReportOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(written) != 1 {
+			t.Fatalf("wrote %d files, want 1", len(written))
+		}
+		if paths[written[0]] {
+			t.Fatalf("%s was written twice, overwriting the earlier report", written[0])
+		}
+		paths[written[0]] = true
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 {
+		t.Errorf("%d report files on disk, want 3", len(entries))
 	}
 }

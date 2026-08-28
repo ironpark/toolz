@@ -320,6 +320,12 @@ type TurnError struct {
 
 // Error implements the error interface.
 func (e *TurnError) Error() string {
+	// Error is optional even on a failed turn, so a nil receiver is reachable
+	// from any caller that has a Turn: it must describe the failure, not panic
+	// and take the process down with it.
+	if e == nil {
+		return "codex: turn failed"
+	}
 	if kind := e.Kind(); kind != "" {
 		return fmt.Sprintf("codex: turn failed (%s): %s", kind, e.Message)
 	}
@@ -330,7 +336,7 @@ func (e *TurnError) Error() string {
 // as a bare string or as an object with a "type" field. It returns the empty
 // string when no error info is present.
 func (e *TurnError) Kind() string {
-	if len(e.CodexErrorInfo) == 0 {
+	if e == nil || len(e.CodexErrorInfo) == 0 {
 		return ""
 	}
 	var s string
@@ -349,7 +355,7 @@ func (e *TurnError) Kind() string {
 // HTTPStatusCode returns the upstream HTTP status forwarded by the server, if
 // any.
 func (e *TurnError) HTTPStatusCode() (int, bool) {
-	if len(e.CodexErrorInfo) == 0 {
+	if e == nil || len(e.CodexErrorInfo) == 0 {
 		return 0, false
 	}
 	var obj struct {

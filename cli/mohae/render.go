@@ -59,10 +59,16 @@ func RenderReport(format string, results []TrialResult, options ReportOptions) (
 // written. The terminal format is skipped: it is printed as the run happens,
 // and a file of it would only duplicate the screen in a form nothing can read.
 //
-// One run is one file per format, named for when the run started, so a
-// benchmark's history accumulates instead of overwriting itself.
-func WriteReports(dir string, formats []string, results []TrialResult, options ReportOptions) ([]string, error) {
-	stamp := time.Now().Format("20060102-150405")
+// The file is named for the trial and for when it was written, so a benchmark's
+// history accumulates instead of overwriting itself. Both parts are needed:
+// several configurations share one report.dir by default, and a stamp alone
+// collides between two trials of the same run that finish in the same second.
+func WriteReports(dir string, name string, formats []string, results []TrialResult, options ReportOptions) ([]string, error) {
+	stem := "run"
+	if name != "" {
+		stem = sanitizeName(name)
+	}
+	stem += "-" + time.Now().Format("20060102-150405")
 	written := []string{}
 	seen := map[string]bool{}
 	created := false
@@ -84,7 +90,10 @@ func WriteReports(dir string, formats []string, results []TrialResult, options R
 			}
 			created = true
 		}
-		path := filepath.Join(dir, "run-"+stamp+entry.extension)
+		path, err := uniquePath(dir, stem, entry.extension)
+		if err != nil {
+			return written, err
+		}
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			return written, err
 		}
@@ -104,6 +113,25 @@ func summarize(results []TrialResult) (passed int, total TokenUsage) {
 		total.Add(result.Usage)
 	}
 	return passed, total
+}
+
+// uniquePath is stem+extension in dir, with a counter appended if that name is
+// taken. The same trial run twice inside one second is rare but it does happen
+// — a re-run to check a flake is exactly when it would — and silently replacing
+// the earlier report would destroy the measurement being compared against.
+func uniquePath(dir, stem, extension string) (string, error) {
+	for attempt := 0; ; attempt++ {
+		candidate := stem
+		if attempt > 0 {
+			candidate = fmt.Sprintf("%s-%d", stem, attempt+1)
+		}
+		path := filepath.Join(dir, candidate+extension)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return path, nil
+		} else if err != nil {
+			return "", err
+		}
+	}
 }
 
 // renderTerminal is the rendering a run prints as it finishes: the verdict

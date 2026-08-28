@@ -131,18 +131,19 @@ func driverEnv(config *Config, workspace *Workspace) map[string]string {
 	return env
 }
 
-// environ is the environment a driver's subprocess starts from: the parent's,
-// plus the trial's. The parent's is inherited because an agent CLI needs its
-// own credentials and PATH, and stripping them would only mean measuring an
-// agent that cannot log in.
+// environ is the environment a driver's subprocess starts from.
+func (o DriverOptions) environ() []string { return processEnv(o.Env) }
+
+// processEnv puts extra on top of this process's environment. The parent's is
+// inherited because an agent CLI needs its own credentials and PATH, and
+// stripping them would only mean measuring an agent that cannot log in.
 //
-// The trial's variables come last and in sorted order, so a configuration's
-// setting wins and two runs of it differ in the agent's behaviour rather than
-// in their inputs.
-func (o DriverOptions) environ() []string {
+// extra comes last and in sorted order, so a configuration's setting wins and
+// two runs of it differ in the agent's behaviour rather than in their inputs.
+func processEnv(extra map[string]string) []string {
 	environ := os.Environ()
-	for _, key := range slices.Sorted(maps.Keys(o.Env)) {
-		environ = append(environ, key+"="+o.Env[key])
+	for _, key := range slices.Sorted(maps.Keys(extra)) {
+		environ = append(environ, key+"="+extra[key])
 	}
 	return environ
 }

@@ -63,7 +63,10 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 		return result
 	}
 	defer func() {
-		if result.Passed && !options.KeepWorkspace {
+		// A trial nothing graded is kept too: with no verify command there is
+		// no verdict, so the workspace is the only thing it produced, and
+		// deleting it would leave the run with nothing to show at all.
+		if result.Passed && len(result.Verify) > 0 && !options.KeepWorkspace {
 			workspace.Cleanup()
 			return
 		}
@@ -228,14 +231,25 @@ func runVerifyCommands(ctx context.Context, config *Config, workspace *Workspace
 	}
 	// Detached from the trial's deadline: a trial that ran out of time still
 	// has a workspace worth grading, and grading it under an already-expired
-	// context would fail every command for the wrong reason.
+	// context would fail every command for the wrong reason. It gets a fresh
+	// deadline of the same length rather than none, so a grading command that
+	// hangs — one waiting on stdin, or on a network that never answers — ends
+	// the run instead of blocking it forever.
 	ctx = context.WithoutCancel(ctx)
+	if config.Limits.TimeoutSeconds > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(config.Limits.TimeoutSeconds)*time.Second)
+		defer cancel()
+	}
 	results := make([]VerifyResult, 0, len(config.Verify.Commands))
 	for _, text := range config.Verify.Commands {
 		started := time.Now()
 		command := exec.CommandContext(ctx, "sh", "-c", text)
 		command.Dir = workspace.Scratch
-		command.Env = append(os.Environ(), "MOHAE_WORKSPACE="+workspace.Root)
+		// The same variables the agent had: a grading command that reads
+		// $MOHAE_MODEL should not see something different from the trial it
+		// grades.
+		command.Env = processEnv(driverEnv(config, workspace))
 		isolateProcess(command)
 		output := &bytes.Buffer{}
 		command.Stdout = output

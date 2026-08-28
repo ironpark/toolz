@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // trialConfig builds a runnable configuration whose agent is a shell stub, so a
@@ -264,5 +265,68 @@ func TestRunTrialReportsASetupFailureWithoutRunningTheAgent(t *testing.T) {
 		// Sending prompts into a workspace that was never set up would spend
 		// tokens measuring the wrong thing.
 		t.Errorf("turns = %+v, want none", result.Turns)
+	}
+}
+
+// TestRunTrialWithoutVerificationIsUngraded pins the honest verdict: nothing
+// measured the trial, so it must not read as a task the agent completed, and
+// the workspace — the only thing it produced — must survive to be looked at.
+func TestRunTrialWithoutVerificationIsUngraded(t *testing.T) {
+	config := trialConfig(t, "echo done")
+	config.Verify.Commands = nil
+
+	result := RunTrial(context.Background(), config, TrialOptions{Out: &bytes.Buffer{}})
+
+	if result.Verdict() != "ungraded" {
+		t.Errorf("verdict = %q, want %q", result.Verdict(), "ungraded")
+	}
+	if !result.Passed {
+		t.Error("an ungraded trial did not fail, so it must not count against the run")
+	}
+	if result.Workspace == "" {
+		t.Fatal("the workspace of an ungraded trial was not kept")
+	}
+	if _, err := os.Stat(result.Workspace); err != nil {
+		t.Errorf("the kept workspace is not there: %v", err)
+	}
+	os.RemoveAll(filepath.Dir(result.Workspace))
+}
+
+// TestRunTrialBoundsAHangingVerifyCommand keeps grading inside a deadline. The
+// verify context is deliberately detached from the trial's, and detaching it
+// without a replacement limit would let one hung command block the whole run.
+func TestRunTrialBoundsAHangingVerifyCommand(t *testing.T) {
+	config := trialConfig(t, "echo done")
+	config.Verify.Commands = []string{"sleep 60"}
+	config.Limits.TimeoutSeconds = 1
+
+	done := make(chan TrialResult, 1)
+	go func() { done <- RunTrial(context.Background(), config, TrialOptions{Out: &bytes.Buffer{}}) }()
+
+	select {
+	case result := <-done:
+		if result.Passed {
+			t.Error("a verify command that never finished was graded as a pass")
+		}
+		if result.Workspace != "" {
+			os.RemoveAll(filepath.Dir(result.Workspace))
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("a hung verify command blocked the trial past its own limit")
+	}
+}
+
+// TestRunTrialGivesVerifyTheTrialEnvironment keeps the grading command and the
+// agent reading the same variables: a check on $MOHAE_MODEL that saw something
+// different from the trial it grades would be grading the wrong thing.
+func TestRunTrialGivesVerifyTheTrialEnvironment(t *testing.T) {
+	config := trialConfig(t, "echo done")
+	config.Agent.Model = "a-model"
+	config.Verify.Commands = []string{`test "$MOHAE_MODEL" = a-model && test "$MOHAE_TRIAL" = trial`}
+
+	result := RunTrial(context.Background(), config, TrialOptions{Out: &bytes.Buffer{}})
+
+	if !result.Passed {
+		t.Errorf("verify did not see the trial environment: %+v", result.Verify)
 	}
 }

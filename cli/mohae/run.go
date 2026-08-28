@@ -192,7 +192,7 @@ func writeRunReports(configs []*Config, results []TrialResult, output string, op
 		// --output is written too, so `-o markdown` leaves the document it
 		// printed on disk rather than only on the terminal.
 		formats := append(append([]string{}, config.Report.Formats...), output)
-		written, err := WriteReports(config.Report.Dir, formats, []TrialResult{result}, options)
+		written, err := WriteReports(config.Report.Dir, result.Name, formats, []TrialResult{result}, options)
 		if err != nil {
 			return err
 		}

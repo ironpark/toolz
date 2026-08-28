@@ -452,3 +452,19 @@ func TestDecodeInitializeResult(t *testing.T) {
 		t.Fatalf("res = %+v", res)
 	}
 }
+
+// TestTurnErrorAccessorsOnANilReceiver keeps a failed turn describable. Turn.Error
+// is optional even when Status is TurnFailed, so every caller holding a *Turn can
+// reach these methods with nothing behind the pointer.
+func TestTurnErrorAccessorsOnANilReceiver(t *testing.T) {
+	var failure *TurnError
+	if got := failure.Error(); got != "codex: turn failed" {
+		t.Errorf("Error() = %q, want %q", got, "codex: turn failed")
+	}
+	if got := failure.Kind(); got != "" {
+		t.Errorf("Kind() = %q, want empty", got)
+	}
+	if code, ok := failure.HTTPStatusCode(); ok {
+		t.Errorf("HTTPStatusCode() = %d, true; want 0, false", code)
+	}
+}

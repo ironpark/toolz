@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -151,7 +152,14 @@ func (d *codexDriver) Send(ctx context.Context, prompt string) (Response, error)
 	}
 	response.Text = strings.TrimRight(text.String(), "\n")
 	if turn != nil && turn.Status == codex.TurnFailed {
-		return response, fmt.Errorf("codex: turn failed: %s", turn.Error.Error())
+		// Error is optional even on a failed turn. Dereferencing an absent one
+		// would turn a trial that failed — a result — into a crashed run.
+		if turn.Error == nil {
+			return response, errors.New("codex: turn failed")
+		}
+		// Returned as it is: TurnError.Error already reads "codex: turn failed
+		// (kind): message", so wrapping it would say so twice.
+		return response, turn.Error
 	}
 	return response, nil
 }

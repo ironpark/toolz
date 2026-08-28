@@ -106,13 +106,20 @@ func (r TrialResult) EffectiveModel() string {
 }
 
 // Verdict is the one-word outcome a report leads with.
+//
+// A trial with no verify command is "ungraded", not "pass": nothing measured
+// it, and calling that a pass would read as a task the agent completed. It is
+// still counted as passing for the run's exit status, because a configuration
+// that deliberately grades nothing has not failed either.
 func (r TrialResult) Verdict() string {
 	switch {
-	case r.Passed:
-		return "pass"
 	case r.TimedOut:
 		return "timeout"
-	default:
+	case !r.Passed:
 		return "fail"
+	case len(r.Verify) == 0:
+		return "ungraded"
+	default:
+		return "pass"
 	}
 }
