@@ -161,14 +161,14 @@ func ParseFile(path string) (Config, error) {
 	if err := yaml.UnmarshalWithOptions(contents, &value, yaml.Strict()); err != nil {
 		return Config{}, fmt.Errorf("parse %s: %w", path, err)
 	}
-	value, err = Normalize(value)
+	value, err = normalize(value)
 	if err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	return value, nil
 }
 
-func Normalize(value Config) (Config, error) {
+func normalize(value Config) (Config, error) {
 	if len(value.PlansDirs) == 0 && value.PlansDir != "" {
 		value.PlansDirs = []string{value.PlansDir}
 	}

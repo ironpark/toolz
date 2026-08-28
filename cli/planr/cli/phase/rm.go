@@ -51,7 +51,7 @@ func removeCommand(_ context.Context, cmd *ucli.Command) error {
 	if err != nil {
 		return fmt.Errorf("parse %s/PLAN.md: %w", planDirectory, err)
 	}
-	if status, _ := planFront["plan_status"].(string); status == "done" {
+	if mdoc.FrontString(planFront, "plan_status") == "done" {
 		return fmt.Errorf("plan %q is already done; phase rm is only allowed for open plans", planDirectory)
 	}
 
@@ -111,7 +111,7 @@ func removeCommand(_ context.Context, cmd *ucli.Command) error {
 }
 
 func phaseDependents(phases []plan.StoredPhase, planDirectory string, phaseID int) []plan.StoredPhase {
-	planName := draft.Name(planDirectory)
+	planName := draft.PlanName(planDirectory)
 	dependents := []plan.StoredPhase{}
 	for _, phase := range phases {
 		if phase.ID == phaseID {

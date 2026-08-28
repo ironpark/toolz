@@ -16,8 +16,8 @@ const (
 )
 
 // Strings is the set of headings and markers planr writes into a plan.
-// Both variants must stay parseable by parsePhases, so any heading added here
-// also belongs in PhaseSectionHeadings.
+// Both variants must stay parseable by the draft parser in internal/draft, so
+// any heading added here also belongs in PhaseSectionHeadings.
 type Strings struct {
 	// Template is the embedded draft skeleton emitted by `planr new`.
 	Template string

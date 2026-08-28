@@ -51,13 +51,13 @@ var events = map[string]bool{
 }
 
 // Commands lists the shell commands bound to when/event.
-func (value Config) Commands(when, event string) []string {
+func (c Config) Commands(when, event string) []string {
 	var rules []Rule
 	switch when {
 	case "before":
-		rules = value.Before
+		rules = c.Before
 	case "after":
-		rules = value.After
+		rules = c.After
 	default:
 		return nil
 	}
@@ -73,16 +73,16 @@ func (value Config) Commands(when, event string) []string {
 	return Commands
 }
 
-func Validate(value Config) error {
-	if value.Timeout < 0 {
+func Validate(c Config) error {
+	if c.Timeout < 0 {
 		return fmt.Errorf("hooks.timeout must not be negative")
 	}
 	for _, group := range []struct {
 		name  string
 		rules []Rule
 	}{
-		{name: "before", rules: value.Before},
-		{name: "after", rules: value.After},
+		{name: "before", rules: c.Before},
+		{name: "after", rules: c.After},
 	} {
 		for index, rule := range group.rules {
 			if len(rule.On) == 0 {
@@ -107,17 +107,17 @@ func Validate(value Config) error {
 	return nil
 }
 
-func Run(repoRoot string, value Config, skip bool, when, event, planDirectory string, phaseID int, status string) error {
-	return RunTo(repoRoot, value, skip, when, event, planDirectory, phaseID, status, os.Stdout)
+func Run(repoRoot string, c Config, skip bool, when, event, planDirectory string, phaseID int, status string) error {
+	return RunTo(repoRoot, c, skip, when, event, planDirectory, phaseID, status, os.Stdout)
 }
 
-func RunTo(repoRoot string, value Config, skip bool, when, event, planDirectory string, phaseID int, status string, outputWriter io.Writer) error {
+func RunTo(repoRoot string, c Config, skip bool, when, event, planDirectory string, phaseID int, status string, outputWriter io.Writer) error {
 	if skip {
 		return nil
 	}
-	for index, command := range value.Commands(when, event) {
+	for index, command := range c.Commands(when, event) {
 		label := fmt.Sprintf("%s %s hook #%d", when, event, index+1)
-		if err := RunOneTo(repoRoot, command, label, event, planDirectory, phaseID, status, value.TimeoutDuration(), outputWriter); err != nil {
+		if err := runOneTo(repoRoot, command, label, event, planDirectory, phaseID, status, c.TimeoutDuration(), outputWriter); err != nil {
 			return err
 		}
 	}
@@ -128,18 +128,18 @@ func RunTo(repoRoot string, value Config, skip bool, when, event, planDirectory 
 // suites, so the default is generous, but an unbounded hook would hang planr
 // forever with no indication of which command is stuck. A repository can
 // override it with hooks.timeout.
-func (value Config) TimeoutDuration() time.Duration {
-	if value.Timeout <= 0 {
+func (c Config) TimeoutDuration() time.Duration {
+	if c.Timeout <= 0 {
 		return DefaultTimeout
 	}
-	return value.Timeout
+	return c.Timeout
 }
 
-func RunOne(repoRoot, command, label, event, planDirectory string, phaseID int, status string, timeout time.Duration) error {
-	return RunOneTo(repoRoot, command, label, event, planDirectory, phaseID, status, timeout, os.Stdout)
+func runOne(repoRoot, command, label, event, planDirectory string, phaseID int, status string, timeout time.Duration) error {
+	return runOneTo(repoRoot, command, label, event, planDirectory, phaseID, status, timeout, os.Stdout)
 }
 
-func RunOneTo(repoRoot, command, label, event, planDirectory string, phaseID int, status string, timeout time.Duration, outputWriter io.Writer) error {
+func runOneTo(repoRoot, command, label, event, planDirectory string, phaseID int, status string, timeout time.Duration, outputWriter io.Writer) error {
 	if strings.TrimSpace(command) == "" {
 		return nil
 	}

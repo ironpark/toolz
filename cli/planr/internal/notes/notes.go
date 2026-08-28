@@ -262,7 +262,7 @@ func Read(repoRoot, planFilter string) ([]Note, error) {
 			}
 			// Notes record the numbered directory, but every other command
 			// accepts the bare plan name too, so both are matched here.
-			if planFilter != "" && note.Plan != planFilter && draft.Name(note.Plan) != planFilter {
+			if planFilter != "" && note.Plan != planFilter && draft.PlanName(note.Plan) != planFilter {
 				continue
 			}
 			note.Commit, note.ShortHash, note.Subject = target.String(), shortHash, subject
@@ -314,12 +314,9 @@ func parseLine(line string) (Note, bool) {
 	return note, note.Plan != "" && note.Event != ""
 }
 
-// WarnFailure reports a note that could not be written without failing the
-// command, since the plan or phase is already marked done on disk.
-func WarnFailure(err error) {
-	fmt.Fprintf(os.Stderr, "warning: completion recorded on disk but not linked to a commit: %v\n", err)
-}
-
-func WarnStartFailure(err error) {
-	fmt.Fprintf(os.Stderr, "warning: phase start recorded on disk but not linked to a commit: %v\n", err)
+// Warn reports a note that could not be written without failing the command,
+// since the state change named by what is already recorded on disk. The plan is
+// consistent; only the link to a commit is missing.
+func Warn(what string, err error) {
+	fmt.Fprintf(os.Stderr, "warning: %s recorded on disk but not linked to a commit: %v\n", what, err)
 }

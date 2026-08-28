@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
-	"github.com/ironpark/toolz/cli/planr/internal/doctor"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
@@ -85,7 +84,7 @@ func editCommand(_ context.Context, cmd *ucli.Command) error {
 	if err != nil {
 		return err
 	}
-	editSelector := draft.Name(planDirectory) + "#"
+	editSelector := draft.PlanName(planDirectory) + "#"
 	checkoutFront := map[string]any{}
 	var body string
 	if targetKind == "phase" {
@@ -99,14 +98,14 @@ func editCommand(_ context.Context, cmd *ucli.Command) error {
 		checkoutFront["planr_slug"] = phaseSlugFromPath(target)
 		body = phaseBody
 	} else {
-		editSelector = draft.Name(planDirectory)
+		editSelector = draft.PlanName(planDirectory)
 		checkoutFront["planr_section"] = section
 		_, body, err = mdoc.Split(string(raw))
 		if err != nil {
 			return err
 		}
 		if section == "plan" {
-			start, end, found := doctor.ChecklistBounds(body)
+			start, end, found := plan.ChecklistBounds(body)
 			if !found {
 				return fmt.Errorf("PLAN.md does not contain a # Phases section")
 			}
@@ -147,7 +146,7 @@ func editCommand(_ context.Context, cmd *ucli.Command) error {
 }
 
 func scratchFileName(planDirectory, targetKind string, phaseID int, section string) string {
-	name := draft.Name(planDirectory)
+	name := draft.PlanName(planDirectory)
 	if targetKind == "phase" {
 		return fmt.Sprintf("%s-phase-%02d.md", name, phaseID)
 	}

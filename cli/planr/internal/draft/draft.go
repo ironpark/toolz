@@ -231,7 +231,7 @@ func Parse(raw []byte, fallback string) (Draft, error) {
 		detail := fmt.Sprintf("invalid description for plan %q: %v", name, err)
 		return Draft{}, validation.NewFailure(validation.Record{Rule: "description", Section: "frontmatter", Detail: err.Error()}, detail)
 	}
-	dependsOn, err := CanonicalDependencies(mdoc.Strings(front["depends_on"]))
+	dependsOn, err := canonicalDependencies(mdoc.Strings(front["depends_on"]))
 	if err != nil {
 		detail := fmt.Sprintf("invalid plan dependencies: %v", err)
 		return Draft{}, validation.NewFailure(validation.Record{Rule: "plan_dependency", Section: "frontmatter", Detail: err.Error()}, detail)
@@ -279,10 +279,10 @@ func CheckPlaceholders(raw string) error {
 	// following line, which leaves the marker itself untouched.
 	message := fmt.Sprintf("draft still has %d unfilled %s placeholder(s):\n%s\noverwrite each of these lines with real content -- adding text below a line leaves its marker in place -- then run planr apply again",
 		len(lines), Placeholder, strings.Join(lines, "\n"))
-	return validation.NewFailures(PlaceholderRecords(raw), message)
+	return validation.NewFailures(placeholderRecords(raw), message)
 }
 
-func PlaceholderRecords(raw string) []validation.Record {
+func placeholderRecords(raw string) []validation.Record {
 	records := []validation.Record{}
 	visible := blankHTMLComments(raw)
 	lines := strings.Split(visible, "\n")

@@ -43,7 +43,7 @@ func EnsureDependenciesMet(planDirectories []string, planRoot, planDirectory str
 			target = &phases[index]
 		}
 	}
-	// A missing phase is reported by updatePhaseStatus with a better message.
+	// A missing phase is reported by UpdatePhaseStatusLocked with a better message.
 	if target == nil {
 		return nil
 	}
@@ -55,7 +55,7 @@ func EnsureDependenciesMet(planDirectories []string, planRoot, planDirectory str
 			unmet = append(unmet, fmt.Sprintf("%s (unreadable dependency)", raw))
 			continue
 		}
-		if dependency.Plan == draft.Name(planDirectory) && dependency.Phase != nil {
+		if dependency.Plan == draft.PlanName(planDirectory) && dependency.Phase != nil {
 			phase, found := local[*dependency.Phase]
 			switch {
 			case !found:
@@ -340,25 +340,28 @@ func AlreadyDone(planRoot string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	status, _ := front["plan_status"].(string)
+	status := mdoc.FrontString(front, "plan_status")
 	return status == "done", nil
 }
 
-func UpdatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status string) (string, bool, error) {
+// UpdatePhaseStatusLocked writes one phase's status and refreshes the derived
+// PLAN.md checklist, reporting whether the change completed the whole plan. The
+// caller must already hold the plan lock from AcquireLock.
+func UpdatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status string) (bool, error) {
 	phasePath, err := FindPhaseFile(planRoot, phaseID)
 	if err != nil {
-		return "", false, fmt.Errorf("%s: %w", planDirectory, err)
+		return false, fmt.Errorf("%s: %w", planDirectory, err)
 	}
 	phaseRaw, err := os.ReadFile(phasePath)
 	if err != nil {
-		return "", false, err
+		return false, err
 	}
 	phaseFront, phaseBody, err := mdoc.Split(string(phaseRaw))
 	if err != nil {
-		return "", false, fmt.Errorf("parse %s: %w", filepath.Base(phasePath), err)
+		return false, fmt.Errorf("parse %s: %w", filepath.Base(phasePath), err)
 	}
 	if err := ValidateStatusChange(phaseFront, status); err != nil {
-		return "", false, fmt.Errorf("%s phase %02d: %w", planDirectory, phaseID, err)
+		return false, fmt.Errorf("%s phase %02d: %w", planDirectory, phaseID, err)
 	}
 	phaseFront["status"] = status
 	// completed_at records when the phase reached done; reopening it clears the stamp.
@@ -368,21 +371,21 @@ func UpdatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 		delete(phaseFront, "completed_at")
 	}
 	if err := mdoc.WriteFile(phasePath, phaseFront, phaseBody); err != nil {
-		return "", false, err
+		return false, err
 	}
 
 	phases, err := ReadPhases(planRoot)
 	if err != nil {
-		return "", false, err
+		return false, err
 	}
 	planPath := filepath.Join(planRoot, "PLAN.md")
 	planRaw, err := os.ReadFile(planPath)
 	if err != nil {
-		return "", false, err
+		return false, err
 	}
 	planFront, planBody, err := mdoc.Split(string(planRaw))
 	if err != nil {
-		return "", false, fmt.Errorf("parse PLAN.md: %w", err)
+		return false, fmt.Errorf("parse PLAN.md: %w", err)
 	}
 	completed := len(phases) > 0
 	for _, phase := range phases {
@@ -400,12 +403,12 @@ func UpdatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 	}
 	planBody, err = UpdateChecklist(planBody, phaseID, status == "done")
 	if err != nil {
-		return "", false, fmt.Errorf("update PLAN.md phase checklist: %w", err)
+		return false, fmt.Errorf("update PLAN.md phase checklist: %w", err)
 	}
 	if err := mdoc.WriteFile(planPath, planFront, planBody); err != nil {
-		return "", false, err
+		return false, err
 	}
-	return planDirectory, completed, nil
+	return completed, nil
 }
 
 func UpdateChecklist(body string, phaseID int, done bool) (string, error) {
@@ -424,7 +427,7 @@ func UpdateChecklist(body string, phaseID int, done bool) (string, error) {
 
 func ValidateStatusChange(front map[string]any, status string) error {
 	if status == "conditional" {
-		condition, _ := front["entry_condition"].(string)
+		condition := mdoc.FrontString(front, "entry_condition")
 		if strings.TrimSpace(condition) == "" {
 			return fmt.Errorf("conditional status requires a non-empty entry_condition")
 		}
@@ -452,7 +455,7 @@ func FindDirectory(planDirectories []string, planArg string) (string, string, er
 			if !entry.IsDir() {
 				continue
 			}
-			if entry.Name() == planArg || draft.Name(entry.Name()) == planArg {
+			if entry.Name() == planArg || draft.PlanName(entry.Name()) == planArg {
 				matches = append(matches, match{root: filepath.Join(plans, entry.Name()), directory: entry.Name()})
 			}
 		}

@@ -105,7 +105,7 @@ func TestCompletionStampsFrontmatter(t *testing.T) {
 		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 
-	if _, done, err := updatePhaseStatus([]string{plansRoot}, "checkout-v2", 0, "done"); err != nil || !done {
+	if done, err := updatePhaseStatus([]string{plansRoot}, "checkout-v2", 0, "done"); err != nil || !done {
 		t.Fatalf("complete phase: done=%v err=%v", done, err)
 	}
 	phaseStamp := frontmatterValue(t, filepath.Join(planRoot, "phases", "00-api-contract.md"), "completed_at")
@@ -115,7 +115,7 @@ func TestCompletionStampsFrontmatter(t *testing.T) {
 	}
 
 	// Reopening must clear both stamps so a stale date never lingers.
-	if _, _, err := updatePhaseStatus([]string{plansRoot}, "checkout-v2", 0, "planned"); err != nil {
+	if _, err := updatePhaseStatus([]string{plansRoot}, "checkout-v2", 0, "planned"); err != nil {
 		t.Fatalf("reopen phase: %v", err)
 	}
 	if got := frontmatterValue(t, filepath.Join(planRoot, "phases", "00-api-contract.md"), "completed_at"); got != "" {

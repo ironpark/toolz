@@ -54,7 +54,10 @@ type Phase struct {
 	front map[string]any
 }
 
-type Plan struct {
+// Inspection is everything doctor learned about one plan directory. The
+// *OK flags record how far the read got, so later checks can skip work that
+// would only produce noise on top of an earlier failure.
+type Inspection struct {
 	Directory string
 	root      string
 	planPath  string
@@ -80,8 +83,8 @@ type checklistEntry struct {
 
 var checklistPattern = regexp.MustCompile(`^\s*-\s*\[([ xX])\]\s+\[Phase\s+([0-9]+):\s*(.*?)\]\(([^)]+)\)\s*$`)
 
-func InspectPlan(planRoot, directory string) (Plan, []Issue) {
-	record := Plan{
+func InspectPlan(planRoot, directory string) (Inspection, []Issue) {
+	inspection := Inspection{
 		Directory:   directory,
 		root:        planRoot,
 		planPath:    filepath.Join(planRoot, "PLAN.md"),
@@ -89,25 +92,25 @@ func InspectPlan(planRoot, directory string) (Plan, []Issue) {
 	}
 	issues := []Issue{}
 
-	raw, err := os.ReadFile(record.planPath)
+	raw, err := os.ReadFile(inspection.planPath)
 	if err != nil {
-		issues = append(issues, Issue{Location: record.Directory, Message: fmt.Sprintf("cannot read PLAN.md: %v", err)})
-		record.PhaseDataOK = false
+		issues = append(issues, Issue{Location: inspection.Directory, Message: fmt.Sprintf("cannot read PLAN.md: %v", err)})
+		inspection.PhaseDataOK = false
 	} else {
 		if !hasDocumentFrontmatter(string(raw)) {
-			issues = append(issues, Issue{Location: record.Directory + "/PLAN.md", Message: "missing frontmatter"})
+			issues = append(issues, Issue{Location: inspection.Directory + "/PLAN.md", Message: "missing frontmatter"})
 		} else {
 			front, body, frontErr := mdoc.Split(string(raw))
 			if frontErr != nil {
-				issues = append(issues, Issue{Location: record.Directory + "/PLAN.md", Message: frontErr.Error()})
+				issues = append(issues, Issue{Location: inspection.Directory + "/PLAN.md", Message: frontErr.Error()})
 			} else {
-				record.Front, record.raw, record.Body, record.PlanReadable = front, string(raw), body, true
+				inspection.Front, inspection.raw, inspection.Body, inspection.PlanReadable = front, string(raw), body, true
 				frontIssues := validatePlanFrontmatter(directory, front)
 				issues = append(issues, frontIssues...)
-				record.PlanFrontOK = len(frontIssues) == 0
+				inspection.PlanFrontOK = len(frontIssues) == 0
 				var checklistIssues []Issue
-				record.Checklist, record.ChecklistStart, checklistIssues = parseChecklist(body, directory)
-				record.ChecklistIssues = append(record.ChecklistIssues, checklistIssues...)
+				inspection.Checklist, inspection.ChecklistStart, checklistIssues = parseChecklist(body, directory)
+				inspection.ChecklistIssues = append(inspection.ChecklistIssues, checklistIssues...)
 			}
 		}
 	}
@@ -116,11 +119,11 @@ func InspectPlan(planRoot, directory string) (Plan, []Issue) {
 	entries, readErr := os.ReadDir(phaseDirectory)
 	if readErr != nil {
 		if os.IsNotExist(readErr) {
-			issues = append(issues, Issue{Location: record.Directory + "/phases", Message: "directory does not exist"})
+			issues = append(issues, Issue{Location: inspection.Directory + "/phases", Message: "directory does not exist"})
 		} else {
-			issues = append(issues, Issue{Location: record.Directory + "/phases", Message: fmt.Sprintf("cannot read directory: %v", readErr)})
+			issues = append(issues, Issue{Location: inspection.Directory + "/phases", Message: fmt.Sprintf("cannot read directory: %v", readErr)})
 		}
-		record.PhaseDataOK = false
+		inspection.PhaseDataOK = false
 	} else {
 		ids := map[int]string{}
 		slugs := map[string]string{}
@@ -131,27 +134,27 @@ func InspectPlan(planRoot, directory string) (Plan, []Issue) {
 			if filepath.Ext(entry.Name()) != ".md" {
 				continue
 			}
-			location := record.Directory + "/phases/" + entry.Name()
+			location := inspection.Directory + "/phases/" + entry.Name()
 			match := plan.PhaseFilePrefix.FindStringSubmatch(entry.Name())
 			if len(match) != 3 || !draft.KebabPattern.MatchString(match[2]) {
 				issues = append(issues, Issue{Location: location, Message: "invalid phase filename; expected NN-lowercase-kebab-case.md"})
-				record.PhaseDataOK = false
+				inspection.PhaseDataOK = false
 				continue
 			}
 			id, parseErr := strconv.Atoi(match[1])
 			if parseErr != nil {
 				issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("invalid phase number: %v", parseErr)})
-				record.PhaseDataOK = false
+				inspection.PhaseDataOK = false
 				continue
 			}
 			if previous, found := ids[id]; found {
 				issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("duplicate phase number %02d also used by %s", id, previous)})
-				record.PhaseDataOK = false
+				inspection.PhaseDataOK = false
 				continue
 			}
 			if previous, found := slugs[match[2]]; found {
 				issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("duplicate phase slug %q also used by %s", match[2], previous)})
-				record.PhaseDataOK = false
+				inspection.PhaseDataOK = false
 				continue
 			}
 			ids[id] = entry.Name()
@@ -161,18 +164,18 @@ func InspectPlan(planRoot, directory string) (Plan, []Issue) {
 			phaseRaw, readPhaseErr := os.ReadFile(phasePath)
 			if readPhaseErr != nil {
 				issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("cannot read phase: %v", readPhaseErr)})
-				record.PhaseDataOK = false
+				inspection.PhaseDataOK = false
 				continue
 			}
 			if !hasDocumentFrontmatter(string(phaseRaw)) {
 				issues = append(issues, Issue{Location: location, Message: "missing frontmatter"})
-				record.PhaseDataOK = false
+				inspection.PhaseDataOK = false
 				continue
 			}
 			phaseFront, _, frontErr := mdoc.Split(string(phaseRaw))
 			if frontErr != nil {
 				issues = append(issues, Issue{Location: location, Message: frontErr.Error()})
-				record.PhaseDataOK = false
+				inspection.PhaseDataOK = false
 				continue
 			}
 			phase := Phase{
@@ -180,35 +183,35 @@ func InspectPlan(planRoot, directory string) (Plan, []Issue) {
 				path:        phasePath,
 				front:       phaseFront,
 			}
-			phaseIssues := validatePhase(record.Directory, phase)
+			phaseIssues := validatePhase(inspection.Directory, phase)
 			if len(phaseIssues) > 0 {
-				record.PhaseDataOK = false
+				inspection.PhaseDataOK = false
 			}
 			issues = append(issues, phaseIssues...)
-			record.Phases = append(record.Phases, phase)
+			inspection.Phases = append(inspection.Phases, phase)
 		}
-		sort.Slice(record.Phases, func(i, j int) bool { return record.Phases[i].ID < record.Phases[j].ID })
-		if len(record.Phases) == 0 {
-			issues = append(issues, Issue{Location: record.Directory + "/phases", Message: "no phase documents found"})
-			record.PhaseDataOK = false
+		sort.Slice(inspection.Phases, func(i, j int) bool { return inspection.Phases[i].ID < inspection.Phases[j].ID })
+		if len(inspection.Phases) == 0 {
+			issues = append(issues, Issue{Location: inspection.Directory + "/phases", Message: "no phase documents found"})
+			inspection.PhaseDataOK = false
 		}
 	}
 
-	if record.PlanReadable && record.PhaseDataOK {
-		record.ChecklistIssues = append(record.ChecklistIssues, CompareChecklist(record)...)
-		planStatus := stringValue(record.Front["plan_status"])
+	if inspection.PlanReadable && inspection.PhaseDataOK {
+		inspection.ChecklistIssues = append(inspection.ChecklistIssues, compareChecklist(inspection)...)
+		planStatus := stringValue(inspection.Front["plan_status"])
 		expected := "done"
-		for _, phase := range record.Phases {
+		for _, phase := range inspection.Phases {
 			if phase.Status != "done" {
 				expected = "in-progress"
 				break
 			}
 		}
 		if planStatus != "" && planStatus != expected {
-			issues = append(issues, Issue{Location: record.Directory + "/PLAN.md", Message: fmt.Sprintf("plan_status is %q but phase files indicate %q", planStatus, expected)})
+			issues = append(issues, Issue{Location: inspection.Directory + "/PLAN.md", Message: fmt.Sprintf("plan_status is %q but phase files indicate %q", planStatus, expected)})
 		}
 	}
-	return record, issues
+	return inspection, issues
 }
 
 func hasDocumentFrontmatter(raw string) bool {
@@ -239,7 +242,7 @@ func validatePlanFrontmatter(directory string, front map[string]any) []Issue {
 					issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("duplicate dependency %q", raw)})
 				}
 				seen[canonical] = true
-				if dependency.Plan == draft.Name(directory) {
+				if dependency.Plan == draft.PlanName(directory) {
 					issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("plan cannot depend on itself: %s", draft.DependencyLabel(dependency))})
 				}
 			}
@@ -278,8 +281,8 @@ func validatePhase(directory string, phase Phase) []Issue {
 					issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("broken dependency %q: %v", raw, err)})
 					continue
 				}
-				if dependency.Plan != draft.Name(directory) || dependency.Phase == nil {
-					issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("phase dependency %q must reference a phase in %s", raw, draft.Name(directory))})
+				if dependency.Plan != draft.PlanName(directory) || dependency.Phase == nil {
+					issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("phase dependency %q must reference a phase in %s", raw, draft.PlanName(directory))})
 				}
 			}
 		}
@@ -299,7 +302,7 @@ func validatePhase(directory string, phase Phase) []Issue {
 }
 
 func parseChecklist(body, directory string) ([]checklistEntry, int, []Issue) {
-	start, end, found := ChecklistBounds(body)
+	start, end, found := plan.ChecklistBounds(body)
 	if !found {
 		return nil, -1, []Issue{{Location: directory + "/PLAN.md", Message: "missing # Phases section"}}
 	}
@@ -343,36 +346,15 @@ func parseChecklist(body, directory string) ([]checklistEntry, int, []Issue) {
 	return entries, start, issues
 }
 
-func ChecklistBounds(body string) (int, int, bool) {
-	lines := strings.SplitAfter(body, "\n")
-	offset := 0
-	start := -1
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if start < 0 {
-			if trimmed == "# Phases" {
-				start = offset + len(line)
-			}
-		} else if strings.HasPrefix(trimmed, "# ") {
-			return start, offset, true
-		}
-		offset += len(line)
-	}
-	if start >= 0 {
-		return start, len(body), true
-	}
-	return -1, -1, false
-}
-
-func CompareChecklist(record Plan) []Issue {
+func compareChecklist(inspection Inspection) []Issue {
 	issues := []Issue{}
-	location := record.Directory + "/PLAN.md"
+	location := inspection.Directory + "/PLAN.md"
 	byID := map[int]checklistEntry{}
-	for _, entry := range record.Checklist {
+	for _, entry := range inspection.Checklist {
 		byID[entry.phaseNumber] = entry
 	}
 	phaseIDs := map[int]bool{}
-	for _, phase := range record.Phases {
+	for _, phase := range inspection.Phases {
 		phaseIDs[phase.ID] = true
 		entry, found := byID[phase.ID]
 		if !found {
@@ -391,7 +373,7 @@ func CompareChecklist(record Plan) []Issue {
 			issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("checklist phase %02d is %s but phase file status is %q", phase.ID, checklistState(entry.checked), phase.Status)})
 		}
 	}
-	for _, entry := range record.Checklist {
+	for _, entry := range inspection.Checklist {
 		if !phaseIDs[entry.phaseNumber] {
 			issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("checklist entry for phase %02d has no phase file", entry.phaseNumber)})
 		}
@@ -400,7 +382,7 @@ func CompareChecklist(record Plan) []Issue {
 }
 
 func RepairChecklist(body string, phases []Phase) (string, error) {
-	start, end, found := ChecklistBounds(body)
+	start, end, found := plan.ChecklistBounds(body)
 	if !found {
 		return "", fmt.Errorf("PLAN.md does not contain a # Phases section")
 	}
@@ -420,12 +402,12 @@ func RepairChecklist(body string, phases []Phase) (string, error) {
 	return body[:start] + replacement + body[end:], nil
 }
 
-func WritePlanBody(record Plan, body string) error {
-	bodyOffset := len(record.raw) - len(record.Body)
-	if bodyOffset < 0 || bodyOffset > len(record.raw) {
+func WritePlanBody(inspection Inspection, body string) error {
+	bodyOffset := len(inspection.raw) - len(inspection.Body)
+	if bodyOffset < 0 || bodyOffset > len(inspection.raw) {
 		return fmt.Errorf("could not locate PLAN.md body")
 	}
-	return mdoc.WriteAtomically(record.planPath, record.raw[:bodyOffset]+body)
+	return mdoc.WriteAtomically(inspection.planPath, inspection.raw[:bodyOffset]+body)
 }
 
 func checklistState(checked bool) string {
@@ -435,10 +417,10 @@ func checklistState(checked bool) string {
 	return "unchecked"
 }
 
-func CheckPlanDependencies(reporter *Reporter, record Plan, byName map[string]Plan) {
-	location := record.Directory + "/PLAN.md"
-	if record.Front != nil {
-		if value, found := record.Front["depends_on"]; found {
+func CheckPlanDependencies(reporter *Reporter, inspection Inspection, byName map[string]Inspection) {
+	location := inspection.Directory + "/PLAN.md"
+	if inspection.Front != nil {
+		if value, found := inspection.Front["depends_on"]; found {
 			if dependencies, ok := stringList(value); ok {
 				for _, raw := range dependencies {
 					dependency, err := draft.ParseDependency(strings.TrimSpace(raw))
@@ -458,15 +440,15 @@ func CheckPlanDependencies(reporter *Reporter, record Plan, byName map[string]Pl
 		}
 	}
 
-	if !record.PhaseDataOK {
+	if !inspection.PhaseDataOK {
 		return
 	}
-	drafts := make([]draft.Phase, 0, len(record.Phases))
-	for _, phase := range record.Phases {
+	drafts := make([]draft.Phase, 0, len(inspection.Phases))
+	for _, phase := range inspection.Phases {
 		meta := draft.Meta{Phase: phase.ID, Slug: phase.Slug, Status: phase.Status}
 		for _, raw := range phase.Dependencies {
 			dependency, err := draft.ParseDependency(strings.TrimSpace(raw))
-			if err != nil || dependency.Phase == nil || dependency.Plan != draft.Name(record.Directory) {
+			if err != nil || dependency.Phase == nil || dependency.Plan != draft.PlanName(inspection.Directory) {
 				continue
 			}
 			meta.DependsOn = append(meta.DependsOn, *dependency.Phase)
@@ -474,12 +456,12 @@ func CheckPlanDependencies(reporter *Reporter, record Plan, byName map[string]Pl
 		drafts = append(drafts, draft.Phase{Title: phase.Title, Meta: meta})
 	}
 	if err := draft.ValidatePhaseDependencies(drafts); err != nil {
-		reporter.Add(Issue{Location: record.Directory, Message: "broken phase dependency graph: " + err.Error()})
+		reporter.Add(Issue{Location: inspection.Directory, Message: "broken phase dependency graph: " + err.Error()})
 	}
 }
 
-func hasPhase(record Plan, id int) bool {
-	for _, phase := range record.Phases {
+func hasPhase(inspection Inspection, id int) bool {
+	for _, phase := range inspection.Phases {
 		if phase.ID == id {
 			return true
 		}

@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/ironpark/toolz/cli/planr/cli/phase"
+	"github.com/ironpark/toolz/cli/planr/internal/cliflag"
 	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	ucli "github.com/urfave/cli/v3"
 )
@@ -55,8 +56,8 @@ func newRootCommand() *ucli.Command {
 				Flags: []ucli.Flag{
 					&ucli.StringFlag{Name: "language", Usage: "plan document language (en, ko)"},
 					&ucli.StringSliceFlag{Name: "plans-dir", Usage: "plans directory relative to the repository root (repeatable)"},
-					forceFlag("overwrite an existing .planr.yaml"),
-					jsonFlag(),
+					cliflag.Force("overwrite an existing .planr.yaml"),
+					cliflag.JSON(),
 				},
 				Action: initCommand,
 			},
@@ -64,7 +65,7 @@ func newRootCommand() *ucli.Command {
 				Name:  "config",
 				Usage: "show the applied configuration",
 				Flags: []ucli.Flag{
-					jsonFlag(),
+					cliflag.JSON(),
 				},
 				Action: configCommand,
 			},
@@ -73,7 +74,7 @@ func newRootCommand() *ucli.Command {
 				Usage: "diagnose configuration, plans, and repository consistency",
 				Flags: []ucli.Flag{
 					&ucli.BoolFlag{Name: "fix", Usage: "repair PLAN.md checklists from phase files"},
-					jsonFlag(),
+					cliflag.JSON(),
 				},
 				Action: doctorCommand,
 			},
@@ -85,7 +86,7 @@ func newRootCommand() *ucli.Command {
 					&ucli.StringFlag{Name: "output", Usage: "draft file path"},
 					&ucli.StringSliceFlag{Name: "depends-on", Usage: "plan dependency (repeatable)"},
 					&ucli.StringFlag{Name: "description", Usage: "short plan description (max 200 characters)"},
-					jsonFlag(),
+					cliflag.JSON(),
 				},
 				ShellComplete: planNameShellComplete,
 				Action:        newCommand,
@@ -95,9 +96,9 @@ func newRootCommand() *ucli.Command {
 				Usage:     "check out an existing plan document for editing",
 				ArgsUsage: "<plan-name>#<phase-number> or <plan-name>",
 				Flags: []ucli.Flag{
-					sectionFlag(),
+					cliflag.Section(),
 					&ucli.StringFlag{Name: "output", Usage: "editable file path"},
-					jsonFlag(),
+					cliflag.JSON(),
 				},
 				ShellComplete: planNameShellComplete,
 				Action:        editCommand,
@@ -109,7 +110,7 @@ func newRootCommand() *ucli.Command {
 				Flags: []ucli.Flag{
 					&ucli.BoolFlag{Name: "stdin", Usage: "read the document from stdin"},
 					&ucli.BoolFlag{Name: "dry-run", Usage: "report changes without writing"},
-					jsonFlag(),
+					cliflag.JSON(),
 				},
 				Action: applyCommand,
 			},
@@ -117,7 +118,7 @@ func newRootCommand() *ucli.Command {
 				Name:  "schema",
 				Usage: "describe the plan document contract",
 				Flags: []ucli.Flag{
-					jsonFlag(),
+					cliflag.JSON(),
 				},
 				Action: schemaCommand,
 			},
@@ -126,7 +127,7 @@ func newRootCommand() *ucli.Command {
 				Usage:     "show plan progress",
 				ArgsUsage: "[plan-name]",
 				Flags: []ucli.Flag{
-					jsonFlag(),
+					cliflag.JSON(),
 				},
 				ShellComplete: planNameShellComplete,
 				Action:        statusCommand,
@@ -136,8 +137,8 @@ func newRootCommand() *ucli.Command {
 				Usage:     "show the current or selected phase document",
 				ArgsUsage: "<plan-name> [phase-number]",
 				Flags: []ucli.Flag{
-					jsonFlag(),
-					sectionFlag(),
+					cliflag.JSON(),
+					cliflag.Section(),
 					&ucli.BoolFlag{Name: "all", Usage: "show the entire plan"},
 				},
 				ShellComplete: planNameShellComplete,
@@ -148,7 +149,7 @@ func newRootCommand() *ucli.Command {
 				Usage:     "show a concise overview of all plans",
 				ArgsUsage: "[plan-name]",
 				Flags: []ucli.Flag{
-					jsonFlag(),
+					cliflag.JSON(),
 				},
 				ShellComplete: planNameShellComplete,
 				Action:        overviewCommand,
@@ -158,7 +159,7 @@ func newRootCommand() *ucli.Command {
 				Usage:     "list plan and phase completions linked to commits",
 				ArgsUsage: "[plan-name]",
 				Flags: []ucli.Flag{
-					jsonFlag(),
+					cliflag.JSON(),
 				},
 				ShellComplete: planNameShellComplete,
 				Action:        notesCommand,

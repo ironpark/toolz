@@ -19,8 +19,8 @@ type failure struct {
 	message string
 }
 
-func (failure *failure) Error() string {
-	return failure.message
+func (f *failure) Error() string {
+	return f.message
 }
 
 func NewFailure(record Record, message string) error {
@@ -32,11 +32,11 @@ func NewFailures(records []Record, message string) error {
 }
 
 func Records(err error) []Record {
-	var failure *failure
-	if !errors.As(err, &failure) {
+	var target *failure
+	if !errors.As(err, &target) {
 		return nil
 	}
-	return append([]Record{}, failure.records...)
+	return append([]Record{}, target.records...)
 }
 
 func Wrap(err error, rule, section string) error {

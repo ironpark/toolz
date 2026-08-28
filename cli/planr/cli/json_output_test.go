@@ -90,7 +90,7 @@ func TestOverviewAndNotesJSONKeepEmptyArrays(t *testing.T) {
 }
 
 func TestShowJSONContainsStructuredPhaseContent(t *testing.T) {
-	value, err := json.Marshal(makeShowJSON(plan.Details{
+	value, err := json.Marshal(makeShowJSON(plan.PhaseDetails{
 		Plan: "checkout-v2", Directory: "00-checkout-v2", ID: 2,
 		Slug: "rollout", Title: "Gradual Rollout", Status: "conditional",
 		PlannedWork: "- move traffic", DoneWhen: "- metrics are stable",

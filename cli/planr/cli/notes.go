@@ -24,21 +24,21 @@ func notesCommand(_ context.Context, cmd *ucli.Command) error {
 		return err
 	}
 
-	notes, err := notes.Read(repoRoot, cmd.Args().First())
+	records, err := notes.Read(repoRoot, cmd.Args().First())
 	if err != nil {
 		return err
 	}
 	if cmd.Bool("json") {
-		return writeJSON(makeNotesJSON(notes))
+		return writeJSON(makeNotesJSON(records))
 	}
-	if len(notes) == 0 {
+	if len(records) == 0 {
 		fmt.Println("no completions recorded")
 		return nil
 	}
 
 	writer := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(writer, "COMPLETED\tPLAN\tEVENT\tCOMMIT\tSUBJECT")
-	for _, note := range notes {
+	for _, note := range records {
 		event := note.Event
 		if note.Phase != "" {
 			event = fmt.Sprintf("%s %s", event, note.Phase)

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ironpark/toolz/cli/planr/internal/cliflag"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/notes"
@@ -32,7 +33,7 @@ func Command(complete ucli.ShellCompleteFunc) *ucli.Command {
 				ArgsUsage: "<plan-name> <phase-number>",
 				Flags: []ucli.Flag{
 					&ucli.StringFlag{Name: "status", Usage: "planned, conditional, in-progress, or done"},
-					forceFlag("mark done despite uncommitted source changes"),
+					cliflag.Force("mark done despite uncommitted source changes"),
 				},
 				ShellComplete: complete,
 				Action:        setCommand,
@@ -51,19 +52,13 @@ func Command(complete ucli.ShellCompleteFunc) *ucli.Command {
 				Usage:     "remove a phase from an open plan",
 				ArgsUsage: "<plan-name> <phase-number>",
 				Flags: []ucli.Flag{
-					forceFlag("remove a phase despite dependent phases"),
+					cliflag.Force("remove a phase despite dependent phases"),
 				},
 				ShellComplete: complete,
 				Action:        removeCommand,
 			},
 		},
 	}
-}
-
-// forceFlag overrides a refusal. usage states what is being overridden, since
-// each phase subcommand refuses for a different reason.
-func forceFlag(usage string) ucli.Flag {
-	return &ucli.BoolFlag{Name: "force", Usage: usage}
 }
 
 func setCommand(_ context.Context, cmd *ucli.Command) error {
@@ -144,8 +139,7 @@ func run(cmd *ucli.Command, status string) error {
 			return err
 		}
 	}
-	var completed bool
-	planDirectory, completed, err = plan.UpdatePhaseStatusLocked(planRoot, planDirectory, phaseID, status)
+	completed, err := plan.UpdatePhaseStatusLocked(planRoot, planDirectory, phaseID, status)
 	if err != nil {
 		return err
 	}
@@ -153,19 +147,19 @@ func run(cmd *ucli.Command, status string) error {
 	// Link the completion to the commit it landed on, for `planr notes`.
 	if status == "in-progress" {
 		if err := notes.RecordCompletion(repoRoot, planDirectory, hooks.EventStart, phaseID); err != nil {
-			notes.WarnStartFailure(err)
+			notes.Warn("phase start", err)
 		}
 	}
 	if status == "done" {
 		if err := notes.RecordCompletion(repoRoot, planDirectory, hooks.EventDone, phaseID); err != nil {
-			notes.WarnFailure(err)
+			notes.Warn("completion", err)
 		}
 	}
 	if completed {
 		fmt.Printf("Plan %s marked done\n", planDirectory)
 		if !planWasDone {
 			if err := notes.RecordCompletion(repoRoot, planDirectory, hooks.EventPlanDone, -1); err != nil {
-				notes.WarnFailure(err)
+				notes.Warn("completion", err)
 			}
 		}
 	}

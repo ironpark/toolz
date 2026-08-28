@@ -70,7 +70,7 @@ func planNameCompletionValues(planDirectories []string, prefix string) ([]string
 			if !entry.IsDir() {
 				continue
 			}
-			name := draft.Name(entry.Name())
+			name := draft.PlanName(entry.Name())
 			if strings.HasPrefix(name, prefix) {
 				seen[name] = true
 			}

@@ -30,7 +30,7 @@ func TestArchiveMovesCompletedPlanAndPreservesNumbering(t *testing.T) {
 	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := updatePhaseStatus([]string{active}, "checkout-v2", 0, "done"); err != nil {
+	if _, err := updatePhaseStatus([]string{active}, "checkout-v2", 0, "done"); err != nil {
 		t.Fatalf("complete plan: %v", err)
 	}
 

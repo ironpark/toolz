@@ -113,7 +113,7 @@ func showPlanSection(planRoot, planDirectory, section string, jsonOutput bool) e
 		return err
 	}
 	if jsonOutput {
-		return writeJSON(showSectionJSONOutput{Plan: draft.Name(planDirectory), Directory: planDirectory, Section: section, Content: string(raw), File: absPath})
+		return writeJSON(showSectionJSONOutput{Plan: draft.PlanName(planDirectory), Directory: planDirectory, Section: section, Content: string(raw), File: absPath})
 	}
 	fmt.Print(string(raw))
 	return nil
@@ -147,10 +147,9 @@ func showAllPlan(planRoot, planDirectory string, jsonOutput bool) error {
 			return detailsErr
 		}
 		phaseJSON = append(phaseJSON, makeShowJSON(details))
-		path, pathErr := plan.FindPhaseFile(planRoot, phase.ID)
-		if pathErr != nil {
-			return pathErr
-		}
+		// ReadPhaseDetails already resolved the phase file, so reuse its path
+		// rather than scanning the phases directory a second time.
+		path := details.File
 		raw, readErr := os.ReadFile(path)
 		if readErr != nil {
 			return readErr
@@ -162,7 +161,7 @@ func showAllPlan(planRoot, planDirectory string, jsonOutput bool) error {
 		documents[filepath.ToSlash(relative)] = string(raw)
 	}
 	return writeJSON(showAllJSONOutput{
-		Plan:         draft.Name(planDirectory),
+		Plan:         draft.PlanName(planDirectory),
 		Directory:    planDirectory,
 		Status:       mdoc.FrontString(front, "plan_status"),
 		Description:  mdoc.FrontString(front, "description"),

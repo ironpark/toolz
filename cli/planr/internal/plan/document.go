@@ -114,9 +114,9 @@ func Write(root string, d draft.Draft, planDirectory, language string) error {
 	return nil
 }
 
-// RenderDocuments produces the complete set of files written when a plan
-// is registered. Keeping this separate from Write lets apply --dry-run
-// return the exact resulting documents without touching the repository.
+// RenderDocuments produces the complete set of files written when a plan is
+// registered. Rendering is separate from writing so apply --dry-run can report
+// the exact resulting documents without touching the repository.
 func RenderDocuments(d draft.Draft, planDirectory, language, registeredAt string) (map[string]string, error) {
 	text := doc.StringsFor(language)
 	documents := map[string]string{
@@ -217,10 +217,10 @@ func PhaseFrontmatter(planDirectory string, meta draft.Meta) map[string]any {
 func PhaseDocumentBody(language, title, planned, completion string) string {
 	text := doc.StringsFor(language)
 	return fmt.Sprintf("> DONE-WHEN: %s\n> NEXT: %s\n\n# %s\n\n## %s\n\n%s\n\n## %s\n\n%s\n",
-		FirstPhaseLine(completion), text.NoNext, title, text.PlannedWork, planned, text.DoneWhen, completion)
+		firstPhaseLine(completion), text.NoNext, title, text.PlannedWork, planned, text.DoneWhen, completion)
 }
 
-func FirstPhaseLine(value string) string {
+func firstPhaseLine(value string) string {
 	return strings.TrimPrefix(strings.TrimSpace(strings.SplitN(value, "\n", 2)[0]), "- ")
 }
 
@@ -242,7 +242,7 @@ func CollectSummaries(planDirectories []string, filter string) ([]Summary, bool,
 			if !entry.IsDir() {
 				continue
 			}
-			if filter != "" && entry.Name() != filter && draft.Name(entry.Name()) != filter {
+			if filter != "" && entry.Name() != filter && draft.PlanName(entry.Name()) != filter {
 				continue
 			}
 			planRoot := filepath.Join(plans, entry.Name())
@@ -258,9 +258,9 @@ func CollectSummaries(planDirectories []string, filter string) ([]Summary, bool,
 			if err != nil {
 				return nil, false, err
 			}
-			status, _ := front["plan_status"].(string)
+			status := mdoc.FrontString(front, "plan_status")
 			summary := Summary{
-				Name:   draft.Name(entry.Name()),
+				Name:   draft.PlanName(entry.Name()),
 				Label:  filepath.Join(filepath.Base(plans), entry.Name()),
 				Status: status,
 				Phases: phases,
@@ -358,14 +358,14 @@ func ReadPhases(planRoot string) ([]StoredPhase, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s/%s: %w", filepath.Base(planRoot), entry.Name(), err)
 		}
-		status, _ := front["status"].(string)
+		status := mdoc.FrontString(front, "status")
 		phases = append(phases, StoredPhase{id, match[2], mdoc.Title(string(contents)), status, mdoc.Strings(front["depends_on"])})
 	}
 	sort.Slice(phases, func(i, j int) bool { return phases[i].ID < phases[j].ID })
 	return phases, nil
 }
 
-type Details struct {
+type PhaseDetails struct {
 	Plan, Directory string
 	ID              int
 	Slug, Title     string
@@ -388,30 +388,55 @@ func ReadDocument(planRoot, name string) (map[string]any, string, error) {
 	return front, body, nil
 }
 
-func ReadPhaseDetails(planRoot, planDirectory string, stored StoredPhase) (Details, error) {
+func ReadPhaseDetails(planRoot, planDirectory string, stored StoredPhase) (PhaseDetails, error) {
 	phasePath, err := FindPhaseFile(planRoot, stored.ID)
 	if err != nil {
-		return Details{}, fmt.Errorf("%s: %w", planDirectory, err)
+		return PhaseDetails{}, fmt.Errorf("%s: %w", planDirectory, err)
 	}
 	raw, err := os.ReadFile(phasePath)
 	if err != nil {
-		return Details{}, err
+		return PhaseDetails{}, err
 	}
 	front, body, err := mdoc.Split(string(raw))
 	if err != nil {
-		return Details{}, fmt.Errorf("parse %s: %w", filepath.Base(phasePath), err)
+		return PhaseDetails{}, fmt.Errorf("parse %s: %w", filepath.Base(phasePath), err)
 	}
 	plannedWork, doneWhen, err := draft.SplitPhaseDocumentSections(stored.Title, body)
 	if err != nil {
-		return Details{}, fmt.Errorf("parse %s: %w", filepath.Base(phasePath), err)
+		return PhaseDetails{}, fmt.Errorf("parse %s: %w", filepath.Base(phasePath), err)
 	}
 	absPath, err := filepath.Abs(phasePath)
 	if err != nil {
-		return Details{}, err
+		return PhaseDetails{}, err
 	}
-	details := Details{Plan: draft.Name(planDirectory), Directory: planDirectory, ID: stored.ID, Slug: stored.Slug, Title: stored.Title, Status: stored.Status, PlannedWork: plannedWork, DoneWhen: doneWhen, Dependencies: mdoc.Strings(front["depends_on"]), File: absPath}
+	details := PhaseDetails{Plan: draft.PlanName(planDirectory), Directory: planDirectory, ID: stored.ID, Slug: stored.Slug, Title: stored.Title, Status: stored.Status, PlannedWork: plannedWork, DoneWhen: doneWhen, Dependencies: mdoc.Strings(front["depends_on"]), File: absPath}
 	if status, ok := front["status"].(string); ok && status != "" {
 		details.Status = status
 	}
 	return details, nil
+}
+
+// ChecklistBounds locates the derived phase checklist inside a PLAN.md body,
+// returning the offsets of the region between the `# Phases` heading and the
+// next top-level heading. Both the diagnostics and the write path need it, so
+// it lives with the rest of the checklist rendering.
+func ChecklistBounds(body string) (int, int, bool) {
+	lines := strings.SplitAfter(body, "\n")
+	offset := 0
+	start := -1
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if start < 0 {
+			if trimmed == "# Phases" {
+				start = offset + len(line)
+			}
+		} else if strings.HasPrefix(trimmed, "# ") {
+			return start, offset, true
+		}
+		offset += len(line)
+	}
+	if start >= 0 {
+		return start, len(body), true
+	}
+	return -1, -1, false
 }

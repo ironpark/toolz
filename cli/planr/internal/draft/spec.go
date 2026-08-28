@@ -33,7 +33,7 @@ func NormalizeDescription(value string, required bool) (string, error) {
 }
 
 func NormalizeDependencies(values []string, planName string) ([]string, error) {
-	result, err := CanonicalDependencies(values)
+	result, err := canonicalDependencies(values)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func NormalizeDependencies(values []string, planName string) ([]string, error) {
 	return result, nil
 }
 
-func CanonicalDependencies(values []string) ([]string, error) {
+func canonicalDependencies(values []string) ([]string, error) {
 	seen := map[string]bool{}
 	result := make([]string, 0, len(values))
 	for _, value := range values {
@@ -74,7 +74,7 @@ func CanonicalDependencies(values []string) ([]string, error) {
 
 func ParseDependency(value string) (Dependency, error) {
 	plan, phaseText, hasPhase := strings.Cut(value, "#")
-	plan = Name(plan)
+	plan = PlanName(plan)
 	if !KebabPattern.MatchString(plan) {
 		return Dependency{}, fmt.Errorf("dependency %q must use plan-name or plan-name#phase-number", value)
 	}
@@ -102,7 +102,10 @@ func DependencyLabel(dependency Dependency) string {
 	return fmt.Sprintf("%s#%d", dependency.Plan, *dependency.Phase)
 }
 
-func Name(directory string) string {
+// PlanName strips the numeric ordering prefix from a plan directory name,
+// turning "00-checkout-v2" into "checkout-v2". Directories are numbered so they
+// sort, but every user-facing reference uses the bare name.
+func PlanName(directory string) string {
 	parts := strings.SplitN(directory, "-", 2)
 	if len(parts) == 2 {
 		if len(parts[0]) >= 2 {

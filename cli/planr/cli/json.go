@@ -258,7 +258,7 @@ func makeNotesJSON(notes []notes.Note) notesJSONOutput {
 	return notesJSONOutput{Notes: values}
 }
 
-func makeShowJSON(phase plan.Details) showJSONOutput {
+func makeShowJSON(phase plan.PhaseDetails) showJSONOutput {
 	return showJSONOutput{
 		Plan:        phase.Plan,
 		Directory:   phase.Directory,

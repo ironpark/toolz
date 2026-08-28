@@ -11,6 +11,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -93,4 +94,82 @@ func newPlanCommand(cmd *ucli.Command) error {
 		return err
 	}
 	return nil
+}
+
+func newPhaseCommand(cmd *ucli.Command, selector string) error {
+	planArg, title, ok := strings.Cut(selector, "#")
+	if !ok || planArg == "" || title == "" || strings.Contains(title, "#") {
+		return fmt.Errorf("new phase requires <plan-name>#<phase-name>")
+	}
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("phase title must not be empty")
+	}
+	if strings.ContainsAny(title, "\r\n") {
+		return fmt.Errorf("phase title must be a single line")
+	}
+	if len(cmd.StringSlice("depends-on")) > 0 || strings.TrimSpace(cmd.String("description")) != "" {
+		return fmt.Errorf("phase draft fields belong in the draft; do not pass plan description or dependency flags")
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	settings, repoRoot, err := config.Load(cwd)
+	if err != nil {
+		return err
+	}
+	settings = settings.WithSkipHooks(cmd.Bool("no-hooks"))
+	planDirectories := settings.PlanDirs(repoRoot)
+	planRoot, planDirectory, err := plan.FindDirectory(planDirectories, planArg)
+	if err != nil {
+		return err
+	}
+	done, err := plan.AlreadyDone(planRoot)
+	if err != nil {
+		return err
+	}
+	if done {
+		return fmt.Errorf("plan %q is already done; new phase drafts are only allowed for open plans", planDirectory)
+	}
+
+	slug := slugifyPhaseTitle(strings.TrimSpace(title))
+	if slug == "" {
+		// The draft remains editable, and the author can replace this placeholder
+		// with a valid ASCII slug before applying a non-ASCII title.
+		slug = "phase"
+	}
+	output := cmd.String("output")
+	if output == "" {
+		output = draft.PlanName(planDirectory) + "-" + slug + ".md"
+	}
+	absOutput, err := filepath.Abs(output)
+	if err != nil {
+		return err
+	}
+	if !cmd.Bool("json") {
+		if _, err := os.Stat(absOutput); err == nil {
+			return fmt.Errorf("draft file already exists: %s", absOutput)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	rendered, err := doc.RenderNewPhaseDraft(settings.Language, draft.PlanName(planDirectory), strings.TrimSpace(title), slug)
+	if err != nil {
+		return err
+	}
+	if err := runDocumentHooks(repoRoot, settings, "before", hooks.EventNew, planDirectory, -1, "draft", cmd.Bool("json")); err != nil {
+		return err
+	}
+	if cmd.Bool("json") {
+		if err := writeJSON(makeTemplateJSON(applyKindPhase, draft.PlanName(planDirectory)+"#"+strings.TrimSpace(title), rendered)); err != nil {
+			return err
+		}
+	} else {
+		if err := os.WriteFile(absOutput, []byte(rendered), 0644); err != nil {
+			return err
+		}
+		fmt.Printf("Created %s\n", absOutput)
+	}
+	return runDocumentHooks(repoRoot, settings, "after", hooks.EventNew, planDirectory, -1, "draft", cmd.Bool("json"))
 }

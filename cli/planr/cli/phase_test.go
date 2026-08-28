@@ -35,12 +35,12 @@ func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
 		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 
-	if _, done, err := updatePhaseStatus([]string{plansRoot}, "checkout-v2", 0, "done"); err != nil {
+	if done, err := updatePhaseStatus([]string{plansRoot}, "checkout-v2", 0, "done"); err != nil {
 		t.Fatalf("update first phase: %v", err)
 	} else if done {
 		t.Fatal("plan completed after only one phase")
 	}
-	if _, done, err := updatePhaseStatus([]string{plansRoot}, "checkout-v2", 1, "done"); err != nil {
+	if done, err := updatePhaseStatus([]string{plansRoot}, "checkout-v2", 1, "done"); err != nil {
 		t.Fatalf("update second phase: %v", err)
 	} else if !done {
 		t.Fatal("plan did not complete after all phases were done")
@@ -51,7 +51,7 @@ func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
 	assertPlanChecklist(t, planPath, 0, true)
 	assertPlanChecklist(t, planPath, 1, true)
 
-	if _, done, err := updatePhaseStatus([]string{plansRoot}, "00-checkout-v2", 0, "planned"); err != nil {
+	if done, err := updatePhaseStatus([]string{plansRoot}, "00-checkout-v2", 0, "planned"); err != nil {
 		t.Fatalf("reopen first phase: %v", err)
 	} else if done {
 		t.Fatal("plan remained complete after reopening a phase")
@@ -88,7 +88,7 @@ func TestEnsureDependenciesMetBlocksOutOfOrderPhases(t *testing.T) {
 		t.Fatalf("plan.EnsureDependenciesMet() blocked an unblocked phase: %v", err)
 	}
 
-	if _, _, err := updatePhaseStatus(directories, "checkout-v2", 0, "done"); err != nil {
+	if _, err := updatePhaseStatus(directories, "checkout-v2", 0, "done"); err != nil {
 		t.Fatalf("complete first phase: %v", err)
 	}
 	if err := plan.EnsureDependenciesMet(directories, planRoot, "00-checkout-v2", 1, "done"); err != nil {
@@ -122,7 +122,7 @@ func TestEnsureDependenciesMetBlocksOnUnfinishedPlans(t *testing.T) {
 	}
 
 	for _, phase := range []int{0, 1} {
-		if _, _, err := updatePhaseStatus(directories, "00-api-foundation", phase, "done"); err != nil {
+		if _, err := updatePhaseStatus(directories, "00-api-foundation", phase, "done"); err != nil {
 			t.Fatalf("complete api-foundation phase %d: %v", phase, err)
 		}
 	}

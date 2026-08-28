@@ -66,7 +66,7 @@ func doctorCommand(_ context.Context, cmd *ucli.Command) error {
 		}
 	}
 
-	plans := []doctor.Plan{}
+	plans := []doctor.Inspection{}
 	for _, plansRoot := range validDirectories {
 		entries, readErr := os.ReadDir(plansRoot)
 		if readErr != nil {
@@ -78,39 +78,39 @@ func doctorCommand(_ context.Context, cmd *ucli.Command) error {
 				continue
 			}
 			planRoot := filepath.Join(plansRoot, entry.Name())
-			record, issues := doctor.InspectPlan(planRoot, entry.Name())
-			if cmd.Bool("fix") && len(record.ChecklistIssues) > 0 && record.PlanReadable && record.PlanFrontOK && record.PhaseDataOK && record.ChecklistStart >= 0 {
-				repaired, repairErr := doctor.RepairChecklist(record.Body, record.Phases)
+			inspection, issues := doctor.InspectPlan(planRoot, entry.Name())
+			if cmd.Bool("fix") && len(inspection.ChecklistIssues) > 0 && inspection.PlanReadable && inspection.PlanFrontOK && inspection.PhaseDataOK && inspection.ChecklistStart >= 0 {
+				repaired, repairErr := doctor.RepairChecklist(inspection.Body, inspection.Phases)
 				if repairErr != nil {
-					issues = append(issues, doctor.Issue{Location: record.Directory + "/PLAN.md", Message: fmt.Sprintf("cannot repair checklist: %v", repairErr)})
-					issues = append(issues, record.ChecklistIssues...)
-				} else if writeErr := doctor.WritePlanBody(record, repaired); writeErr != nil {
-					issues = append(issues, doctor.Issue{Location: record.Directory + "/PLAN.md", Message: fmt.Sprintf("cannot repair checklist: %v", writeErr)})
-					issues = append(issues, record.ChecklistIssues...)
+					issues = append(issues, doctor.Issue{Location: inspection.Directory + "/PLAN.md", Message: fmt.Sprintf("cannot repair checklist: %v", repairErr)})
+					issues = append(issues, inspection.ChecklistIssues...)
+				} else if writeErr := doctor.WritePlanBody(inspection, repaired); writeErr != nil {
+					issues = append(issues, doctor.Issue{Location: inspection.Directory + "/PLAN.md", Message: fmt.Sprintf("cannot repair checklist: %v", writeErr)})
+					issues = append(issues, inspection.ChecklistIssues...)
 				} else {
-					reporter.Printf("FIXED %s/PLAN.md: synchronized checklist with phases\n", record.Directory)
+					reporter.Printf("FIXED %s/PLAN.md: synchronized checklist with phases\n", inspection.Directory)
 				}
 			} else {
-				issues = append(issues, record.ChecklistIssues...)
+				issues = append(issues, inspection.ChecklistIssues...)
 			}
 			for _, issue := range issues {
 				reporter.Add(issue)
 			}
-			plans = append(plans, record)
+			plans = append(plans, inspection)
 		}
 	}
 
-	byName := map[string]doctor.Plan{}
-	for _, record := range plans {
-		name := draft.Name(record.Directory)
+	byName := map[string]doctor.Inspection{}
+	for _, inspection := range plans {
+		name := draft.PlanName(inspection.Directory)
 		if previous, found := byName[name]; found {
-			reporter.Add(doctor.Issue{Location: record.Directory, Message: fmt.Sprintf("duplicate plan name %q also exists at %s", name, previous.Directory)})
+			reporter.Add(doctor.Issue{Location: inspection.Directory, Message: fmt.Sprintf("duplicate plan name %q also exists at %s", name, previous.Directory)})
 			continue
 		}
-		byName[name] = record
+		byName[name] = inspection
 	}
-	for _, record := range plans {
-		doctor.CheckPlanDependencies(reporter, record, byName)
+	for _, inspection := range plans {
+		doctor.CheckPlanDependencies(reporter, inspection, byName)
 	}
 
 	if reporter.Issues == 0 {
