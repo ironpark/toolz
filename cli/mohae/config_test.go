@@ -12,8 +12,8 @@ agent:
   type: codex
 workspace:
   source: ./fixture
-prompt:
-  file: ./PROMPT.md
+prompts:
+  - file: ./PROMPT.md
 `
 
 func writeConfig(t *testing.T, contents string) string {
@@ -30,7 +30,7 @@ func TestLoadConfigAppliesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Limits.TimeoutSeconds != DefaultTimeoutSeconds || config.Limits.MaxTurns != DefaultMaxTurns {
+	if config.Limits.TimeoutSeconds != DefaultTimeoutSeconds {
 		t.Errorf("limits not defaulted: %+v", config.Limits)
 	}
 	if config.Report.Dir != DefaultReportDir {
@@ -63,8 +63,12 @@ func TestValidateRejectsIncompleteConfigurations(t *testing.T) {
 		"missing agent type":  strings.Replace(minimalConfig, "  type: codex\n", "", 1),
 		"unknown agent type":  strings.Replace(minimalConfig, "codex", "not-an-agent", 1),
 		"missing workspace":   strings.Replace(minimalConfig, "  source: ./fixture\n", "", 1),
-		"missing prompt":      strings.Replace(minimalConfig, "  file: ./PROMPT.md\n", "", 1),
-		"two prompts":         minimalConfig + "    text: inline\n",
+		"missing prompt":      strings.Replace(minimalConfig, "  - file: ./PROMPT.md\n", "", 1),
+		"two prompt sources":  minimalConfig + "    text: inline\n",
+		"unknown prompt key":  minimalConfig + "    unles: turn > 1\n",
+		"broken condition":    minimalConfig + "    when: turn >\n",
+		"unknown condition":   minimalConfig + "    when: nonexistent_variable\n",
+		"non-boolean when":    minimalConfig + "    when: turn\n",
 		"unknown format":      minimalConfig + "report:\n  formats: [smoke-signal]\n",
 		"custom without argv": strings.Replace(minimalConfig, "codex", "custom-cli", 1),
 	}
@@ -106,10 +110,54 @@ func TestReferencedPathsSkipUnsetFieldsAndAreAbsolute(t *testing.T) {
 		}
 		fields[referenced.Field] = true
 	}
-	if !fields["workspace.source"] || !fields["prompt.file"] {
+	if !fields["workspace.source"] || !fields["prompts[0].file"] {
 		t.Errorf("missing referenced paths: %v", fields)
 	}
 	if fields["verify.script"] {
 		t.Error("an unset field was reported as a referenced path")
+	}
+}
+
+func TestSkillsAndMCPAreScopedPerAgent(t *testing.T) {
+	config, err := LoadConfig(writeConfig(t, minimalConfig+`skills:
+  - path: ./skills/commit
+    agents: [claude-code]
+mcp:
+  - name: context7
+    config: ./mcp.json
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill := config.Skills[0]
+	if !skill.EnabledFor("claude-code") || skill.EnabledFor("codex") {
+		t.Errorf("skill scoping = %+v", skill)
+	}
+	// An empty agents list means the item applies to every driver, so the
+	// common single-agent config never repeats the agent's name.
+	server := config.MCP[0]
+	if !server.EnabledFor("claude-code") || !server.EnabledFor("codex") {
+		t.Errorf("server scoping = %+v", server)
+	}
+
+	fields := map[string]bool{}
+	for _, referenced := range config.ReferencedPaths() {
+		fields[referenced.Field] = true
+	}
+	if !fields["skills[0].path"] || !fields["mcp[0].config"] {
+		t.Errorf("missing referenced paths: %v", fields)
+	}
+}
+
+func TestSkillsAndMCPRejectUnknownAgentsAndMissingPaths(t *testing.T) {
+	for name, section := range map[string]string{
+		"unknown skill agent": "skills:\n  - path: ./s\n    agents: [gemini]\n",
+		"missing skill path":  "skills:\n  - agents: [codex]\n",
+		"unknown mcp agent":   "mcp:\n  - config: ./m.json\n    agents: [gemini]\n",
+		"missing mcp config":  "mcp:\n  - name: unnamed\n",
+	} {
+		if _, err := LoadConfig(writeConfig(t, minimalConfig+section)); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
 	}
 }

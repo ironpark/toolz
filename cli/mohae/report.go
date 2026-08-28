@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/urfave/cli/v3"
 )
@@ -23,7 +24,7 @@ func newReportCommand() *cli.Command {
 }
 
 func reportAction(_ context.Context, cmd *cli.Command) error {
-	if !contains(KnownFormats, cmd.String("output")) {
+	if !slices.Contains(KnownFormats, cmd.String("output")) {
 		return fmt.Errorf("unknown output format %q", cmd.String("output"))
 	}
 	if cmd.NArg() > 1 {

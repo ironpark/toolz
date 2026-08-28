@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -23,6 +25,13 @@ func newInitCommand() *cli.Command {
 			&cli.StringFlag{Name: "template", Aliases: []string{"t"}, Value: "basic", Usage: "preset: basic, mcp-server, cli-skill, multi-agent"},
 			&cli.BoolFlag{Name: "with-scripts", Usage: "also write init.sh and verify.sh"},
 			&cli.BoolFlag{Name: "with-agent-md", Usage: "also write an AGENTS.md template"},
+			&cli.BoolFlag{Name: "with-prompt", Usage: "also write the PROMPT.md the config sends as its first turn"},
+			&cli.BoolFlag{Name: "with-fixture", Usage: "also write the fixture workspace the trial is run against"},
+			&cli.BoolFlag{Name: "with-mcp", Usage: "also write the MCP server configuration (mcp-server template)"},
+			// The config a template writes references files init can also write.
+			// Without --all, `mohae init && mohae verify` fails on paths mohae
+			// itself named, so one flag asks for a project that verifies clean.
+			&cli.BoolFlag{Name: "all", Usage: "write every file the chosen template's configuration references"},
 			&cli.BoolFlag{Name: "force", Aliases: []string{"f"}, Usage: "overwrite existing files"},
 		},
 		Action: initAction,
@@ -31,7 +40,7 @@ func newInitCommand() *cli.Command {
 
 func initAction(_ context.Context, cmd *cli.Command) error {
 	template := cmd.String("template")
-	if !contains(Templates, template) {
+	if !slices.Contains(Templates, template) {
 		return fmt.Errorf("unknown --template %q (one of: %s)", template, strings.Join(Templates, ", "))
 	}
 	target := cmd.Args().First()
@@ -52,13 +61,28 @@ func initAction(_ context.Context, cmd *cli.Command) error {
 		directory = filepath.Dir(target)
 	}
 
+	all := cmd.Bool("all")
 	files := map[string]string{target: configTemplate(template)}
-	if cmd.Bool("with-scripts") {
+	if all || cmd.Bool("with-scripts") {
 		files[filepath.Join(directory, "init.sh")] = initScriptTemplate
 		files[filepath.Join(directory, "verify.sh")] = verifyScriptTemplate
 	}
-	if cmd.Bool("with-agent-md") {
+	if all || cmd.Bool("with-agent-md") {
 		files[filepath.Join(directory, "AGENTS.md")] = agentMarkdownTemplate
+	}
+	if all || cmd.Bool("with-prompt") {
+		files[filepath.Join(directory, "PROMPT.md")] = promptTemplate
+	}
+	if all || cmd.Bool("with-fixture") {
+		// A directory alone would not survive a copy into a trial workspace,
+		// and the template's own verify command looks for this README, so the
+		// fixture is written with the file that makes it a working example.
+		files[filepath.Join(directory, "fixture", "README.md")] = fixtureReadmeTemplate
+	}
+	// mcp.json is only referenced by the mcp-server template, so --all asks for
+	// it there and nowhere else; --with-mcp writes it on request regardless.
+	if cmd.Bool("with-mcp") || (all && template == "mcp-server") {
+		files[filepath.Join(directory, "mcp.json")] = mcpConfigTemplate
 	}
 
 	force := cmd.Bool("force")
@@ -76,7 +100,15 @@ func initAction(_ context.Context, cmd *cli.Command) error {
 			return err
 		}
 	}
-	for _, path := range sortedKeys(files) {
+	// Deterministic order so the created list reads the same on every run.
+	for _, path := range slices.Sorted(maps.Keys(files)) {
+		// Some templates write into subdirectories (the fixture workspace), so
+		// each file's own parent is created rather than only the project root.
+		if parent := filepath.Dir(path); parent != "" && parent != "." {
+			if err := os.MkdirAll(parent, 0o755); err != nil {
+				return err
+			}
+		}
 		mode := os.FileMode(0o644)
 		if strings.HasSuffix(path, ".sh") {
 			// A verification script mohae cannot execute would only be
@@ -91,20 +123,6 @@ func initAction(_ context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-func sortedKeys(files map[string]string) []string {
-	keys := make([]string, 0, len(files))
-	for key := range files {
-		keys = append(keys, key)
-	}
-	// Deterministic order so the created list reads the same on every run.
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
-			keys[j], keys[j-1] = keys[j-1], keys[j]
-		}
-	}
-	return keys
-}
-
 func configTemplate(template string) string {
 	header := `# mohae trial configuration.
 # Paths are resolved relative to this file. See ` + "`mohae verify`" + ` to check
@@ -115,7 +133,7 @@ description: what this trial is meant to measure
 agent:
   type: codex
   model: gpt-5.6-luna
-  reasoning: medium
+  effort: medium
 
 workspace:
   # Copied into an isolated directory before every trial, so a run never
@@ -127,19 +145,37 @@ workspace:
   agent_md: ./AGENTS.md
   git: true
 
-prompt:
-  # Deliberately not placed in the workspace: the agent works from the
-  # conversation, not from a task file it can re-read on disk.
-  file: ./PROMPT.md
+prompts:
+  # The conversation, in order. Deliberately not placed in the workspace: the
+  # agent works from what it was told, not from a task file it can re-read on
+  # disk. More than one entry makes the trial multi-turn.
+  # timeout_seconds bounds one turn alone: the clock starts when the prompt is
+  # sent and the turn is cancelled once it runs out. Without it, only the
+  # trial-wide limits.timeout_seconds applies.
+  - file: ./PROMPT.md
+    timeout_seconds: 120
+  # A follow-up sent only when its condition holds. Conditions are expr
+  # expressions over the conversation so far (turn, previous, responses,
+  # elapsed_seconds, timed_out) and the workspace the agent
+  # worked in (exists, read, sh).
+  # name labels a prompt so a later one can come after it; a dependent prompt
+  # is skipped when the prompt it comes after was never sent.
+  - name: fix-build
+    text: The build is broken. Fix it before you stop.
+    when: sh("go build ./...") != 0
+  - text: Add a regression test for the build fix.
+    after: [fix-build]
 
 verify:
-  # Runs outside the workspace once the agent stops, and is never copied in, so
-  # the agent cannot tailor its output to the checks.
-  script: ./verify.sh
+  # Shell commands run in order outside the workspace once the agent stops,
+  # with $MOHAE_WORKSPACE pointing at it. Each exits zero to pass; what it
+  # prints is up to it.
+  commands:
+    - ./verify.sh
+    - test -f "$MOHAE_WORKSPACE/README.md"
 
 limits:
   timeout_seconds: 300
-  max_turns: 30
 
 report:
   dir: .mohae/reports
@@ -149,23 +185,32 @@ report:
 	case "mcp-server":
 		return header + `
 mcp:
-  config: ./mcp.json
+  # Each server may limit which agent types it is offered to; omitting
+  # agents offers it to all of them.
+  - name: server-under-test
+    config: ./mcp.json
+    agents: [claude-code, codex]
 `
 	case "cli-skill":
 		return header + `
-target_cli:
-  # Built before the trial so the agent gets the current source rather than
-  # whatever happens to be installed on the machine.
-  command: mytool
-  build: go build -o bin/mytool ./cmd/mytool
-  bin_dir: bin
+# Build and install the CLI under test from init.sh, which runs inside the
+# isolated workspace before the agent starts. Building there rather than
+# relying on the machine means the agent gets the current source:
+#
+#   go build -o "$PWD/bin/mytool" ./cmd/mytool
+#   export PATH="$PWD/bin:$PATH"
 `
 	case "multi-agent":
 		return header + `
-# Write one file per agent and run them together:
-#   mohae run 'trials/*.config.yaml'
-# Keeping every other field identical is what makes the comparison mean
-# something.
+# One profile per agent: a section a profile declares replaces the base
+# section wholesale, everything else stays shared, and that sameness is what
+# makes the comparison mean something. Run each variant with
+#   mohae run --profile claude
+profiles:
+  claude:
+    agent:
+      type: claude-code
+      model: claude-opus-5
 `
 	default:
 		return header
@@ -183,28 +228,50 @@ const verifyScriptTemplate = `#!/usr/bin/env bash
 # Runs after the agent stops, from a scratch directory outside the workspace.
 # $MOHAE_WORKSPACE points at the finished workspace.
 #
-# Print one line per check so mohae can tabulate them:
-#   CHECK<TAB>name<TAB>PASS|FAIL<TAB>detail
-# Exit non-zero if any check failed.
+# The exit status is the verdict: zero passes, anything else fails. Print
+# whatever helps a human read the result — mohae records the output verbatim
+# and imposes no format on it.
 
 set -uo pipefail
 
 workspace="${MOHAE_WORKSPACE:?MOHAE_WORKSPACE is not set}"
-failures=0
 
-check() {
-  local name="$1" status="$2" detail="${3:-}"
-  printf 'CHECK\t%s\t%s\t%s\n' "$name" "$status" "$detail"
-  [ "$status" = PASS ] || failures=$((failures + 1))
-}
-
-if [ -f "$workspace/README.md" ]; then
-  check readme PASS
-else
-  check readme FAIL "README.md is missing"
+if [ ! -f "$workspace/README.md" ]; then
+  echo "README.md is missing" >&2
+  exit 1
 fi
+`
 
-exit $((failures > 0))
+// The first turn of the conversation. It lives outside the fixture on purpose:
+// a prompt copied into the workspace would be a task file the agent can re-read
+// on disk, and the trial is meant to measure what it does with what it was told.
+const promptTemplate = `Describe the task the agent is being measured on.
+
+State the goal and the constraints, and leave the approach to the agent: a
+prompt that spells out the steps measures whether the agent can follow a
+recipe, not whether it can solve the problem.
+`
+
+// The workspace the trial is run against. It is copied into an isolated
+// directory before every trial, so what is written here is the state every run
+// starts from.
+const fixtureReadmeTemplate = `# Fixture workspace
+
+Replace this with the repository the agent is measured on. It is copied to an
+isolated directory before every trial, so a run never modifies what is here and
+two runs of the same configuration start from identical state.
+`
+
+// The MCP servers offered to the agent, in the format the agent CLIs already
+// read, so a server configuration can be shared with them unchanged.
+const mcpConfigTemplate = `{
+  "mcpServers": {
+    "server-under-test": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-everything"]
+    }
+  }
+}
 `
 
 const agentMarkdownTemplate = `# Working instructions

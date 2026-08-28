@@ -3,16 +3,18 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"sync"
+	"sync/atomic"
 
 	"github.com/urfave/cli/v3"
 )
 
-const (
-	DefaultTimeoutSeconds = 300
-	DefaultMaxTurns       = 30
-)
+const DefaultTimeoutSeconds = 300
 
 func newRunCommand() *cli.Command {
 	return &cli.Command{
@@ -23,14 +25,21 @@ func newRunCommand() *cli.Command {
 			// Overrides. Each one shadows a configuration field for this
 			// invocation only, which is what makes a config reusable across
 			// variants instead of edited between runs.
+			// Profiles apply first, then the field flags below, so a flag can
+			// still fine-tune whatever a profile selected.
+			&cli.StringSliceFlag{Name: "profile", Usage: "apply a named profile from the config; repeatable, later ones win"},
 			&cli.StringFlag{Name: "agent", Aliases: []string{"a"}, Usage: "override the agent type (claude-code, codex, custom-cli)"},
-			&cli.StringFlag{Name: "prompt", Aliases: []string{"p"}, Usage: "override the opening prompt inline"},
-			&cli.StringFlag{Name: "prompt-file", Aliases: []string{"P"}, Usage: "override the opening prompt with a file"},
+			// Repeatable: the configured conversation is replaced wholesale,
+			// in the order the flags were given. Replacing rather than
+			// appending keeps `--prompt` meaning the same thing whatever the
+			// config happened to contain.
+			&cli.StringSliceFlag{Name: "prompt", Aliases: []string{"p"}, Usage: "replace the conversation with these inline prompts, one turn each (repeatable)"},
+			&cli.StringSliceFlag{Name: "prompt-file", Aliases: []string{"P"}, Usage: "replace the conversation with these prompt files, one turn each (repeatable)"},
+			&cli.StringSliceFlag{Name: "prompt-when", Usage: "expr condition gating the prompt at the same position; use '' to leave one unconditional (repeatable)"},
 			&cli.StringFlag{Name: "agent-md", Usage: "override the AGENTS.md installed in the workspace"},
 			&cli.StringFlag{Name: "init-script", Usage: "override the workspace setup script"},
-			&cli.StringFlag{Name: "verify-script", Usage: "override the script that grades the finished workspace"},
+			&cli.StringSliceFlag{Name: "verify-command", Usage: "replace the commands that grade the finished workspace (repeatable)"},
 			&cli.StringFlag{Name: "mcp-config", Aliases: []string{"m"}, Usage: "override the MCP server configuration"},
-			&cli.StringFlag{Name: "target-cli", Usage: "override the CLI under test"},
 
 			&cli.StringFlag{Name: "output", Aliases: []string{"o"}, Value: "terminal", Usage: "report format: terminal, json, markdown, html"},
 			&cli.StringFlag{Name: "report-dir", Value: DefaultReportDir, Usage: "directory to write reports into"},
@@ -39,7 +48,6 @@ func newRunCommand() *cli.Command {
 			&cli.BoolFlag{Name: "web", Usage: "serve the dashboard alongside the run"},
 
 			&cli.IntFlag{Name: "timeout", Aliases: []string{"t"}, Value: DefaultTimeoutSeconds, Usage: "seconds allowed for one trial"},
-			&cli.IntFlag{Name: "max-turns", Value: DefaultMaxTurns, Usage: "maximum conversation turns"},
 			&cli.BoolFlag{Name: "fail-fast", Usage: "stop at the first failed verification or command error"},
 			&cli.IntFlag{Name: "concurrency", Aliases: []string{"c"}, Value: 1, Usage: "trials to run at the same time"},
 		},
@@ -47,7 +55,7 @@ func newRunCommand() *cli.Command {
 	}
 }
 
-func runAction(_ context.Context, cmd *cli.Command) error {
+func runAction(ctx context.Context, cmd *cli.Command) error {
 	configs, err := loadConfigs(cmd.Args().Slice())
 	if err != nil {
 		return err
@@ -55,33 +63,185 @@ func runAction(_ context.Context, cmd *cli.Command) error {
 	if err := applyRunOverrides(cmd, configs); err != nil {
 		return err
 	}
-	if !contains(KnownFormats, cmd.String("output")) {
-		return fmt.Errorf("unknown output format %q", cmd.String("output"))
+	output := cmd.String("output")
+	if !slices.Contains(KnownFormats, output) {
+		return fmt.Errorf("unknown output format %q", output)
 	}
-	if cmd.Int("concurrency") < 1 {
+	concurrency := cmd.Int("concurrency")
+	if concurrency < 1 {
 		return fmt.Errorf("concurrency must be at least 1")
 	}
-	for _, config := range configs {
-		fmt.Printf("%s  agent=%s workspace=%s\n", config.Name, config.Agent.Type, config.Workspace.Source)
+	if cmd.Bool("web") {
+		// Failing here beats running the whole benchmark and only then
+		// admitting the dashboard the caller asked for does not exist.
+		return notImplemented("run --web")
 	}
-	return notImplemented("run")
+
+	reportOptions := ReportOptions{
+		DetailedTokens: cmd.Bool("detailed-tokens"),
+		ShowDialogue:   cmd.Bool("show-dialogue"),
+	}
+	trialOptions := TrialOptions{
+		ShowDialogue: cmd.Bool("show-dialogue"),
+		// Serialized: with --concurrency the trials write at the same time, and
+		// unsynchronised writes would tear each other's lines apart.
+		Out: newLockedWriter(cmd.Writer),
+	}
+
+	results := runTrials(ctx, configs, concurrency, cmd.Bool("fail-fast"), trialOptions)
+
+	rendered, err := RenderReport(output, results, reportOptions)
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(cmd.Writer, rendered)
+	if err := writeRunReports(configs, results, output, reportOptions, cmd.Writer); err != nil {
+		return err
+	}
+
+	failed := 0
+	for _, result := range results {
+		if !result.Passed {
+			failed++
+		}
+	}
+	if failed > 0 {
+		// The exit status is what a CI job reads; a benchmark that exited 0 on
+		// a failed trial would be a green build for work that did not happen.
+		return fmt.Errorf("%d of %d trial(s) failed", failed, len(results))
+	}
+	return nil
+}
+
+// runTrials runs every configuration, up to concurrency of them at a time, and
+// returns the results in the order the configurations were given — a report
+// whose order depended on which trial happened to finish first would be a
+// different document on every run.
+//
+// With --fail-fast the first failure cancels the trials still running and stops
+// the ones not yet started: the point of the flag is not to spend tokens on a
+// run whose verdict is already known.
+func runTrials(ctx context.Context, configs []*Config, concurrency int, failFast bool, options TrialOptions) []TrialResult {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	results := make([]TrialResult, len(configs))
+	ran := make([]bool, len(configs))
+	slots := make(chan struct{}, concurrency)
+	var wait sync.WaitGroup
+	var mutex sync.Mutex
+	// Its own flag rather than a field under mutex: the mutex guards the result
+	// slices, and the two are read at different times by different goroutines.
+	var stopped atomic.Bool
+
+	for index, config := range configs {
+		if stopped.Load() {
+			break
+		}
+		slots <- struct{}{}
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			defer func() { <-slots }()
+			// Checked again here, not only before the slot was taken: waiting
+			// for a slot is exactly when an earlier trial fails, and a
+			// fail-fast run that started the next trial anyway would spend
+			// tokens on a verdict already decided.
+			if stopped.Load() {
+				return
+			}
+			result := RunTrial(ctx, config, options)
+			mutex.Lock()
+			defer mutex.Unlock()
+			results[index] = result
+			ran[index] = true
+			if failFast && !result.Passed {
+				stopped.Store(true)
+				cancel()
+			}
+		}()
+	}
+	wait.Wait()
+
+	// Only the trials that ran are reported. A configuration fail-fast never
+	// reached did not pass and did not fail; recording it either way would be
+	// a verdict nobody measured.
+	reported := make([]TrialResult, 0, len(results))
+	for index, result := range results {
+		if ran[index] {
+			reported = append(reported, result)
+		}
+	}
+	return reported
+}
+
+// writeRunReports writes each trial's report into the directory its own
+// configuration named, in the formats that configuration asked for. Reports
+// live beside the configuration that produced them, so a trial's history stays
+// with the trial rather than in one directory shared by everything.
+func writeRunReports(configs []*Config, results []TrialResult, output string, options ReportOptions, out io.Writer) error {
+	byPath := map[string]*Config{}
+	for _, config := range configs {
+		byPath[config.Path] = config
+	}
+	for _, result := range results {
+		config, ok := byPath[result.ConfigPath]
+		if !ok {
+			continue
+		}
+		// --output is written too, so `-o markdown` leaves the document it
+		// printed on disk rather than only on the terminal.
+		formats := append(append([]string{}, config.Report.Formats...), output)
+		written, err := WriteReports(config.Report.Dir, result.Name, formats, []TrialResult{result}, options)
+		if err != nil {
+			return err
+		}
+		for _, path := range written {
+			fmt.Fprintf(out, "report %s\n", path)
+		}
+	}
+	return nil
+}
+
+// lockedWriter serializes the writes of trials running at the same time. The
+// dialogue of a parallel run is still interleaved trial by trial — nothing can
+// unpick that — but no single line is torn in half by another trial's.
+type lockedWriter struct {
+	mutex  sync.Mutex
+	writer io.Writer
+}
+
+func newLockedWriter(writer io.Writer) io.Writer {
+	if writer == nil {
+		writer = os.Stdout
+	}
+	return &lockedWriter{writer: writer}
+}
+
+func (w *lockedWriter) Write(data []byte) (int, error) {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+	return w.writer.Write(data)
 }
 
 // applyRunOverrides folds the command line into every selected configuration,
 // so `--prompt` means the same thing whether one config was named or twenty.
 func applyRunOverrides(cmd *cli.Command, configs []*Config) error {
-	if cmd.IsSet("prompt") && cmd.IsSet("prompt-file") {
-		return fmt.Errorf("--prompt and --prompt-file are mutually exclusive")
+	prompts, err := overridePrompts(cmd)
+	if err != nil {
+		return err
 	}
 	for _, config := range configs {
+		for _, name := range cmd.StringSlice("profile") {
+			if err := config.ApplyProfile(name); err != nil {
+				return err
+			}
+		}
 		if value := cmd.String("agent"); value != "" {
 			config.Agent.Type = value
 		}
-		if cmd.IsSet("prompt") {
-			config.Prompt = PromptConfig{Text: cmd.String("prompt")}
-		}
-		if cmd.IsSet("prompt-file") {
-			config.Prompt = PromptConfig{File: absoluteOverride(cmd.String("prompt-file"))}
+		if prompts != nil {
+			config.Prompts = prompts
 		}
 		if value := cmd.String("agent-md"); value != "" {
 			config.Workspace.AgentMD = absoluteOverride(value)
@@ -89,20 +249,18 @@ func applyRunOverrides(cmd *cli.Command, configs []*Config) error {
 		if value := cmd.String("init-script"); value != "" {
 			config.Workspace.InitScript = absoluteOverride(value)
 		}
-		if value := cmd.String("verify-script"); value != "" {
-			config.Verify.Script = absoluteOverride(value)
+		if values := cmd.StringSlice("verify-command"); len(values) > 0 {
+			// Commands are shell text, not paths, so they pass through as
+			// typed; anything path-like inside them is the caller's business.
+			config.Verify.Commands = values
 		}
 		if value := cmd.String("mcp-config"); value != "" {
-			config.MCP.Config = absoluteOverride(value)
-		}
-		if value := cmd.String("target-cli"); value != "" {
-			config.TargetCLI.Command = value
+			// The override replaces the configured servers wholesale, and with
+			// no agents filter, so what the flag names is what every agent gets.
+			config.MCP = []MCPServerConfig{{Config: absoluteOverride(value)}}
 		}
 		if cmd.IsSet("timeout") {
 			config.Limits.TimeoutSeconds = cmd.Int("timeout")
-		}
-		if cmd.IsSet("max-turns") {
-			config.Limits.MaxTurns = cmd.Int("max-turns")
 		}
 		if cmd.IsSet("report-dir") {
 			config.Report.Dir = cmd.String("report-dir")
@@ -112,6 +270,38 @@ func applyRunOverrides(cmd *cli.Command, configs []*Config) error {
 		}
 	}
 	return nil
+}
+
+// overridePrompts builds the conversation named on the command line, or nil if
+// none was. --prompt and --prompt-file stay mutually exclusive because a
+// conversation drawn from both would have no defined turn order.
+func overridePrompts(cmd *cli.Command) ([]Prompt, error) {
+	texts, files := cmd.StringSlice("prompt"), cmd.StringSlice("prompt-file")
+	if len(texts) > 0 && len(files) > 0 {
+		return nil, fmt.Errorf("--prompt and --prompt-file are mutually exclusive")
+	}
+	conditions := cmd.StringSlice("prompt-when")
+	count := len(texts) + len(files)
+	if count == 0 {
+		if len(conditions) > 0 {
+			return nil, fmt.Errorf("--prompt-when needs --prompt or --prompt-file to attach to")
+		}
+		return nil, nil
+	}
+	if len(conditions) > count {
+		return nil, fmt.Errorf("%d --prompt-when values for %d prompt(s)", len(conditions), count)
+	}
+	prompts := make([]Prompt, 0, count)
+	for _, text := range texts {
+		prompts = append(prompts, Prompt{Text: text})
+	}
+	for _, file := range files {
+		prompts = append(prompts, Prompt{File: absoluteOverride(file)})
+	}
+	for index, condition := range conditions {
+		prompts[index].When = condition
+	}
+	return prompts, nil
 }
 
 // absoluteOverride pins a command-line path to the working directory before it

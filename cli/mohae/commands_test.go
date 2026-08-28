@@ -93,6 +93,27 @@ func TestInitTemplateIsAValidConfiguration(t *testing.T) {
 	}
 }
 
+func TestInitAllWritesAProjectThatVerifies(t *testing.T) {
+	// The template's configuration names files init can write. If --all leaves
+	// any of them out, `mohae init && mohae verify` fails on mohae's own output.
+	for _, template := range Templates {
+		t.Run(template, func(t *testing.T) {
+			directory := chdir(t)
+			if err := run(t, "init", "--all", "--template", template); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{DefaultConfigName, "init.sh", "verify.sh", "AGENTS.md", "PROMPT.md", filepath.Join("fixture", "README.md")} {
+				if _, err := os.Stat(filepath.Join(directory, name)); err != nil {
+					t.Errorf("%s was not created: %v", name, err)
+				}
+			}
+			if err := run(t, "verify", "--check-scripts", "--check-agent-md"); err != nil {
+				t.Fatalf("verify = %v, want success", err)
+			}
+		})
+	}
+}
+
 func TestInitRejectsAnUnknownTemplate(t *testing.T) {
 	chdir(t)
 	if err := run(t, "init", "--template", "nonesuch"); err == nil {
@@ -142,7 +163,9 @@ func TestVerifyStrictFailsOnWarnings(t *testing.T) {
 	trimmed := strings.NewReplacer(
 		"  init_script: ./init.sh\n", "",
 		"  agent_md: ./AGENTS.md\n", "",
-		"  script: ./verify.sh\n", "",
+		"  commands:\n", "",
+		"    - ./verify.sh\n", "",
+		"    - test -f \"$MOHAE_WORKSPACE/README.md\"\n", "",
 	).Replace(string(config))
 	trimmed = strings.Replace(trimmed, "verify:\n", "", 1)
 	if err := os.WriteFile(filepath.Join(directory, DefaultConfigName), []byte(trimmed), 0o644); err != nil {
@@ -173,9 +196,11 @@ func TestRunOverridesReachEveryConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	configs := []*Config{config}
-	command := newRunCommand()
-	if err := command.Run(context.Background(), []string{"run", "--agent", "claude-code", "--prompt", "inline", "--timeout", "42"}); !errors.Is(err, errNotImplemented) {
-		t.Fatalf("run = %v, want a not-implemented error", err)
+	// The action is replaced so the flags are parsed without a trial actually
+	// running: what is under test here is that an override reaches every config.
+	command := flagsOnly(newRunCommand())
+	if err := command.Run(context.Background(), []string{"run", "--agent", "claude-code", "--prompt", "inline", "--timeout", "42"}); err != nil {
+		t.Fatal(err)
 	}
 	if err := applyRunOverrides(command, configs); err != nil {
 		t.Fatal(err)
@@ -183,10 +208,10 @@ func TestRunOverridesReachEveryConfig(t *testing.T) {
 	if config.Agent.Type != "claude-code" {
 		t.Errorf("agent = %q", config.Agent.Type)
 	}
-	if config.Prompt.Text != "inline" || config.Prompt.File != "" {
-		// An override that only added a prompt would leave two of them set and
-		// fail validation for a reason nobody typed.
-		t.Errorf("prompt = %+v", config.Prompt)
+	if len(config.Prompts) != 1 || config.Prompts[0].Text != "inline" || config.Prompts[0].File != "" {
+		// An override that appended instead of replacing would send the
+		// configured prompt too, and measure a conversation nobody typed.
+		t.Errorf("prompts = %+v", config.Prompts)
 	}
 	if config.Limits.TimeoutSeconds != 42 {
 		t.Errorf("timeout = %d", config.Limits.TimeoutSeconds)
@@ -252,7 +277,6 @@ func TestUnimplementedCommandsFailLoudly(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, arguments := range [][]string{
-		{"run"},
 		{"compare", "--a", "a.yaml", "--b", "b.yaml"},
 		{"report"},
 	} {

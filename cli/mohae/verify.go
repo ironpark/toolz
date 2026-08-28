@@ -102,10 +102,10 @@ func verifyConfig(cmd *cli.Command, config *Config) []checkResult {
 			results = append(results, checkResult{statusPass, referenced.Field, ""})
 		}
 	}
-	if config.Verify.Script == "" {
+	if len(config.Verify.Commands) == 0 {
 		// A trial with nothing to grade it still produces a transcript, but no
 		// verdict; that is a choice, not necessarily a mistake.
-		results = append(results, checkResult{statusWarn, "verify.script", "not set: the trial will have no pass/fail verdict"})
+		results = append(results, checkResult{statusWarn, "verify.commands", "not set: the trial will have no pass/fail verdict"})
 	}
 	if config.Workspace.AgentMD == "" {
 		results = append(results, checkResult{statusWarn, "workspace.agent_md", "not set: the agent gets no instructions"})
@@ -119,22 +119,14 @@ func verifyConfig(cmd *cli.Command, config *Config) []checkResult {
 	if cmd.Bool("check-mcp") {
 		results = append(results, checkResult{statusWarn, "mcp", "--check-mcp is not implemented yet"})
 	}
-	if command := config.TargetCLI.Command; command != "" && config.TargetCLI.Build == "" {
-		if _, err := exec.LookPath(strings.Fields(command)[0]); err != nil {
-			results = append(results, checkResult{statusWarn, "target_cli.command", command + " is not on PATH and no build is configured"})
-		} else {
-			results = append(results, checkResult{statusPass, "target_cli.command", ""})
-		}
-	}
 	return results
 }
 
 func checkScripts(config *Config) []checkResult {
 	results := []checkResult{}
-	for _, script := range []LabeledPath{
-		{"workspace.init_script", config.Workspace.InitScript},
-		{"verify.script", config.Verify.Script},
-	} {
+	// Verify commands are shell text rather than files, so only the init
+	// script has an executable bit to check.
+	for _, script := range []LabeledPath{{"workspace.init_script", config.Workspace.InitScript}} {
 		if script.Path == "" {
 			continue
 		}

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-yaml"
 )
@@ -32,23 +35,30 @@ type Config struct {
 
 	Agent     AgentConfig     `yaml:"agent"`
 	Workspace WorkspaceConfig `yaml:"workspace"`
-	Prompt    PromptConfig    `yaml:"prompt"`
-	MCP       MCPConfig       `yaml:"mcp,omitempty"`
-	TargetCLI TargetCLIConfig `yaml:"target_cli,omitempty"`
-	Verify    VerifyConfig    `yaml:"verify,omitempty"`
-	Limits    LimitsConfig    `yaml:"limits,omitempty"`
-	Report    ReportConfig    `yaml:"report,omitempty"`
+	// Prompts is the conversation, in order. More than one makes the trial
+	// multi-turn; each entry may carry a `when` condition, so the same
+	// configuration can describe follow-ups that only some runs need.
+	Prompts []Prompt          `yaml:"prompts"`
+	Skills  []SkillConfig     `yaml:"skills,omitempty"`
+	MCP     []MCPServerConfig `yaml:"mcp,omitempty"`
+	Verify  VerifyConfig      `yaml:"verify,omitempty"`
+	Limits  LimitsConfig      `yaml:"limits,omitempty"`
+	Report  ReportConfig      `yaml:"report,omitempty"`
+
+	// Profiles are named subsets of this configuration; `--profile` overwrites
+	// the base with one or more of them before the trial runs.
+	Profiles map[string]Profile `yaml:"profiles,omitempty"`
 }
 
 // AgentConfig selects the agent under test. `type` names a built-in driver;
 // `command` is only read by the custom-cli driver, which is what lets a tool
 // mohae has never heard of be evaluated on the same terms as a built-in one.
 type AgentConfig struct {
-	Type      string            `yaml:"type"`
-	Model     string            `yaml:"model,omitempty"`
-	Reasoning string            `yaml:"reasoning,omitempty"`
-	Command   []string          `yaml:"command,omitempty"`
-	Env       map[string]string `yaml:"env,omitempty"`
+	Type    string            `yaml:"type"`
+	Model   string            `yaml:"model,omitempty"`
+	Effort  string            `yaml:"effort,omitempty"`
+	Command []string          `yaml:"command,omitempty"`
+	Env     map[string]string `yaml:"env,omitempty"`
 }
 
 // WorkspaceConfig describes the repository the agent works in. It is copied to
@@ -64,51 +74,60 @@ type WorkspaceConfig struct {
 	Git     bool   `yaml:"git,omitempty"`
 }
 
-// PromptConfig is the first and only user message. It is deliberately not
-// placed in the workspace: the agent has to work from the conversation, not
-// from a task file it can re-read on disk.
-type PromptConfig struct {
-	Text string `yaml:"text,omitempty"`
-	File string `yaml:"file,omitempty"`
+// SkillConfig installs one skill into the workspace before the trial starts.
+// Agents limits which agent types see it; an empty list enables it for all,
+// so the common single-agent config never has to repeat the agent's name.
+type SkillConfig struct {
+	Path   string   `yaml:"path"`
+	Agents []string `yaml:"agents,omitempty"`
 }
 
-type MCPConfig struct {
-	Config string `yaml:"config,omitempty"`
+// EnabledFor reports whether this skill applies to the given agent type.
+func (s SkillConfig) EnabledFor(agentType string) bool {
+	return len(s.Agents) == 0 || slices.Contains(s.Agents, agentType)
 }
 
-// TargetCLIConfig is the tool the agent is expected to reach for. Build runs
-// before the trial so the agent gets the current source, not whatever happens
-// to be installed on the machine.
-type TargetCLIConfig struct {
-	Command string `yaml:"command,omitempty"`
-	Build   string `yaml:"build,omitempty"`
-	BinDir  string `yaml:"bin_dir,omitempty"`
+// MCPServerConfig connects one MCP server to the trial. Agents limits which
+// agent types it is offered to; an empty list offers it to all.
+type MCPServerConfig struct {
+	Name   string   `yaml:"name,omitempty"`
+	Config string   `yaml:"config"`
+	Agents []string `yaml:"agents,omitempty"`
 }
 
-// VerifyConfig grades the finished workspace. The script runs outside the
-// workspace so grading cannot leave files behind that would be mistaken for the
-// agent's work, and it is never copied in, so the agent cannot tailor its
-// output to the checks.
+// EnabledFor reports whether this server applies to the given agent type.
+func (m MCPServerConfig) EnabledFor(agentType string) bool {
+	return len(m.Agents) == 0 || slices.Contains(m.Agents, agentType)
+}
+
+// VerifyConfig grades the finished workspace. Commands are shell commands run
+// in order once the agent stops; each exits zero to pass, and what it prints
+// is its own business — mohae records the output but imposes no format on it.
+// Commands run outside the workspace (with $MOHAE_WORKSPACE pointing at it) so
+// grading cannot leave files behind that would be mistaken for the agent's
+// work, and nothing is copied in, so the agent cannot tailor its output to
+// the checks.
 type VerifyConfig struct {
-	Script string `yaml:"script,omitempty"`
+	Commands []string `yaml:"commands,omitempty"`
 }
 
 type LimitsConfig struct {
 	TimeoutSeconds int `yaml:"timeout_seconds,omitempty"`
-	MaxTurns       int `yaml:"max_turns,omitempty"`
+}
+
+// bound puts the configured limit on a context. An unset limit leaves the
+// context alone; the returned cancel is safe to defer either way.
+func (l LimitsConfig) bound(ctx context.Context) (context.Context, context.CancelFunc) {
+	if l.TimeoutSeconds > 0 {
+		return context.WithTimeout(ctx, time.Duration(l.TimeoutSeconds)*time.Second)
+	}
+	return ctx, func() {}
 }
 
 type ReportConfig struct {
 	Dir     string   `yaml:"dir,omitempty"`
 	Formats []string `yaml:"formats,omitempty"`
 }
-
-// KnownAgentTypes are the drivers the runner can select. custom-cli covers any
-// agent with a non-interactive command line.
-var KnownAgentTypes = []string{"claude-code", "codex", "custom-cli"}
-
-// KnownFormats are the report renderings.
-var KnownFormats = []string{"terminal", "json", "markdown", "html"}
 
 // LoadConfig reads and validates one configuration file.
 func LoadConfig(path string) (*Config, error) {
@@ -142,9 +161,6 @@ func (c *Config) applyDefaults() {
 	if c.Limits.TimeoutSeconds == 0 {
 		c.Limits.TimeoutSeconds = DefaultTimeoutSeconds
 	}
-	if c.Limits.MaxTurns == 0 {
-		c.Limits.MaxTurns = DefaultMaxTurns
-	}
 	if c.Report.Dir == "" {
 		c.Report.Dir = DefaultReportDir
 	}
@@ -160,7 +176,7 @@ func (c *Config) Validate() error {
 	if c.Agent.Type == "" {
 		return fmt.Errorf("agent.type is required (one of: %s)", strings.Join(KnownAgentTypes, ", "))
 	}
-	if !contains(KnownAgentTypes, c.Agent.Type) {
+	if !slices.Contains(KnownAgentTypes, c.Agent.Type) {
 		return fmt.Errorf("unknown agent.type %q (one of: %s)", c.Agent.Type, strings.Join(KnownAgentTypes, ", "))
 	}
 	if c.Agent.Type == "custom-cli" && len(c.Agent.Command) == 0 {
@@ -169,24 +185,53 @@ func (c *Config) Validate() error {
 	if c.Workspace.Source == "" {
 		return fmt.Errorf("workspace.source is required")
 	}
-	if c.Prompt.Text == "" && c.Prompt.File == "" {
-		return fmt.Errorf("prompt.text or prompt.file is required")
+	if len(c.Prompts) == 0 {
+		return fmt.Errorf("prompts is required and must list at least one prompt")
 	}
-	if c.Prompt.Text != "" && c.Prompt.File != "" {
-		// Silently preferring one would make a trial measure a prompt nobody
-		// meant to send.
-		return fmt.Errorf("prompt.text and prompt.file are mutually exclusive")
+	// `after` may only name prompts defined earlier: the conversation is sent
+	// in order, so a forward or self reference could never be satisfied and
+	// would silently skip the prompt on every run.
+	names := map[string]int{}
+	for index := range c.Prompts {
+		field := fmt.Sprintf("prompts[%d]", index)
+		if err := c.Prompts[index].Validate(field); err != nil {
+			return err
+		}
+		for _, name := range c.Prompts[index].After {
+			if _, ok := names[name]; !ok {
+				return fmt.Errorf("%s.after: %q does not name an earlier prompt", field, name)
+			}
+		}
+		if name := c.Prompts[index].Name; name != "" {
+			if previous, ok := names[name]; ok {
+				return fmt.Errorf("%s.name: %q is already used by prompts[%d]", field, name, previous)
+			}
+			names[name] = index
+		}
+	}
+	for index, skill := range c.Skills {
+		if skill.Path == "" {
+			return fmt.Errorf("skills[%d].path is required", index)
+		}
+		if err := validateAgents(fmt.Sprintf("skills[%d]", index), skill.Agents); err != nil {
+			return err
+		}
+	}
+	for index, server := range c.MCP {
+		if server.Config == "" {
+			return fmt.Errorf("mcp[%d].config is required", index)
+		}
+		if err := validateAgents(fmt.Sprintf("mcp[%d]", index), server.Agents); err != nil {
+			return err
+		}
 	}
 	for _, format := range c.Report.Formats {
-		if !contains(KnownFormats, format) {
+		if !slices.Contains(KnownFormats, format) {
 			return fmt.Errorf("unknown report format %q (one of: %s)", format, strings.Join(KnownFormats, ", "))
 		}
 	}
 	if c.Limits.TimeoutSeconds < 0 {
 		return fmt.Errorf("limits.timeout_seconds must not be negative")
-	}
-	if c.Limits.MaxTurns < 0 {
-		return fmt.Errorf("limits.max_turns must not be negative")
 	}
 	return nil
 }
@@ -211,9 +256,15 @@ func (c *Config) ReferencedPaths() []LabeledPath {
 		{"workspace.source", c.Workspace.Source},
 		{"workspace.init_script", c.Workspace.InitScript},
 		{"workspace.agent_md", c.Workspace.AgentMD},
-		{"prompt.file", c.Prompt.File},
-		{"mcp.config", c.MCP.Config},
-		{"verify.script", c.Verify.Script},
+	}
+	for index, skill := range c.Skills {
+		candidates = append(candidates, LabeledPath{fmt.Sprintf("skills[%d].path", index), skill.Path})
+	}
+	for index, server := range c.MCP {
+		candidates = append(candidates, LabeledPath{fmt.Sprintf("mcp[%d].config", index), server.Config})
+	}
+	for index, prompt := range c.Prompts {
+		candidates = append(candidates, LabeledPath{fmt.Sprintf("prompts[%d].file", index), prompt.File})
 	}
 	paths := make([]LabeledPath, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -233,11 +284,13 @@ type LabeledPath struct {
 	Path  string
 }
 
-func contains(values []string, value string) bool {
-	for _, item := range values {
-		if item == value {
-			return true
+// validateAgents rejects an agents list naming a driver that does not exist,
+// which would otherwise read as an item silently enabled for nobody.
+func validateAgents(field string, agents []string) error {
+	for _, agent := range agents {
+		if !slices.Contains(KnownAgentTypes, agent) {
+			return fmt.Errorf("%s.agents: unknown agent type %q (one of: %s)", field, agent, strings.Join(KnownAgentTypes, ", "))
 		}
 	}
-	return false
+	return nil
 }
