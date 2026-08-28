@@ -160,16 +160,39 @@ func TestLoginChatGPTBrowserFlowAndCancel(t *testing.T) {
 		t.Fatalf("login = %+v", login)
 	}
 
+	// The server sends account/login/completed as soon as it answers the
+	// cancel, and AwaitLogin drops a completion that arrives before it has
+	// registered, so register the waiter before cancelling.
+	type awaited struct {
+		completed *LoginCompletedParams
+		err       error
+	}
+	results := make(chan awaited, 1)
+	ready := make(chan struct{})
+	go func() {
+		close(ready)
+		completed, err := client.AwaitLogin(context.Background(), "login-1")
+		results <- awaited{completed, err}
+	}()
+	<-ready
+	time.Sleep(50 * time.Millisecond)
+
 	if err := client.CancelLogin(context.Background(), login.LoginID); err != nil {
 		t.Fatalf("CancelLogin: %v", err)
 	}
-	completed, err := client.AwaitLogin(context.Background(), "login-1")
 	<-done
-	if err == nil {
+
+	var res awaited
+	select {
+	case res = <-results:
+	case <-time.After(fakeTimeout):
+		t.Fatal("AwaitLogin did not return after the login was canceled")
+	}
+	if res.err == nil {
 		t.Fatal("AwaitLogin succeeded for a canceled login")
 	}
-	if completed == nil || completed.Error != "canceled" {
-		t.Fatalf("completed = %+v", completed)
+	if res.completed == nil || res.completed.Error != "canceled" {
+		t.Fatalf("completed = %+v", res.completed)
 	}
 }
 
