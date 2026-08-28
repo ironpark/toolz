@@ -12,6 +12,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	ucli "github.com/urfave/cli/v3"
 )
@@ -82,7 +83,7 @@ func newPlanCommand(cmd *ucli.Command) error {
 		return err
 	}
 	if cmd.Bool("json") {
-		if err := writeJSON(makeTemplateJSON("plan", name, rendered)); err != nil {
+		if err := jsonout.Write(jsonout.Template("plan", name, rendered)); err != nil {
 			return err
 		}
 	} else {
@@ -163,7 +164,7 @@ func newPhaseCommand(cmd *ucli.Command, selector string) error {
 		return err
 	}
 	if cmd.Bool("json") {
-		if err := writeJSON(makeTemplateJSON(apply.KindPhase, draft.PlanName(planDirectory)+"#"+strings.TrimSpace(title), rendered)); err != nil {
+		if err := jsonout.Write(jsonout.Template(apply.KindPhase, draft.PlanName(planDirectory)+"#"+strings.TrimSpace(title), rendered)); err != nil {
 			return err
 		}
 	} else {

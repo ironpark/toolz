@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	ucli "github.com/urfave/cli/v3"
 )
@@ -74,7 +75,7 @@ func statusCommand(_ context.Context, cmd *ucli.Command) error {
 		summaries = visible
 	}
 	if cmd.Bool("json") {
-		return writeJSON(makeStatusJSON(summaries))
+		return jsonout.Write(jsonout.Status(summaries))
 	}
 	printPlanGroups(summaries, func(name string, summary plan.Summary) {
 		done, total, _ := summary.Progress()

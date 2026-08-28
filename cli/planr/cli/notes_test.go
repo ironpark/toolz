@@ -15,6 +15,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/notes"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
@@ -153,7 +154,7 @@ func TestPhaseStartRecordsNoteForCurrentHead(t *testing.T) {
 	if len(recorded) != 1 || recorded[0].Event != hooks.EventStart || recorded[0].Phase != "00" {
 		t.Fatalf("start notes = %#v, want one start note for phase 00", recorded)
 	}
-	jsonNotes := makeNotesJSON(recorded)
+	jsonNotes := jsonout.Notes(recorded)
 	if len(jsonNotes.Notes) != 1 || jsonNotes.Notes[0].Event != hooks.EventStart || jsonNotes.Notes[0].Phase != "00" {
 		t.Fatalf("start JSON notes = %#v, want the start event", jsonNotes)
 	}

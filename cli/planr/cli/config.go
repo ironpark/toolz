@@ -9,6 +9,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -25,7 +26,7 @@ func configCommand(_ context.Context, cmd *ucli.Command) error {
 		return err
 	}
 	if cmd.Bool("json") {
-		return writeJSON(makeConfigJSON(settings, root))
+		return jsonout.Write(jsonout.Config(settings, root))
 	}
 
 	if settings.Path == "" {

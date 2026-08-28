@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/schema"
 	ucli "github.com/urfave/cli/v3"
 )
@@ -15,7 +16,7 @@ func schemaCommand(_ context.Context, cmd *ucli.Command) error {
 	}
 	value := schema.Value()
 	if cmd.Bool("json") {
-		return writeJSON(value)
+		return jsonout.Write(value)
 	}
 	fmt.Printf("document: %s\n", value.Name)
 	fmt.Printf("version: %d\n", value.Version)

@@ -11,6 +11,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/apply"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	ucli "github.com/urfave/cli/v3"
@@ -121,7 +122,7 @@ func editCommand(_ context.Context, cmd *ucli.Command) error {
 		return err
 	}
 	if cmd.Bool("json") {
-		return writeJSON(editJSONOutput{Kind: targetKind, Selector: editSelector, Section: section, Target: targetRelative, Base: mdoc.Hash(raw), Document: document})
+		return jsonout.Write(jsonout.EditOutput{Kind: targetKind, Selector: editSelector, Section: section, Target: targetRelative, Base: mdoc.Hash(raw), Document: document})
 	}
 	output := cmd.String("output")
 	if output == "" {

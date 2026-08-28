@@ -11,6 +11,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/doctor"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -115,13 +116,13 @@ func doctorCommand(_ context.Context, cmd *ucli.Command) error {
 
 	if reporter.Issues == 0 {
 		if reporter.JSON {
-			return writeJSON(makeDoctorJSON(reporter.Records))
+			return jsonout.Write(jsonout.Doctor(reporter.Records))
 		}
 		fmt.Println("Doctor found no problems")
 		return nil
 	}
 	if reporter.JSON {
-		if err := writeJSON(makeDoctorJSON(reporter.Records)); err != nil {
+		if err := jsonout.Write(jsonout.Doctor(reporter.Records)); err != nil {
 			return err
 		}
 	}

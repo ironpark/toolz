@@ -10,6 +10,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -330,7 +331,7 @@ func TestInitRejectsPositionalArguments(t *testing.T) {
 }
 
 func TestMakeInitJSONEncodesEmptyListsNotNull(t *testing.T) {
-	output := makeInitJSON("/repo/.planr.yaml", "/repo", doc.English, []string{"plan"}, nil, nil)
+	output := jsonout.Init("/repo/.planr.yaml", "/repo", doc.English, []string{"plan"}, nil, nil)
 	if output.Created == nil || output.Existed == nil {
 		t.Fatalf("created/existed must encode as [], got %#v", output)
 	}

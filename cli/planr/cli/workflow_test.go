@@ -15,6 +15,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/schema"
@@ -275,7 +276,7 @@ func TestStructuredValidationIncludesPlaceholderLocationAndCycle(t *testing.T) {
 		if len(records) != 3 || records[0].Rule != "placeholder" || records[0].Section != "PHASES" || records[0].Phase == nil || records[0].Line == 0 {
 			t.Fatalf("placeholder records = %#v", records)
 		}
-		encoded := makeValidationJSON(records)
+		encoded := jsonout.Validation(records)
 		if encoded[0].Rule != "placeholder" || encoded[0].Phase == nil || encoded[0].Line == 0 {
 			t.Fatalf("placeholder JSON = %#v", encoded[0])
 		}
@@ -293,7 +294,7 @@ func TestStructuredValidationIncludesPlaceholderLocationAndCycle(t *testing.T) {
 
 func TestJSONDocumentEnvelopeCanFlowIntoApplyStdin(t *testing.T) {
 	template := "---\nplan_name: demo\n---\n# document\n"
-	encoded, err := json.Marshal(makeTemplateJSON(apply.KindPlan, "demo", template))
+	encoded, err := json.Marshal(jsonout.Template(apply.KindPlan, "demo", template))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +302,7 @@ func TestJSONDocumentEnvelopeCanFlowIntoApplyStdin(t *testing.T) {
 		t.Fatalf("apply.UnwrapJSONDocument(template) = %q, want %q", got, template)
 	}
 	document := "---\nplanr_edit: demo#0\n---\n# phase\n"
-	encoded, err = json.Marshal(editJSONOutput{Document: document})
+	encoded, err = json.Marshal(jsonout.EditOutput{Document: document})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +345,7 @@ func TestStdinOnlyLifecycleUsesNewEditAndApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("edit phase as JSON: %v", err)
 	}
-	var checkout editJSONOutput
+	var checkout jsonout.EditOutput
 	if err := json.Unmarshal([]byte(checkoutOutput), &checkout); err != nil {
 		t.Fatalf("decode edit checkout: %v; output=%q", err, checkoutOutput)
 	}
@@ -382,7 +383,7 @@ func TestNewJSONProducesPlanAndPhaseTemplatesWithoutFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new plan --json: %v", err)
 	}
-	var planTemplate templateJSONOutput
+	var planTemplate jsonout.TemplateOutput
 	if err := json.Unmarshal([]byte(output), &planTemplate); err != nil {
 		t.Fatalf("decode plan template: %v; output=%q", err, output)
 	}
@@ -399,7 +400,7 @@ func TestNewJSONProducesPlanAndPhaseTemplatesWithoutFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new phase --json: %v", err)
 	}
-	var phaseTemplate templateJSONOutput
+	var phaseTemplate jsonout.TemplateOutput
 	if err := json.Unmarshal([]byte(output), &phaseTemplate); err != nil {
 		t.Fatalf("decode phase template: %v; output=%q", err, output)
 	}
@@ -430,7 +431,7 @@ func TestShowSectionsAllAndSchemaReturnMachineReadableDocuments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show section: %v", err)
 	}
-	var section showSectionJSONOutput
+	var section jsonout.ShowSectionOutput
 	if err := json.Unmarshal([]byte(output), &section); err != nil {
 		t.Fatalf("decode section: %v; output=%q", err, output)
 	}
@@ -444,7 +445,7 @@ func TestShowSectionsAllAndSchemaReturnMachineReadableDocuments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show all: %v", err)
 	}
-	var all showAllJSONOutput
+	var all jsonout.ShowAllOutput
 	if err := json.Unmarshal([]byte(output), &all); err != nil {
 		t.Fatalf("decode show all: %v; output=%q", err, output)
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/apply"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 	ucli "github.com/urfave/cli/v3"
 )
@@ -69,7 +70,7 @@ func applyCommand(_ context.Context, cmd *ucli.Command) error {
 		return applyCommandError(cmd, err)
 	}
 	if cmd.Bool("json") {
-		return writeJSON(makeApplyJSON(operation))
+		return jsonout.Write(jsonout.Apply(operation))
 	}
 	if operation.DryRun {
 		printApplyDryRun(operation)
@@ -95,7 +96,7 @@ func applyCommandError(cmd *ucli.Command, err error) error {
 	if len(records) == 0 {
 		records = []validation.Record{{Rule: "document", Detail: err.Error()}}
 	}
-	if writeErr := writeJSON(applyFailureJSON{Ok: false, Errors: makeValidationJSON(records)}); writeErr != nil {
+	if writeErr := jsonout.Write(jsonout.ApplyFailureOutput{Ok: false, Errors: jsonout.Validation(records)}); writeErr != nil {
 		return writeErr
 	}
 	return err

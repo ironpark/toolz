@@ -1,4 +1,4 @@
-package cli
+package jsonout
 
 import (
 	"encoding/json"
@@ -27,7 +27,7 @@ func TestStatusJSONUsesStableSnakeCaseFields(t *testing.T) {
 		Wait: []string{"platform-refresh"},
 	}}
 
-	raw, err := json.Marshal(makeStatusJSON(summaries))
+	raw, err := json.Marshal(Status(summaries))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,14 +55,14 @@ func TestStatusJSONUsesStableSnakeCaseFields(t *testing.T) {
 }
 
 func TestOverviewAndNotesJSONKeepEmptyArrays(t *testing.T) {
-	overview, err := json.Marshal(makeOverviewJSON(nil))
+	overview, err := json.Marshal(Overview(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(overview) != `{"plans":[]}` {
 		t.Fatalf("empty overview JSON = %s, want an empty plans array", overview)
 	}
-	empty, err := json.Marshal(makeNotesJSON(nil))
+	empty, err := json.Marshal(Notes(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestOverviewAndNotesJSONKeepEmptyArrays(t *testing.T) {
 		t.Fatalf("empty notes JSON = %s, want an empty notes array", empty)
 	}
 
-	value, err := json.Marshal(makeNotesJSON([]notes.Note{{
+	value, err := json.Marshal(Notes([]notes.Note{{
 		At: "2026-08-27T00:00:00Z", Plan: "00-demo", Event: hooks.EventDone,
 		Phase: "01", Commit: "0123456789abcdef", ShortHash: "0123456", Subject: "finish phase",
 	}}))
@@ -90,7 +90,7 @@ func TestOverviewAndNotesJSONKeepEmptyArrays(t *testing.T) {
 }
 
 func TestShowJSONContainsStructuredPhaseContent(t *testing.T) {
-	value, err := json.Marshal(makeShowJSON(plan.PhaseDetails{
+	value, err := json.Marshal(Show(plan.PhaseDetails{
 		Plan: "checkout-v2", Directory: "00-checkout-v2", ID: 2,
 		Slug: "rollout", Title: "Gradual Rollout", Status: "conditional",
 		PlannedWork: "- move traffic", DoneWhen: "- metrics are stable",
@@ -115,7 +115,7 @@ func TestShowJSONContainsStructuredPhaseContent(t *testing.T) {
 }
 
 func TestDiagnosticJSONUsesStableStructuredFields(t *testing.T) {
-	config, err := json.Marshal(makeConfigJSON(config.Config{
+	config, err := json.Marshal(Config(config.Config{
 		PlansDirs: []string{"plans-active", "plans-archive"},
 		Ignore:    []string{"tmp/**"},
 		Language:  doc.Korean,
@@ -132,14 +132,14 @@ func TestDiagnosticJSONUsesStableStructuredFields(t *testing.T) {
 		t.Fatalf("config JSON = %s", config)
 	}
 
-	doctor, err := json.Marshal(makeDoctorJSON([]doctor.Issue{{Location: "plan/PLAN.md", Message: "broken checklist"}}))
+	doctor, err := json.Marshal(Doctor([]doctor.Issue{{Location: "plan/PLAN.md", Message: "broken checklist"}}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(doctor) != `{"issues":[{"location":"plan/PLAN.md","message":"broken checklist"}]}` {
 		t.Fatalf("doctor JSON = %s", doctor)
 	}
-	empty, err := json.Marshal(makeDoctorJSON(nil))
+	empty, err := json.Marshal(Doctor(nil))
 	if err != nil {
 		t.Fatal(err)
 	}

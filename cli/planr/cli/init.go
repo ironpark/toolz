@@ -11,6 +11,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -83,7 +84,7 @@ func initCommand(_ context.Context, cmd *ucli.Command) error {
 	created = append(created, target)
 
 	if cmd.Bool("json") {
-		return writeJSON(makeInitJSON(target, root, language, plansDirs, created, existed))
+		return jsonout.Write(jsonout.Init(target, root, language, plansDirs, created, existed))
 	}
 	for _, path := range created {
 		fmt.Printf("created %s\n", path)

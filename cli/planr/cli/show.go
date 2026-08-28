@@ -11,6 +11,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/apply"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	ucli "github.com/urfave/cli/v3"
@@ -91,7 +92,7 @@ func showCommand(_ context.Context, cmd *ucli.Command) error {
 		return err
 	}
 	if cmd.Bool("json") {
-		return writeJSON(makeShowJSON(details))
+		return jsonout.Write(jsonout.Show(details))
 	}
 
 	fmt.Printf("Phase %02d: %s\n", details.ID, details.Title)
@@ -114,7 +115,7 @@ func showPlanSection(planRoot, planDirectory, section string, jsonOutput bool) e
 		return err
 	}
 	if jsonOutput {
-		return writeJSON(showSectionJSONOutput{Plan: draft.PlanName(planDirectory), Directory: planDirectory, Section: section, Content: string(raw), File: absPath})
+		return jsonout.Write(jsonout.ShowSectionOutput{Plan: draft.PlanName(planDirectory), Directory: planDirectory, Section: section, Content: string(raw), File: absPath})
 	}
 	fmt.Print(string(raw))
 	return nil
@@ -141,13 +142,13 @@ func showAllPlan(planRoot, planDirectory string, jsonOutput bool) error {
 	if err != nil {
 		return err
 	}
-	phaseJSON := make([]showJSONOutput, 0, len(phases))
+	phaseJSON := make([]jsonout.ShowOutput, 0, len(phases))
 	for _, phase := range phases {
 		details, detailsErr := plan.ReadPhaseDetails(planRoot, planDirectory, phase)
 		if detailsErr != nil {
 			return detailsErr
 		}
-		phaseJSON = append(phaseJSON, makeShowJSON(details))
+		phaseJSON = append(phaseJSON, jsonout.Show(details))
 		// ReadPhaseDetails already resolved the phase file, so reuse its path
 		// rather than scanning the phases directory a second time.
 		path := details.File
@@ -161,7 +162,7 @@ func showAllPlan(planRoot, planDirectory string, jsonOutput bool) error {
 		}
 		documents[filepath.ToSlash(relative)] = string(raw)
 	}
-	return writeJSON(showAllJSONOutput{
+	return jsonout.Write(jsonout.ShowAllOutput{
 		Plan:         draft.PlanName(planDirectory),
 		Directory:    planDirectory,
 		Status:       mdoc.FrontString(front, "plan_status"),

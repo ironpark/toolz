@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/notes"
 	ucli "github.com/urfave/cli/v3"
 )
@@ -29,7 +30,7 @@ func notesCommand(_ context.Context, cmd *ucli.Command) error {
 		return err
 	}
 	if cmd.Bool("json") {
-		return writeJSON(makeNotesJSON(records))
+		return jsonout.Write(jsonout.Notes(records))
 	}
 	if len(records) == 0 {
 		fmt.Println("no completions recorded")

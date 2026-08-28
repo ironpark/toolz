@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	ucli "github.com/urfave/cli/v3"
 )
@@ -46,7 +47,7 @@ func overviewCommand(_ context.Context, cmd *ucli.Command) error {
 		summaries = matched
 	}
 	if cmd.Bool("json") {
-		return writeJSON(makeOverviewJSON(summaries))
+		return jsonout.Write(jsonout.Overview(summaries))
 	}
 	if len(summaries) == 0 {
 		fmt.Println("No plans found")
