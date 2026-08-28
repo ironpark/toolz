@@ -30,6 +30,13 @@ type Config struct {
 	Path string `yaml:"-"`
 }
 
+// WithSkipHooks returns the configuration with the invocation-scoped
+// --no-hooks flag applied. It is never read from .planr.yaml.
+func (c Config) WithSkipHooks(skip bool) Config {
+	c.SkipHooks = skip
+	return c
+}
+
 func Load(start string) (Config, string, error) {
 	location, err := Discover(start)
 	if err != nil {
