@@ -1,0 +1,8 @@
+{
+  "issues": [
+    {
+      "location": "plan/00-checkout-v2/PLAN.md",
+      "message": "missing phase file"
+    }
+  ]
+}

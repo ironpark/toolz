@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "action": "plan",
+  "selector": "checkout-v2",
+  "dry_run": false,
+  "changed": false,
+  "documents": {},
+  "diff": []
+}

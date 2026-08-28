@@ -1,0 +1,17 @@
+[
+  {
+    "rule": "placeholder",
+    "section": "PHASES",
+    "phase": 1,
+    "line": 42,
+    "detail": "unfilled placeholder"
+  },
+  {
+    "rule": "dependency_cycle",
+    "phases": [
+      0,
+      1
+    ],
+    "detail": "cycle detected"
+  }
+]

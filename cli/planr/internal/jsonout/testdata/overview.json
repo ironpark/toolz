@@ -1,0 +1,24 @@
+{
+  "plans": [
+    {
+      "name": "checkout-v2",
+      "directory": "plan/00-checkout-v2",
+      "status": "in-progress",
+      "done_phases": 1,
+      "total_phases": 2,
+      "next_phase": "Checkout UI",
+      "wait": [
+        "api-foundation#0"
+      ]
+    },
+    {
+      "name": "api-foundation",
+      "directory": "plan/01-api-foundation",
+      "status": "unknown",
+      "done_phases": 1,
+      "total_phases": 1,
+      "next_phase": "",
+      "wait": []
+    }
+  ]
+}

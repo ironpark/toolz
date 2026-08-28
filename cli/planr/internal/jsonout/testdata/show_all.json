@@ -1,0 +1,31 @@
+{
+  "plan": "checkout-v2",
+  "directory": "plan/00-checkout-v2",
+  "status": "in-progress",
+  "description": "checkout flow refresh",
+  "depends_on": [
+    "api-foundation"
+  ],
+  "goals": "Ship checkout.",
+  "context": "Existing checkout.",
+  "plan_document": "---\nplan_name: checkout-v2\n---\n# plan\n",
+  "phases": [
+    {
+      "plan": "checkout-v2",
+      "directory": "plan/00-checkout-v2",
+      "phase_number": 1,
+      "slug": "checkout-ui",
+      "title": "Checkout UI",
+      "status": "planned",
+      "planned_work": "Add the UI.",
+      "done_when": "UI tests pass.",
+      "depends_on": [
+        "foundation"
+      ],
+      "file": "plan/00-checkout-v2/phases/01-checkout-ui.md"
+    }
+  ],
+  "documents": {
+    "GOALS.md": "Ship checkout.\n"
+  }
+}

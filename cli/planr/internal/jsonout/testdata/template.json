@@ -1,0 +1,5 @@
+{
+  "kind": "plan",
+  "selector": "checkout-v2",
+  "template": "---\nplan_name: checkout-v2\n---\n# plan\n"
+}

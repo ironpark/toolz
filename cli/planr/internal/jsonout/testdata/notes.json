@@ -1,0 +1,13 @@
+{
+  "notes": [
+    {
+      "completed_at": "2024-01-02T03:04:05Z",
+      "plan": "checkout-v2",
+      "event": "done",
+      "phase": "0",
+      "commit": "1111111111111111111111111111111111111111",
+      "short_commit": "1111111",
+      "subject": "finish the foundation"
+    }
+  ]
+}

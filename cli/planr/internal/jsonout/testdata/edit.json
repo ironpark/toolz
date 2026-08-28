@@ -1,0 +1,8 @@
+{
+  "kind": "edit",
+  "selector": "checkout-v2#0",
+  "section": "GOALS",
+  "target": "plan/00-checkout-v2/phases/00-foundation.md",
+  "base": "0000000000000000000000000000000000000000000000000000000000000000",
+  "document": "---\nplanr_edit: checkout-v2#0\n---\n# phase\n"
+}

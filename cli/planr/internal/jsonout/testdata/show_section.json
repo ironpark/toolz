@@ -1,0 +1,7 @@
+{
+  "plan": "checkout-v2",
+  "directory": "plan/00-checkout-v2",
+  "section": "GOALS",
+  "content": "Ship checkout.\n",
+  "file": "plan/00-checkout-v2/GOALS.md"
+}

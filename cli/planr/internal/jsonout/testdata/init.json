@@ -1,0 +1,14 @@
+{
+  "config_file": "/repo/.planr.yaml",
+  "repository_root": "/repo",
+  "language": "en",
+  "plans_dirs": [
+    "plan"
+  ],
+  "created": [
+    "plan"
+  ],
+  "existed": [
+    ".planr.yaml"
+  ]
+}

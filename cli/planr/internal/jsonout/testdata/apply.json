@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "action": "plan",
+  "selector": "checkout-v2",
+  "dry_run": true,
+  "changed": true,
+  "documents": {
+    "plan/00-checkout-v2/PLAN.md": "# plan\n"
+  },
+  "diff": [
+    {
+      "path": "plan/00-checkout-v2/PLAN.md",
+      "before": "",
+      "after": "# plan\n"
+    }
+  ]
+}
