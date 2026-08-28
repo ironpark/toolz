@@ -26,22 +26,9 @@ type CheckoutDocument struct {
 // plan section. It is the producer half of the format Edit parses, so both
 // sides of the round trip stay defined in one place.
 func Checkout(repoRoot, planRoot, planDirectory string, phaseID int, section string) (CheckoutDocument, error) {
-	kind := TargetPhase
-	if section != "" {
-		kind = TargetSection
-	}
-	var (
-		target string
-		err    error
-	)
-	if kind == TargetPhase {
-		target, err = plan.FindPhaseFile(planRoot, phaseID)
-	} else {
-		target = filepath.Join(planRoot, plan.SectionFile(section))
-		_, err = os.Stat(target)
-	}
+	target, err := editTarget(planRoot, planDirectory, phaseID, section)
 	if err != nil {
-		return CheckoutDocument{}, fmt.Errorf("%s: %w", planDirectory, err)
+		return CheckoutDocument{}, err
 	}
 	raw, err := os.ReadFile(target)
 	if err != nil {
@@ -51,10 +38,13 @@ func Checkout(repoRoot, planRoot, planDirectory string, phaseID int, section str
 	if err != nil {
 		return CheckoutDocument{}, err
 	}
+	base := mdoc.Hash(raw)
 	front := map[string]any{}
 	selector := draft.PlanName(planDirectory)
+	kind := TargetSection
 	var body string
-	if kind == TargetPhase {
+	if section == "" {
+		kind = TargetPhase
 		stored, phaseBody, splitErr := mdoc.Split(string(raw))
 		if splitErr != nil {
 			return CheckoutDocument{}, fmt.Errorf("parse %s: %w", filepath.Base(target), splitErr)
@@ -74,15 +64,35 @@ func Checkout(repoRoot, planRoot, planDirectory string, phaseID int, section str
 			if !found {
 				return CheckoutDocument{}, fmt.Errorf("PLAN.md does not contain a # Phases section")
 			}
-			body = body[:start] + "\n" + plan.ChecklistPlaceholder + "\n" + body[end:]
+			body = body[:start] + "\n" + ChecklistPlaceholder + "\n" + body[end:]
 		}
 	}
 	front["planr_edit"] = selector
 	front["planr_target"] = targetRelative
-	front["planr_base"] = mdoc.Hash(raw)
+	front["planr_base"] = base
 	document, err := mdoc.Render(front, body)
 	if err != nil {
 		return CheckoutDocument{}, err
 	}
-	return CheckoutDocument{Kind: kind, Selector: selector, Section: section, Target: targetRelative, Base: mdoc.Hash(raw), Document: document}, nil
+	return CheckoutDocument{Kind: kind, Selector: selector, Section: section, Target: targetRelative, Base: base, Document: document}, nil
+}
+
+// editTarget resolves the document an edit addresses: a phase document when
+// section is empty, otherwise the plan section's file. Checkout and Edit share
+// it so the producer and consumer of a checkout always resolve the same file.
+func editTarget(planRoot, planDirectory string, phaseID int, section string) (string, error) {
+	var (
+		target string
+		err    error
+	)
+	if section == "" {
+		target, err = plan.FindPhaseFile(planRoot, phaseID)
+	} else {
+		target = filepath.Join(planRoot, plan.SectionFile(section))
+		_, err = os.Stat(target)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", planDirectory, err)
+	}
+	return target, nil
 }

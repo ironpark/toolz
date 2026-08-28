@@ -207,7 +207,7 @@ func TestEditPlanSectionProtectsDerivedChecklist(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkout := editCheckout(t, root, planRoot, "00-checkout-v2", -1, "plan")
-	bad := strings.Replace(checkout, plan.ChecklistPlaceholder, "- [ ] a hand-written checklist", 1)
+	bad := strings.Replace(checkout, ChecklistPlaceholder, "- [ ] a hand-written checklist", 1)
 	if _, err := Edit([]byte(bad), settings, root, false, io.Discard); err == nil || !strings.Contains(err.Error(), "derived checklist") {
 		t.Fatalf("derived-region apply error = %v", err)
 	}

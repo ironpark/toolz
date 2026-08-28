@@ -1,6 +1,7 @@
 package jsonout
 
 import (
+	"github.com/ironpark/toolz/cli/planr/internal/apply"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 )
 
@@ -68,6 +69,27 @@ func Show(phase plan.PhaseDetails) ShowOutput {
 	}
 }
 
+func ShowSection(details plan.SectionDetails) ShowSectionOutput {
+	return ShowSectionOutput{
+		Plan:      details.Plan,
+		Directory: details.Directory,
+		Section:   details.Section,
+		Content:   details.Content,
+		File:      details.File,
+	}
+}
+
+func Edit(checkout apply.CheckoutDocument) EditOutput {
+	return EditOutput{
+		Kind:     checkout.Kind,
+		Selector: checkout.Selector,
+		Section:  checkout.Section,
+		Target:   checkout.Target,
+		Base:     checkout.Base,
+		Document: checkout.Document,
+	}
+}
+
 func Template(kind, selector, template string) TemplateOutput {
 	return TemplateOutput{Kind: kind, Selector: selector, Template: template}
 }
@@ -83,9 +105,9 @@ func ShowAll(details plan.Details) ShowAllOutput {
 		Status:       details.Status,
 		Description:  details.Description,
 		DependsOn:    details.DependsOn,
-		Goals:        details.Goals,
-		Context:      details.Context,
-		PlanDocument: details.PlanDocument,
+		Goals:        details.Documents["GOALS.md"],
+		Context:      details.Documents["CONTEXT.md"],
+		PlanDocument: details.Documents["PLAN.md"],
 		Phases:       phases,
 		Documents:    details.Documents,
 	}

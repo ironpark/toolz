@@ -64,15 +64,9 @@ func Edit(raw []byte, settings config.Config, repoRoot string, dryRun bool, outp
 		}
 		defer lock.Close()
 	}
-	var target string
-	if targetKind == "phase" {
-		target, err = plan.FindPhaseFile(planRoot, phaseID)
-	} else {
-		target = filepath.Join(planRoot, plan.SectionFile(section))
-		_, err = os.Stat(target)
-	}
+	target, err := editTarget(planRoot, planDirectory, phaseID, section)
 	if err != nil {
-		return Operation{}, fmt.Errorf("%s: %w", planDirectory, err)
+		return Operation{}, err
 	}
 	expectedTarget, err := RelativeTargetPath(repoRoot, targetValue)
 	if err != nil {
@@ -93,12 +87,12 @@ func Edit(raw []byte, settings config.Config, repoRoot string, dryRun bool, outp
 	if currentHash != base {
 		detail := fmt.Sprintf("cannot apply edit for %s: planr_base %s does not match the current on-disk document hash %s; run planr edit again", selector, base, currentHash)
 		record := validation.Record{Rule: "base_mismatch", Detail: detail}
-		if targetKind == "phase" {
+		if targetKind == TargetPhase {
 			record.Phase = validation.IntPointer(phaseID)
 		}
 		return Operation{}, validation.NewFailure(record, detail)
 	}
-	if targetKind == "phase" {
+	if targetKind == TargetPhase {
 		return phaseEdit(raw, front, currentRaw, target, planRoot, planDirectory, phaseID, dryRun, output)
 	}
 	return sectionEdit(raw, currentRaw, target, planDirectory, section, dryRun, output)
@@ -349,7 +343,7 @@ func sectionEdit(raw []byte, currentRaw []byte, target, planDirectory, section s
 	switch section {
 	case "plan":
 		incomingStart, incomingEnd, incomingFound := plan.ChecklistBounds(incomingBody)
-		if !incomingFound || strings.TrimSpace(incomingBody[incomingStart:incomingEnd]) != plan.ChecklistPlaceholder {
+		if !incomingFound || strings.TrimSpace(incomingBody[incomingStart:incomingEnd]) != ChecklistPlaceholder {
 			detail := "plan section checkout must keep the derived checklist region unchanged"
 			return Operation{}, validation.NewFailure(validation.Record{Rule: "derived_region", Section: "PLAN", Detail: detail}, detail)
 		}

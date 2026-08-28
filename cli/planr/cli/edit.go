@@ -59,11 +59,11 @@ func editCommand(_ context.Context, cmd *ucli.Command) error {
 		return err
 	}
 	if cmd.Bool("json") {
-		return jsonout.Write(jsonout.EditOutput{Kind: checkout.Kind, Selector: checkout.Selector, Section: checkout.Section, Target: checkout.Target, Base: checkout.Base, Document: checkout.Document})
+		return jsonout.Write(jsonout.Edit(checkout))
 	}
 	output := cmd.String("output")
 	if output == "" {
-		output = filepath.Join(repoRoot, scratchDirectory, scratchFileName(planDirectory, checkout.Kind, phaseID, section))
+		output = filepath.Join(repoRoot, scratchDirectory, scratchFileName(planDirectory, phaseID, section))
 	}
 	absOutput, err := filepath.Abs(output)
 	if err != nil {
@@ -84,9 +84,9 @@ func editCommand(_ context.Context, cmd *ucli.Command) error {
 	return nil
 }
 
-func scratchFileName(planDirectory, targetKind string, phaseID int, section string) string {
+func scratchFileName(planDirectory string, phaseID int, section string) string {
 	name := draft.PlanName(planDirectory)
-	if targetKind == "phase" {
+	if section == "" {
 		return fmt.Sprintf("%s-phase-%02d.md", name, phaseID)
 	}
 	return fmt.Sprintf("%s-section-%s.md", name, section)

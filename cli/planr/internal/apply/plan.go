@@ -39,7 +39,7 @@ func Plan(d draft.Draft, settings config.Config, repoRoot string, dryRun bool, o
 	if dryRun {
 		return op, nil
 	}
-	if err := hooks.RunTo(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventAdd, planDirectory, -1, "registered", output); err != nil {
+	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventAdd, planDirectory, -1, "registered", output); err != nil {
 		return Operation{}, err
 	}
 	temporary, err := os.MkdirTemp(planDirectories[0], ".planr-")
@@ -54,7 +54,7 @@ func Plan(d draft.Draft, settings config.Config, repoRoot string, dryRun bool, o
 		return Operation{}, err
 	}
 	fmt.Fprintf(output, "Registered %s\n", planDirectory)
-	if err := hooks.RunTo(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventAdd, planDirectory, -1, "registered", output); err != nil {
+	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventAdd, planDirectory, -1, "registered", output); err != nil {
 		return Operation{}, err
 	}
 	return op, nil

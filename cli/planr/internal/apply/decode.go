@@ -193,13 +193,13 @@ func parseEditDocumentSelector(selector string, front map[string]any) (string, s
 		if strings.TrimSpace(selector) == "" {
 			return "", "", 0, "", fmt.Errorf("planr_edit must contain a plan name")
 		}
-		return strings.TrimSpace(selector), "section", -1, section, nil
+		return strings.TrimSpace(selector), TargetSection, -1, section, nil
 	}
 	planName, phaseID, err := ParseEditSelector(selector)
 	if err != nil {
 		return "", "", 0, "", err
 	}
-	return planName, "phase", phaseID, "", nil
+	return planName, TargetPhase, phaseID, "", nil
 }
 
 // RelativeTargetPath normalises a planr_target value into a repository-relative

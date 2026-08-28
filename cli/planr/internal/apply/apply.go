@@ -15,11 +15,18 @@ const (
 	KindEdit  = "edit"
 )
 
-// Edit target kinds: which document inside a plan a checkout addresses.
+// Edit target kinds: which document inside a plan a checkout addresses. These
+// are the values of CheckoutDocument.Kind, distinct from the document kinds
+// above even where the string happens to match.
 const (
 	TargetPhase   = "phase"
 	TargetSection = "section"
 )
+
+// ChecklistPlaceholder marks the derived phase checklist region in a PLAN.md
+// checkout. Checkout swaps the real checklist for it, and Edit refuses the
+// document unless it comes back untouched.
+const ChecklistPlaceholder = "<!-- planr: phase checklist is derived; do not edit -->"
 
 // Diff records the before/after contents of one document an operation touches.
 // Before is empty for documents the operation creates.
