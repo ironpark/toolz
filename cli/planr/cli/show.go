@@ -11,7 +11,6 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
-	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	ucli "github.com/urfave/cli/v3"
 )
@@ -124,55 +123,11 @@ func showAllPlan(planRoot, planDirectory string, jsonOutput bool) error {
 	if !jsonOutput {
 		return fmt.Errorf("show --all requires --json")
 	}
-	front, _, err := plan.ReadDocument(planRoot, "PLAN.md")
+	details, err := plan.ReadAll(planRoot, planDirectory)
 	if err != nil {
 		return err
 	}
-	documents := map[string]string{}
-	for _, relative := range []string{"GOALS.md", "CONTEXT.md", "PLAN.md"} {
-		path := filepath.Join(planRoot, relative)
-		raw, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return readErr
-		}
-		documents[relative] = string(raw)
-	}
-	phases, err := plan.ReadPhases(planRoot)
-	if err != nil {
-		return err
-	}
-	phaseJSON := make([]jsonout.ShowOutput, 0, len(phases))
-	for _, phase := range phases {
-		details, detailsErr := plan.ReadPhaseDetails(planRoot, planDirectory, phase)
-		if detailsErr != nil {
-			return detailsErr
-		}
-		phaseJSON = append(phaseJSON, jsonout.Show(details))
-		// ReadPhaseDetails already resolved the phase file, so reuse its path
-		// rather than scanning the phases directory a second time.
-		path := details.File
-		raw, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return readErr
-		}
-		relative, relErr := filepath.Rel(planRoot, path)
-		if relErr != nil {
-			return relErr
-		}
-		documents[filepath.ToSlash(relative)] = string(raw)
-	}
-	return jsonout.Write(jsonout.ShowAllOutput{
-		Plan:         draft.PlanName(planDirectory),
-		Directory:    planDirectory,
-		Status:       mdoc.FrontString(front, "plan_status"),
-		Description:  mdoc.FrontString(front, "description"),
-		DependsOn:    mdoc.Strings(front["depends_on"]),
-		Goals:        documents["GOALS.md"],
-		Context:      documents["CONTEXT.md"],
-		PlanDocument: documents["PLAN.md"],
-		Phases:       phaseJSON,
-		Documents:    documents,
-	})
+	return jsonout.Write(jsonout.ShowAll(details))
 }
 
 func printShowBody(label, body string) {

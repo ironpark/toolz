@@ -512,3 +512,73 @@ func ChecklistBounds(body string) (int, int, bool) {
 	}
 	return -1, -1, false
 }
+
+// Details is the whole plan aggregate read off disk: the PLAN.md frontmatter,
+// every plan-level document, and the details of every phase. `show --all`
+// renders it directly.
+type Details struct {
+	Plan, Directory string
+	Status          string
+	Description     string
+	DependsOn       []string
+	Goals           string
+	Context         string
+	PlanDocument    string
+	Phases          []PhaseDetails
+	Documents       map[string]string
+}
+
+// sectionDocuments are the plan-level documents always present in a plan
+// directory, in the order they are read.
+var sectionDocuments = []string{"GOALS.md", "CONTEXT.md", "PLAN.md"}
+
+// ReadAll assembles the complete plan aggregate from disk.
+func ReadAll(planRoot, planDirectory string) (Details, error) {
+	front, _, err := ReadDocument(planRoot, "PLAN.md")
+	if err != nil {
+		return Details{}, err
+	}
+	documents := map[string]string{}
+	for _, relative := range sectionDocuments {
+		raw, readErr := os.ReadFile(filepath.Join(planRoot, relative))
+		if readErr != nil {
+			return Details{}, readErr
+		}
+		documents[relative] = string(raw)
+	}
+	stored, err := ReadPhases(planRoot)
+	if err != nil {
+		return Details{}, err
+	}
+	phases := make([]PhaseDetails, 0, len(stored))
+	for _, phase := range stored {
+		details, detailsErr := ReadPhaseDetails(planRoot, planDirectory, phase)
+		if detailsErr != nil {
+			return Details{}, detailsErr
+		}
+		phases = append(phases, details)
+		// ReadPhaseDetails already resolved the phase file, so reuse its path
+		// rather than scanning the phases directory a second time.
+		raw, readErr := os.ReadFile(details.File)
+		if readErr != nil {
+			return Details{}, readErr
+		}
+		relative, relErr := filepath.Rel(planRoot, details.File)
+		if relErr != nil {
+			return Details{}, relErr
+		}
+		documents[filepath.ToSlash(relative)] = string(raw)
+	}
+	return Details{
+		Plan:         draft.PlanName(planDirectory),
+		Directory:    planDirectory,
+		Status:       mdoc.FrontString(front, "plan_status"),
+		Description:  mdoc.FrontString(front, "description"),
+		DependsOn:    mdoc.Strings(front["depends_on"]),
+		Goals:        documents["GOALS.md"],
+		Context:      documents["CONTEXT.md"],
+		PlanDocument: documents["PLAN.md"],
+		Phases:       phases,
+		Documents:    documents,
+	}, nil
+}

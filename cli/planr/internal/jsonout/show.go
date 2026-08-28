@@ -71,3 +71,22 @@ func Show(phase plan.PhaseDetails) ShowOutput {
 func Template(kind, selector, template string) TemplateOutput {
 	return TemplateOutput{Kind: kind, Selector: selector, Template: template}
 }
+
+func ShowAll(details plan.Details) ShowAllOutput {
+	phases := make([]ShowOutput, 0, len(details.Phases))
+	for _, phase := range details.Phases {
+		phases = append(phases, Show(phase))
+	}
+	return ShowAllOutput{
+		Plan:         details.Plan,
+		Directory:    details.Directory,
+		Status:       details.Status,
+		Description:  details.Description,
+		DependsOn:    details.DependsOn,
+		Goals:        details.Goals,
+		Context:      details.Context,
+		PlanDocument: details.PlanDocument,
+		Phases:       phases,
+		Documents:    details.Documents,
+	}
+}
