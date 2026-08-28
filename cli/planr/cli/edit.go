@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ironpark/toolz/cli/planr/internal/apply"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
@@ -24,14 +25,14 @@ func editCommand(_ context.Context, cmd *ucli.Command) error {
 	section := strings.TrimSpace(cmd.String("section"))
 	selector := cmd.Args().First()
 	if section != "" {
-		if !validSection(section) {
+		if !apply.ValidSection(section) {
 			return fmt.Errorf("invalid edit section %q; use goals, context, or plan", section)
 		}
 		if strings.Contains(selector, "#") {
 			return fmt.Errorf("edit --section accepts a plan name, not a phase selector")
 		}
 	} else {
-		planArg, targetKind, _, _, err := parseEditSelector(selector)
+		planArg, targetKind, _, _, err := apply.ParseEditSelector(selector)
 		if err != nil {
 			return err
 		}
@@ -56,7 +57,7 @@ func editCommand(_ context.Context, cmd *ucli.Command) error {
 	phaseID := -1
 	if section == "" {
 		var parsedSection string
-		planArg, targetKind, phaseID, parsedSection, err = parseEditSelector(selector)
+		planArg, targetKind, phaseID, parsedSection, err = apply.ParseEditSelector(selector)
 		if err != nil {
 			return err
 		}
@@ -70,7 +71,7 @@ func editCommand(_ context.Context, cmd *ucli.Command) error {
 	if targetKind == "phase" {
 		target, err = plan.FindPhaseFile(planRoot, phaseID)
 	} else {
-		target = filepath.Join(planRoot, sectionFile(section))
+		target = filepath.Join(planRoot, apply.SectionFile(section))
 		_, err = os.Stat(target)
 	}
 	if err != nil {
@@ -80,7 +81,7 @@ func editCommand(_ context.Context, cmd *ucli.Command) error {
 	if err != nil {
 		return err
 	}
-	targetRelative, err := relativeTargetPath(repoRoot, target)
+	targetRelative, err := apply.RelativeTargetPath(repoRoot, target)
 	if err != nil {
 		return err
 	}
@@ -109,7 +110,7 @@ func editCommand(_ context.Context, cmd *ucli.Command) error {
 			if !found {
 				return fmt.Errorf("PLAN.md does not contain a # Phases section")
 			}
-			body = body[:start] + "\n" + planChecklistPlaceholder + "\n" + body[end:]
+			body = body[:start] + "\n" + plan.ChecklistPlaceholder + "\n" + body[end:]
 		}
 	}
 	checkoutFront["planr_edit"] = editSelector

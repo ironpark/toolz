@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ironpark/toolz/cli/planr/internal/apply"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
@@ -73,7 +74,7 @@ func newPlanCommand(cmd *ucli.Command) error {
 		return err
 	}
 	settings = settings.WithSkipHooks(cmd.Bool("no-hooks"))
-	if err := runDocumentHooks(repoRoot, settings, "before", hooks.EventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
+	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
 		return err
 	}
 	rendered, err := doc.RenderNewDraft(settings.Language, name, dependsOn, description)
@@ -90,7 +91,7 @@ func newPlanCommand(cmd *ucli.Command) error {
 		}
 		fmt.Printf("Created %s\n", absOutput)
 	}
-	if err := runDocumentHooks(repoRoot, settings, "after", hooks.EventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
+	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
 		return err
 	}
 	return nil
@@ -133,7 +134,7 @@ func newPhaseCommand(cmd *ucli.Command, selector string) error {
 		return fmt.Errorf("plan %q is already done; new phase drafts are only allowed for open plans", planDirectory)
 	}
 
-	slug := slugifyPhaseTitle(strings.TrimSpace(title))
+	slug := plan.SlugifyTitle(strings.TrimSpace(title))
 	if slug == "" {
 		// The draft remains editable, and the author can replace this placeholder
 		// with a valid ASCII slug before applying a non-ASCII title.
@@ -158,11 +159,11 @@ func newPhaseCommand(cmd *ucli.Command, selector string) error {
 	if err != nil {
 		return err
 	}
-	if err := runDocumentHooks(repoRoot, settings, "before", hooks.EventNew, planDirectory, -1, "draft", cmd.Bool("json")); err != nil {
+	if err := hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventNew, planDirectory, -1, "draft", cmd.Bool("json")); err != nil {
 		return err
 	}
 	if cmd.Bool("json") {
-		if err := writeJSON(makeTemplateJSON(applyKindPhase, draft.PlanName(planDirectory)+"#"+strings.TrimSpace(title), rendered)); err != nil {
+		if err := writeJSON(makeTemplateJSON(apply.KindPhase, draft.PlanName(planDirectory)+"#"+strings.TrimSpace(title), rendered)); err != nil {
 			return err
 		}
 	} else {
@@ -171,5 +172,5 @@ func newPhaseCommand(cmd *ucli.Command, selector string) error {
 		}
 		fmt.Printf("Created %s\n", absOutput)
 	}
-	return runDocumentHooks(repoRoot, settings, "after", hooks.EventNew, planDirectory, -1, "draft", cmd.Bool("json"))
+	return hooks.RunDocument(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventNew, planDirectory, -1, "draft", cmd.Bool("json"))
 }

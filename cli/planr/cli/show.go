@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ironpark/toolz/cli/planr/internal/apply"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
@@ -20,7 +21,7 @@ func showCommand(_ context.Context, cmd *ucli.Command) error {
 		return fmt.Errorf("show requires <plan-name> and optionally <phase-number>")
 	}
 	section := strings.TrimSpace(cmd.String("section"))
-	if section != "" && !validSection(section) {
+	if section != "" && !apply.ValidSection(section) {
 		return fmt.Errorf("invalid show section %q; use goals, context, or plan", section)
 	}
 	if (section != "" || cmd.Bool("all")) && cmd.NArg() != 1 {
@@ -103,7 +104,7 @@ func showCommand(_ context.Context, cmd *ucli.Command) error {
 }
 
 func showPlanSection(planRoot, planDirectory, section string, jsonOutput bool) error {
-	path := filepath.Join(planRoot, sectionFile(section))
+	path := filepath.Join(planRoot, apply.SectionFile(section))
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err

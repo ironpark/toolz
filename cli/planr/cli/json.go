@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
+	"github.com/ironpark/toolz/cli/planr/internal/apply"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doctor"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
@@ -277,21 +278,21 @@ func makeTemplateJSON(kind, selector, template string) templateJSONOutput {
 	return templateJSONOutput{Kind: kind, Selector: selector, Template: template}
 }
 
-func makeApplyJSON(operation applyOperation) applyJSONOutput {
-	documents := operation.documents
+func makeApplyJSON(operation apply.Operation) applyJSONOutput {
+	documents := operation.Documents
 	if documents == nil {
 		documents = map[string]string{}
 	}
-	diffs := operation.diffs
-	if diffs == nil {
-		diffs = []applyDiffJSON{}
+	diffs := make([]applyDiffJSON, 0, len(operation.Diffs))
+	for _, diff := range operation.Diffs {
+		diffs = append(diffs, applyDiffJSON{Path: diff.Path, Before: diff.Before, After: diff.After})
 	}
 	return applyJSONOutput{
 		Ok:        true,
-		Action:    operation.action,
-		Selector:  operation.selector,
-		DryRun:    operation.dryRun,
-		Changed:   operation.changed,
+		Action:    operation.Action,
+		Selector:  operation.Selector,
+		DryRun:    operation.DryRun,
+		Changed:   operation.Changed,
 		Documents: documents,
 		Diff:      diffs,
 	}

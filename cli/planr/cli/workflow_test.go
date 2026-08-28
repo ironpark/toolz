@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/ironpark/toolz/cli/planr/internal/apply"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
@@ -48,7 +49,7 @@ func applyTestDraft(name string) draft.Draft {
 	}
 }
 
-func filledPhaseDraft(t *testing.T, language string) phaseDraftInput {
+func filledPhaseDraft(t *testing.T, language string) apply.PhaseDraft {
 	t.Helper()
 	raw, err := doc.RenderNewPhaseDraft(language, "checkout-v2", "Cache Warmup", "cache-warmup")
 	if err != nil {
@@ -59,9 +60,9 @@ func filledPhaseDraft(t *testing.T, language string) phaseDraftInput {
 	raw = strings.Replace(raw, "status: planned", "status: conditional", 1)
 	raw = strings.Replace(raw, "entry_condition: null", "entry_condition: only after the cache API is ready", 1)
 	raw = strings.ReplaceAll(raw, draft.Placeholder, "filled")
-	parsed, err := parsePhaseDraft([]byte(raw))
+	parsed, err := apply.ParsePhaseDraft([]byte(raw))
 	if err != nil {
-		t.Fatalf("parsePhaseDraft() unexpected error: %v", err)
+		t.Fatalf("apply.ParsePhaseDraft() unexpected error: %v", err)
 	}
 	return parsed
 }
@@ -75,8 +76,8 @@ func TestApplyPhaseDraftAddsPhaseAndPreservesPhaseFlags(t *testing.T) {
 	}
 
 	planDraft := filledPhaseDraft(t, doc.English)
-	if _, err := applyPhaseDraft(planDraft, settings, root, false, false); err != nil {
-		t.Fatalf("applyPhaseDraft() unexpected error: %v", err)
+	if _, err := apply.Phase(planDraft, settings, root, false, false); err != nil {
+		t.Fatalf("apply.Phase() unexpected error: %v", err)
 	}
 	phasePath := filepath.Join(planRoot, "phases", "02-cache-warmup.md")
 	raw, err := os.ReadFile(phasePath)
@@ -127,11 +128,11 @@ func TestApplyPhaseDraftRefusesCompletedPlan(t *testing.T) {
 	}
 
 	err = func() error {
-		_, err := applyPhaseDraft(filledPhaseDraft(t, doc.English), settings, root, false, false)
+		_, err := apply.Phase(filledPhaseDraft(t, doc.English), settings, root, false, false)
 		return err
 	}()
 	if err == nil || !strings.Contains(err.Error(), "already done") {
-		t.Fatalf("applyPhaseDraft() error = %v, want already done", err)
+		t.Fatalf("apply.Phase() error = %v, want already done", err)
 	}
 	records := validation.Records(err)
 	if len(records) != 1 || records[0].Rule != "plan_done" {
@@ -154,8 +155,8 @@ func TestApplyDryRunDoesNotCreatePlanFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse draft: %v", err)
 	}
-	if _, err := applyPlanDraft(parsed, settings, root, true, false); err != nil {
-		t.Fatalf("applyPlanDraft(dry-run): %v", err)
+	if _, err := apply.Plan(parsed, settings, root, true, false); err != nil {
+		t.Fatalf("apply.Plan(dry-run): %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "plans")); !os.IsNotExist(err) {
 		t.Fatalf("dry-run created plans directory; stat error = %v", err)
@@ -181,8 +182,8 @@ func TestEditPhaseBaseHashAndStatusSafety(t *testing.T) {
 		t.Fatalf("checkout is missing safety metadata:\n%s", checkout)
 	}
 	updated := strings.Replace(checkout, "Build the foundation.", "Build the safer foundation.", 1)
-	if _, err := applyEditDocument([]byte(updated), settings, root, false, false); err != nil {
-		t.Fatalf("applyEditDocument() unexpected error: %v", err)
+	if _, err := apply.Edit([]byte(updated), settings, root, false, false); err != nil {
+		t.Fatalf("apply.Edit() unexpected error: %v", err)
 	}
 	changed, err := os.ReadFile(phasePath)
 	if err != nil {
@@ -193,7 +194,7 @@ func TestEditPhaseBaseHashAndStatusSafety(t *testing.T) {
 	}
 
 	stale := strings.Replace(updated, "Build the safer foundation.", "A stale edit.", 1)
-	_, err = applyEditDocument([]byte(stale), settings, root, false, false)
+	_, err = apply.Edit([]byte(stale), settings, root, false, false)
 	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("stale apply error = %v, want hash mismatch", err)
 	}
@@ -203,7 +204,7 @@ func TestEditPhaseBaseHashAndStatusSafety(t *testing.T) {
 
 	statusCheckout := editDocumentForTest(t, root, "checkout-v2#0", "status.md", "")
 	statusEdited := strings.Replace(statusCheckout, "status: planned", "status: in-progress", 1)
-	_, err = applyEditDocument([]byte(statusEdited), settings, root, false, false)
+	_, err = apply.Edit([]byte(statusEdited), settings, root, false, false)
 	if err == nil || !strings.Contains(err.Error(), "use `planr phase start`") {
 		t.Fatalf("status edit error = %v, want phase start guidance", err)
 	}
@@ -223,11 +224,11 @@ func TestEditPlanSectionProtectsDerivedChecklist(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkout := editDocumentForTest(t, root, "checkout-v2", "plan.md", "plan")
-	bad := strings.Replace(checkout, planChecklistPlaceholder, "- [ ] a hand-written checklist", 1)
-	if _, err := applyEditDocument([]byte(bad), settings, root, false, false); err == nil || !strings.Contains(err.Error(), "derived checklist") {
+	bad := strings.Replace(checkout, plan.ChecklistPlaceholder, "- [ ] a hand-written checklist", 1)
+	if _, err := apply.Edit([]byte(bad), settings, root, false, false); err == nil || !strings.Contains(err.Error(), "derived checklist") {
 		t.Fatalf("derived-region apply error = %v", err)
 	}
-	if _, err := applyEditDocument([]byte(checkout), settings, root, false, false); err != nil {
+	if _, err := apply.Edit([]byte(checkout), settings, root, false, false); err != nil {
 		t.Fatalf("unchanged plan checkout apply: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".planr.lock")); err == nil {
@@ -292,20 +293,20 @@ func TestStructuredValidationIncludesPlaceholderLocationAndCycle(t *testing.T) {
 
 func TestJSONDocumentEnvelopeCanFlowIntoApplyStdin(t *testing.T) {
 	template := "---\nplan_name: demo\n---\n# document\n"
-	encoded, err := json.Marshal(makeTemplateJSON(applyKindPlan, "demo", template))
+	encoded, err := json.Marshal(makeTemplateJSON(apply.KindPlan, "demo", template))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(unwrapJSONDocument(encoded)); got != template {
-		t.Fatalf("unwrapJSONDocument(template) = %q, want %q", got, template)
+	if got := string(apply.UnwrapJSONDocument(encoded)); got != template {
+		t.Fatalf("apply.UnwrapJSONDocument(template) = %q, want %q", got, template)
 	}
 	document := "---\nplanr_edit: demo#0\n---\n# phase\n"
 	encoded, err = json.Marshal(editJSONOutput{Document: document})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(unwrapJSONDocument(encoded)); got != document {
-		t.Fatalf("unwrapJSONDocument(document) = %q, want %q", got, document)
+	if got := string(apply.UnwrapJSONDocument(encoded)); got != document {
+		t.Fatalf("apply.UnwrapJSONDocument(document) = %q, want %q", got, document)
 	}
 }
 
@@ -385,7 +386,7 @@ func TestNewJSONProducesPlanAndPhaseTemplatesWithoutFiles(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &planTemplate); err != nil {
 		t.Fatalf("decode plan template: %v; output=%q", err, output)
 	}
-	if planTemplate.Kind != applyKindPlan || planTemplate.Selector != "new-plan" || !strings.Contains(planTemplate.Template, "plan_name: new-plan") {
+	if planTemplate.Kind != apply.KindPlan || planTemplate.Selector != "new-plan" || !strings.Contains(planTemplate.Template, "plan_name: new-plan") {
 		t.Fatalf("plan template = %+v", planTemplate)
 	}
 	if _, err := os.Stat(filepath.Join(root, "new-plan.md")); !os.IsNotExist(err) {
@@ -402,7 +403,7 @@ func TestNewJSONProducesPlanAndPhaseTemplatesWithoutFiles(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &phaseTemplate); err != nil {
 		t.Fatalf("decode phase template: %v; output=%q", err, output)
 	}
-	if phaseTemplate.Kind != applyKindPhase || phaseTemplate.Selector != "checkout-v2#Second Phase" || !strings.Contains(phaseTemplate.Template, "planr_new: phase") {
+	if phaseTemplate.Kind != apply.KindPhase || phaseTemplate.Selector != "checkout-v2#Second Phase" || !strings.Contains(phaseTemplate.Template, "planr_new: phase") {
 		t.Fatalf("phase template = %+v", phaseTemplate)
 	}
 	if _, err := os.Stat(filepath.Join(root, "checkout-v2-second-phase.md")); !os.IsNotExist(err) {
