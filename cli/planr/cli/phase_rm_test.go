@@ -20,7 +20,7 @@ func TestPhaseRemoveRefusesDependentsAndLeavesNumberGapWithForce(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(root, "plan", "00-checkout-v2")
-	planDraft := plantest.CheckoutDraft(plantest.DependingOn(nil), plantest.WithUIPhase())
+	planDraft := plantest.CheckoutDraft(plantest.WithUIPhase())
 	planDraft.Phases = append(planDraft.Phases, draft.Phase{
 		Title:   "Rollout",
 		Meta:    draft.Meta{Phase: 2, Slug: "rollout", Status: "planned", DependsOn: []int{1}},

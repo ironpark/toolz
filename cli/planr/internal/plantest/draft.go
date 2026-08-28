@@ -9,7 +9,7 @@ import "github.com/ironpark/toolz/cli/planr/internal/draft"
 type CheckoutOption func(*draft.Draft)
 
 // DependingOn makes the plan depend on the named plans.
-func DependingOn(dependsOn []string) CheckoutOption {
+func DependingOn(dependsOn ...string) CheckoutOption {
 	return func(d *draft.Draft) { d.DependsOn = dependsOn }
 }
 
@@ -68,11 +68,9 @@ func ApplyDraft(name string) draft.Draft {
 
 // OverviewDraft returns the single-phase plan draft the overview tests chain
 // together. Its prose differs from CheckoutDraft, so it stays its own fixture.
-func OverviewDraft(name string, dependency *string) draft.Draft {
+func OverviewDraft(name string, dependsOn ...string) draft.Draft {
 	dependencies := []string{}
-	if dependency != nil {
-		dependencies = append(dependencies, *dependency)
-	}
+	dependencies = append(dependencies, dependsOn...)
 	return draft.Draft{
 		Name:         name,
 		Description:  "overview test",
