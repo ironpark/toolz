@@ -11,6 +11,8 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
+	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/urfave/cli/v3"
 )
 
@@ -149,11 +151,11 @@ func TestPhaseStartRecordsNoteForCurrentHead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readPlanNotes() unexpected error: %v", err)
 	}
-	if len(notes) != 1 || notes[0].event != hookEventStart || notes[0].phase != "00" {
+	if len(notes) != 1 || notes[0].event != hooks.EventStart || notes[0].phase != "00" {
 		t.Fatalf("start notes = %#v, want one start note for phase 00", notes)
 	}
 	jsonNotes := makeNotesJSON(notes)
-	if len(jsonNotes.Notes) != 1 || jsonNotes.Notes[0].Event != hookEventStart || jsonNotes.Notes[0].Phase != "00" {
+	if len(jsonNotes.Notes) != 1 || jsonNotes.Notes[0].Event != hooks.EventStart || jsonNotes.Notes[0].Phase != "00" {
 		t.Fatalf("start JSON notes = %#v, want the start event", jsonNotes)
 	}
 }
@@ -175,13 +177,13 @@ func frontmatterValue(t *testing.T, path, key string) string {
 func TestRecordAndReadCompletionNotes(t *testing.T) {
 	repoRoot := seedRepository(t)
 
-	if err := recordCompletionNote(repoRoot, "00-checkout-v2", hookEventDone, 3); err != nil {
+	if err := recordCompletionNote(repoRoot, "00-checkout-v2", hooks.EventDone, 3); err != nil {
 		t.Fatalf("record phase note: %v", err)
 	}
-	if err := recordCompletionNote(repoRoot, "00-checkout-v2", hookEventPlanDone, -1); err != nil {
+	if err := recordCompletionNote(repoRoot, "00-checkout-v2", hooks.EventPlanDone, -1); err != nil {
 		t.Fatalf("record plan note: %v", err)
 	}
-	if err := recordCompletionNote(repoRoot, "01-other", hookEventPlanDone, -1); err != nil {
+	if err := recordCompletionNote(repoRoot, "01-other", hooks.EventPlanDone, -1); err != nil {
 		t.Fatalf("record other plan note: %v", err)
 	}
 
@@ -207,7 +209,7 @@ func TestRecordAndReadCompletionNotes(t *testing.T) {
 	}
 	var phase string
 	for _, note := range filtered {
-		if note.event == hookEventDone {
+		if note.event == hooks.EventDone {
 			phase = note.phase
 		}
 	}
@@ -220,10 +222,10 @@ func TestRecordAndReadCompletionNotes(t *testing.T) {
 // name previously returned an empty result instead of the plan's records.
 func TestReadPlanNotesAcceptsBarePlanName(t *testing.T) {
 	repoRoot := seedRepository(t)
-	if err := recordCompletionNote(repoRoot, "00-checkout-v2", hookEventDone, 1); err != nil {
+	if err := recordCompletionNote(repoRoot, "00-checkout-v2", hooks.EventDone, 1); err != nil {
 		t.Fatalf("record phase note: %v", err)
 	}
-	if err := recordCompletionNote(repoRoot, "01-other", hookEventPlanDone, -1); err != nil {
+	if err := recordCompletionNote(repoRoot, "01-other", hooks.EventPlanDone, -1); err != nil {
 		t.Fatalf("record other plan note: %v", err)
 	}
 
@@ -266,12 +268,12 @@ func TestEnsureGitRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A subdirectory of the repository counts as inside it.
-	if err := ensureGitRepository(nested); err != nil {
+	if err := gitrepo.EnsureRepository(nested); err != nil {
 		t.Errorf("nested path rejected: %v", err)
 	}
 
 	outside := t.TempDir()
-	err := ensureGitRepository(outside)
+	err := gitrepo.EnsureRepository(outside)
 	if err == nil {
 		t.Fatal("expected an error outside a git repository")
 	}

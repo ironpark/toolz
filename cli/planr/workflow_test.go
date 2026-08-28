@@ -10,17 +10,19 @@ import (
 	"testing"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 	"github.com/urfave/cli/v3"
 )
 
-func applyTestSettings() config {
-	return config{
+func applyTestSettings() config.Config {
+	return config.Config{
 		PlansDirs: []string{"plans"},
 		Language:  doc.English,
-		Hooks:     hookConfig{Timeout: defaultHookTimeout},
-		skipHooks: true,
+		Hooks:     hooks.Config{Timeout: hooks.DefaultTimeout},
+		SkipHooks: true,
 	}
 }
 

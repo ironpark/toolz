@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/urfave/cli/v3"
 )
 
@@ -46,9 +48,9 @@ func initCommand(_ context.Context, cmd *cli.Command) error {
 	}
 	plansDirs := cmd.StringSlice("plans-dir")
 	if len(plansDirs) == 0 {
-		plansDirs = defaultConfig().PlansDirs
+		plansDirs = config.Default().PlansDirs
 	}
-	if err := validatePlanDirs(plansDirs); err != nil {
+	if err := config.ValidatePlanDirs(plansDirs); err != nil {
 		return err
 	}
 
@@ -100,7 +102,7 @@ func initCommand(_ context.Context, cmd *cli.Command) error {
 // has to say so -- planr keeps completion records as git notes, so every other
 // command needs one.
 func initTarget(cwd string) (root string, existing string, repositoryErr error, err error) {
-	if repositoryErr = ensureGitRepository(cwd); repositoryErr != nil {
+	if repositoryErr = gitrepo.EnsureRepository(cwd); repositoryErr != nil {
 		// Only this directory's own file counts: without a repository the
 		// upward search has no boundary, and an unrelated .planr.yaml in some
 		// ancestor must not decide anything here.
@@ -112,14 +114,14 @@ func initTarget(cwd string) (root string, existing string, repositoryErr error, 
 		}
 		return cwd, "", repositoryErr, nil
 	}
-	// discoverConfig rather than loadConfig: an existing file that no longer
+	// config.Discover rather than config.Load: an existing file that no longer
 	// parses still has to be detected here, otherwise `init --force` -- the one
 	// command that could repair it -- would fail on the file it is replacing.
-	location, err := discoverConfig(cwd)
+	location, err := config.Discover(cwd)
 	if err != nil {
 		return "", "", nil, err
 	}
-	return location.baseRoot, location.path, nil, nil
+	return location.BaseRoot, location.Path, nil, nil
 }
 
 // configTemplate renders .planr.yaml with the settings init was asked for and

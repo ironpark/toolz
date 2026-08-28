@@ -13,6 +13,8 @@ import (
 	"time"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/urfave/cli/v3"
 )
 
@@ -48,12 +50,12 @@ func phaseCommand(cmd *cli.Command, status string) error {
 	if err != nil {
 		return err
 	}
-	settings, repoRoot, err := loadConfig(cwd)
+	settings, repoRoot, err := config.Load(cwd)
 	if err != nil {
 		return err
 	}
-	settings = commandConfig(settings, cmd)
-	planDirectories := settings.planDirs(repoRoot)
+	settings = commandSettings(settings, cmd)
+	planDirectories := settings.PlanDirs(repoRoot)
 	planRoot, planDirectory, err := findPlanDirectory(planDirectories, cmd.Args().First())
 	if err != nil {
 		return err
@@ -72,7 +74,7 @@ func phaseCommand(cmd *cli.Command, status string) error {
 			return err
 		}
 	}
-	if status == "done" && len(settings.Hooks.commands("before", hookEventPlanDone)) > 0 {
+	if status == "done" && len(settings.Hooks.Commands("before", hooks.EventPlanDone)) > 0 {
 		willComplete, err = phaseWillComplete(planRoot, phaseID)
 		if err != nil {
 			return err
@@ -92,11 +94,11 @@ func phaseCommand(cmd *cli.Command, status string) error {
 			}
 		}
 	}
-	if err := runConfiguredHooks(repoRoot, settings, "before", event, planDirectory, phaseID, status); err != nil {
+	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", event, planDirectory, phaseID, status); err != nil {
 		return err
 	}
 	if willComplete {
-		if err := runConfiguredHooks(repoRoot, settings, "before", hookEventPlanDone, planDirectory, -1, "done"); err != nil {
+		if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventPlanDone, planDirectory, -1, "done"); err != nil {
 			return err
 		}
 	}
@@ -108,28 +110,28 @@ func phaseCommand(cmd *cli.Command, status string) error {
 	fmt.Printf("Updated %s phase %02d: %s\n", planDirectory, phaseID, status)
 	// Link the completion to the commit it landed on, for `planr notes`.
 	if status == "in-progress" {
-		if err := recordCompletionNote(repoRoot, planDirectory, hookEventStart, phaseID); err != nil {
+		if err := recordCompletionNote(repoRoot, planDirectory, hooks.EventStart, phaseID); err != nil {
 			warnStartNoteFailure(err)
 		}
 	}
 	if status == "done" {
-		if err := recordCompletionNote(repoRoot, planDirectory, hookEventDone, phaseID); err != nil {
+		if err := recordCompletionNote(repoRoot, planDirectory, hooks.EventDone, phaseID); err != nil {
 			warnNoteFailure(err)
 		}
 	}
 	if completed {
 		fmt.Printf("Plan %s marked done\n", planDirectory)
 		if !planWasDone {
-			if err := recordCompletionNote(repoRoot, planDirectory, hookEventPlanDone, -1); err != nil {
+			if err := recordCompletionNote(repoRoot, planDirectory, hooks.EventPlanDone, -1); err != nil {
 				warnNoteFailure(err)
 			}
 		}
 	}
-	if err := runConfiguredHooks(repoRoot, settings, "after", event, planDirectory, phaseID, status); err != nil {
+	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "after", event, planDirectory, phaseID, status); err != nil {
 		return err
 	}
 	if completed && status == "done" && !planWasDone {
-		if err := runConfiguredHooks(repoRoot, settings, "after", hookEventPlanDone, planDirectory, -1, "done"); err != nil {
+		if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventPlanDone, planDirectory, -1, "done"); err != nil {
 			return err
 		}
 	}
@@ -412,13 +414,13 @@ func isGeneratedPlanPath(repoRoot string, planDirectories []string, relativePath
 func phaseHookEvent(status string) string {
 	switch status {
 	case "planned":
-		return hookEventReset
+		return hooks.EventReset
 	case "conditional":
-		return hookEventConditional
+		return hooks.EventConditional
 	case "in-progress":
-		return hookEventStart
+		return hooks.EventStart
 	case "done":
-		return hookEventDone
+		return hooks.EventDone
 	default:
 		return ""
 	}

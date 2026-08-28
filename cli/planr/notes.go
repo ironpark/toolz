@@ -15,6 +15,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/urfave/cli/v3"
 )
 
@@ -333,7 +334,7 @@ func notesCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	_, repoRoot, err := loadConfig(cwd)
+	_, repoRoot, err := config.Load(cwd)
 	if err != nil {
 		return err
 	}

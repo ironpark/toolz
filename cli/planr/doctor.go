@@ -11,6 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
+	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/urfave/cli/v3"
 )
 
@@ -85,34 +88,34 @@ func doctorCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	location, err := discoverConfig(cwd)
+	location, err := config.Discover(cwd)
 	if err != nil {
 		return err
 	}
 	reporter := &doctorReporter{json: cmd.Bool("json")}
 
-	if err := ensureGitRepository(cwd); err != nil {
+	if err := gitrepo.EnsureRepository(cwd); err != nil {
 		reporter.add(doctorIssue{location: "git", message: err.Error()})
 	} else {
-		reporter.printf("PASS git repository: %s\n", location.baseRoot)
+		reporter.printf("PASS git repository: %s\n", location.BaseRoot)
 	}
 
-	reporter.printf("INFO agent: %s\n", currentAgentDescription())
+	reporter.printf("INFO agent: %s\n", agentenv.CurrentDescription())
 
-	settings := defaultConfig()
-	if location.path == "" {
+	settings := config.Default()
+	if location.Path == "" {
 		reporter.printf("INFO config: .planr.yaml not found; using defaults\n")
 	} else {
-		parsed, parseErr := parseConfigFile(location.path)
+		parsed, parseErr := config.ParseFile(location.Path)
 		if parseErr != nil {
-			reporter.add(doctorIssue{location: location.path, message: parseErr.Error()})
+			reporter.add(doctorIssue{location: location.Path, message: parseErr.Error()})
 		} else {
 			settings = parsed
-			reporter.printf("PASS config: %s\n", location.path)
+			reporter.printf("PASS config: %s\n", location.Path)
 		}
 	}
 
-	planDirectories := settings.planDirs(location.baseRoot)
+	planDirectories := settings.PlanDirs(location.BaseRoot)
 	validDirectories := []string{}
 	for _, plans := range planDirectories {
 		info, statErr := os.Stat(plans)

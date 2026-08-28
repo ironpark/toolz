@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/urfave/cli/v3"
 )
 
@@ -23,11 +24,11 @@ func phaseRemoveCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	settings, repoRoot, err := loadConfig(cwd)
+	settings, repoRoot, err := config.Load(cwd)
 	if err != nil {
 		return err
 	}
-	planDirectories := settings.planDirs(repoRoot)
+	planDirectories := settings.PlanDirs(repoRoot)
 	planRoot, planDirectory, err := findPlanDirectory(planDirectories, cmd.Args().First())
 	if err != nil {
 		return err

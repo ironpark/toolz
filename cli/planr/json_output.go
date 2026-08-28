@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
+	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 )
 
@@ -319,28 +322,28 @@ func makeInitJSON(target, root, language string, plansDirs, created, existed []s
 	}
 }
 
-func makeConfigJSON(settings config, root string) configJSONOutput {
+func makeConfigJSON(settings config.Config, root string) configJSONOutput {
 	var configFile *string
-	if settings.configPath != "" {
-		value := settings.configPath
+	if settings.Path != "" {
+		value := settings.Path
 		configFile = &value
 	}
 	return configJSONOutput{
 		ConfigFile:     configFile,
 		RepositoryRoot: root,
-		Agent:          currentAgentDescription(),
+		Agent:          agentenv.CurrentDescription(),
 		Language:       settings.Language,
 		PlansDirs:      append([]string{}, settings.PlansDirs...),
 		Ignore:         append([]string{}, settings.Ignore...),
 		Hooks: configHooksJSON{
-			Timeout: settings.Hooks.timeoutDuration().String(),
+			Timeout: settings.Hooks.TimeoutDuration().String(),
 			Before:  makeHookRulesJSON(settings.Hooks.Before),
 			After:   makeHookRulesJSON(settings.Hooks.After),
 		},
 	}
 }
 
-func makeHookRulesJSON(rules []hookRule) []hookRuleJSON {
+func makeHookRulesJSON(rules []hooks.Rule) []hookRuleJSON {
 	result := make([]hookRuleJSON, 0, len(rules))
 	for _, rule := range rules {
 		result = append(result, hookRuleJSON{On: append([]string{}, rule.On...), Run: rule.Run})

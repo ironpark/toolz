@@ -6,6 +6,8 @@ import (
 	"os"
 	"runtime/debug"
 
+	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/urfave/cli/v3"
 )
 
@@ -64,7 +66,7 @@ func newRootCommand() *cli.Command {
 			if err != nil {
 				return ctx, err
 			}
-			return ctx, ensureGitRepository(cwd)
+			return ctx, gitrepo.EnsureRepository(cwd)
 		},
 		Commands: []*cli.Command{
 			{
@@ -245,4 +247,11 @@ func newRootCommand() *cli.Command {
 			},
 		},
 	}
+}
+
+// commandSettings applies the invocation-scoped flags that are not part of
+// .planr.yaml to the loaded configuration.
+func commandSettings(settings config.Config, cmd *cli.Command) config.Config {
+	settings.SkipHooks = cmd.Bool("no-hooks")
+	return settings
 }

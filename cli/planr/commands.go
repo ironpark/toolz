@@ -13,7 +13,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
+	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/urfave/cli/v3"
 )
 
@@ -70,12 +72,12 @@ func newPlanCommand(cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	settings, repoRoot, err := loadConfig(workingDirectory)
+	settings, repoRoot, err := config.Load(workingDirectory)
 	if err != nil {
 		return err
 	}
-	settings = commandConfig(settings, cmd)
-	if err := runDocumentHooks(repoRoot, settings, "before", hookEventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
+	settings = commandSettings(settings, cmd)
+	if err := runDocumentHooks(repoRoot, settings, "before", hooks.EventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
 		return err
 	}
 	draft, err := doc.RenderNewDraft(settings.Language, name, dependsOn, description)
@@ -92,7 +94,7 @@ func newPlanCommand(cmd *cli.Command) error {
 		}
 		fmt.Printf("Created %s\n", absOutput)
 	}
-	if err := runDocumentHooks(repoRoot, settings, "after", hookEventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
+	if err := runDocumentHooks(repoRoot, settings, "after", hooks.EventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
 		return err
 	}
 	return nil
@@ -532,7 +534,7 @@ func statusCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	planDirectories, err := planPaths(cwd)
+	planDirectories, err := config.PlanPaths(cwd)
 	if err != nil {
 		return err
 	}

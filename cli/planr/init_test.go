@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/urfave/cli/v3"
 )
@@ -51,15 +52,15 @@ func TestInitWritesConfigAndPlansDirectory(t *testing.T) {
 	}
 	// The written file has to be the one planr then reads back; a template that
 	// does not round-trip would leave `init` followed by `config` disagreeing.
-	settings, foundRoot, err := loadConfig(root)
+	settings, foundRoot, err := config.Load(root)
 	if err != nil {
-		t.Fatalf("loadConfig() after init: %v", err)
+		t.Fatalf("config.Load() after init: %v", err)
 	}
 	if foundRoot != root {
 		t.Fatalf("root = %q, want %q", foundRoot, root)
 	}
-	if settings.configPath != filepath.Join(root, ".planr.yaml") {
-		t.Fatalf("config path = %q", settings.configPath)
+	if settings.Path != filepath.Join(root, ".planr.yaml") {
+		t.Fatalf("config path = %q", settings.Path)
 	}
 	if settings.Language != doc.DefaultLanguage {
 		t.Fatalf("language = %q, want %q", settings.Language, doc.DefaultLanguage)
@@ -76,9 +77,9 @@ func TestInitHonoursLanguageAndPlansDirectories(t *testing.T) {
 	if err := runInit(t, "--language", "ko", "--plans-dir", "plans-active", "--plans-dir", "plans-archive"); err != nil {
 		t.Fatalf("init() unexpected error: %v", err)
 	}
-	settings, _, err := loadConfig(root)
+	settings, _, err := config.Load(root)
 	if err != nil {
-		t.Fatalf("loadConfig() after init: %v", err)
+		t.Fatalf("config.Load() after init: %v", err)
 	}
 	if settings.Language != doc.Korean {
 		t.Fatalf("language = %q, want %q", settings.Language, doc.Korean)
@@ -149,7 +150,7 @@ func TestInitForceRepairsAnUnparseableConfig(t *testing.T) {
 	if err := runInit(t, "--force"); err != nil {
 		t.Fatalf("init --force on a broken config: %v", err)
 	}
-	if _, _, err := loadConfig(root); err != nil {
+	if _, _, err := config.Load(root); err != nil {
 		t.Fatalf("config still does not parse: %v", err)
 	}
 }

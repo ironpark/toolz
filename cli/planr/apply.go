@@ -14,7 +14,9 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
+	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 	"github.com/urfave/cli/v3"
 )
@@ -77,12 +79,12 @@ func newPhaseCommand(cmd *cli.Command, selector string) error {
 	if err != nil {
 		return err
 	}
-	settings, repoRoot, err := loadConfig(cwd)
+	settings, repoRoot, err := config.Load(cwd)
 	if err != nil {
 		return err
 	}
-	settings = commandConfig(settings, cmd)
-	planDirectories := settings.planDirs(repoRoot)
+	settings = commandSettings(settings, cmd)
+	planDirectories := settings.PlanDirs(repoRoot)
 	planRoot, planDirectory, err := findPlanDirectory(planDirectories, planArg)
 	if err != nil {
 		return err
@@ -120,7 +122,7 @@ func newPhaseCommand(cmd *cli.Command, selector string) error {
 	if err != nil {
 		return err
 	}
-	if err := runDocumentHooks(repoRoot, settings, "before", hookEventNew, planDirectory, -1, "draft", cmd.Bool("json")); err != nil {
+	if err := runDocumentHooks(repoRoot, settings, "before", hooks.EventNew, planDirectory, -1, "draft", cmd.Bool("json")); err != nil {
 		return err
 	}
 	if cmd.Bool("json") {
@@ -133,14 +135,14 @@ func newPhaseCommand(cmd *cli.Command, selector string) error {
 		}
 		fmt.Printf("Created %s\n", absOutput)
 	}
-	return runDocumentHooks(repoRoot, settings, "after", hookEventNew, planDirectory, -1, "draft", cmd.Bool("json"))
+	return runDocumentHooks(repoRoot, settings, "after", hooks.EventNew, planDirectory, -1, "draft", cmd.Bool("json"))
 }
 
-func runDocumentHooks(repoRoot string, settings config, when, event, planDirectory string, phaseID int, status string, jsonOutput bool) error {
+func runDocumentHooks(repoRoot string, settings config.Config, when, event, planDirectory string, phaseID int, status string, jsonOutput bool) error {
 	if jsonOutput {
-		return runConfiguredHooksTo(repoRoot, settings, when, event, planDirectory, phaseID, status, io.Discard)
+		return hooks.RunTo(repoRoot, settings.Hooks, settings.SkipHooks, when, event, planDirectory, phaseID, status, io.Discard)
 	}
-	return runConfiguredHooks(repoRoot, settings, when, event, planDirectory, phaseID, status)
+	return hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, when, event, planDirectory, phaseID, status)
 }
 
 func applyCommand(_ context.Context, cmd *cli.Command) error {
@@ -174,11 +176,11 @@ func applyCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return applyCommandError(cmd, err)
 	}
-	settings, repoRoot, err := loadConfig(cwd)
+	settings, repoRoot, err := config.Load(cwd)
 	if err != nil {
 		return applyCommandError(cmd, err)
 	}
-	settings = commandConfig(settings, cmd)
+	settings = commandSettings(settings, cmd)
 
 	kind, document, err := detectApplyDocument(raw, fallback)
 	if err != nil {
@@ -346,8 +348,8 @@ func phaseDraftValidationError(section, detail string) error {
 	return validation.NewFailure(validation.Record{Rule: "phase_document", Section: section, Detail: detail}, detail)
 }
 
-func applyPlanDraft(d draft, settings config, repoRoot string, dryRun, jsonOutput bool) (applyOperation, error) {
-	planDirectories := settings.planDirs(repoRoot)
+func applyPlanDraft(d draft, settings config.Config, repoRoot string, dryRun, jsonOutput bool) (applyOperation, error) {
+	planDirectories := settings.PlanDirs(repoRoot)
 	if len(planDirectories) == 0 {
 		return applyOperation{}, fmt.Errorf("no plans directory is configured")
 	}
@@ -371,7 +373,7 @@ func applyPlanDraft(d draft, settings config, repoRoot string, dryRun, jsonOutpu
 	if dryRun {
 		return op, nil
 	}
-	if err := runDocumentHooks(repoRoot, settings, "before", hookEventAdd, planDirectory, -1, "registered", jsonOutput); err != nil {
+	if err := runDocumentHooks(repoRoot, settings, "before", hooks.EventAdd, planDirectory, -1, "registered", jsonOutput); err != nil {
 		return applyOperation{}, err
 	}
 	temporary, err := os.MkdirTemp(planDirectories[0], ".planr-")
@@ -388,7 +390,7 @@ func applyPlanDraft(d draft, settings config, repoRoot string, dryRun, jsonOutpu
 	if !jsonOutput {
 		fmt.Printf("Registered %s\n", planDirectory)
 	}
-	if err := runDocumentHooks(repoRoot, settings, "after", hookEventAdd, planDirectory, -1, "registered", jsonOutput); err != nil {
+	if err := runDocumentHooks(repoRoot, settings, "after", hooks.EventAdd, planDirectory, -1, "registered", jsonOutput); err != nil {
 		return applyOperation{}, err
 	}
 	return op, nil
@@ -411,8 +413,8 @@ func writeRenderedPlan(root string, documents map[string]string) error {
 	return nil
 }
 
-func applyPhaseDraft(d phaseDraftInput, settings config, repoRoot string, dryRun, jsonOutput bool) (applyOperation, error) {
-	planDirectories := settings.planDirs(repoRoot)
+func applyPhaseDraft(d phaseDraftInput, settings config.Config, repoRoot string, dryRun, jsonOutput bool) (applyOperation, error) {
+	planDirectories := settings.PlanDirs(repoRoot)
 	planRoot, planDirectory, err := findPlanDirectory(planDirectories, d.Plan)
 	if err != nil {
 		return applyOperation{}, err
@@ -481,7 +483,7 @@ func applyPhaseDraft(d phaseDraftInput, settings config, repoRoot string, dryRun
 	if dryRun {
 		return op, nil
 	}
-	if err := runDocumentHooks(repoRoot, settings, "before", hookEventPhaseAdd, planDirectory, phaseID, meta.Status, jsonOutput); err != nil {
+	if err := runDocumentHooks(repoRoot, settings, "before", hooks.EventPhaseAdd, planDirectory, phaseID, meta.Status, jsonOutput); err != nil {
 		return applyOperation{}, err
 	}
 	if err := os.MkdirAll(filepath.Join(planRoot, "phases"), 0755); err != nil {
@@ -497,7 +499,7 @@ func applyPhaseDraft(d phaseDraftInput, settings config, repoRoot string, dryRun
 	if !jsonOutput {
 		fmt.Printf("Added %s phase %02d: %s\n", planDirectory, phaseID, phasePath)
 	}
-	if err := runDocumentHooks(repoRoot, settings, "after", hookEventPhaseAdd, planDirectory, phaseID, meta.Status, jsonOutput); err != nil {
+	if err := runDocumentHooks(repoRoot, settings, "after", hooks.EventPhaseAdd, planDirectory, phaseID, meta.Status, jsonOutput); err != nil {
 		return applyOperation{}, err
 	}
 	return op, nil
@@ -699,7 +701,7 @@ func documentHash(raw []byte) string {
 	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
-func applyEditDocument(raw []byte, settings config, repoRoot string, dryRun, jsonOutput bool) (applyOperation, error) {
+func applyEditDocument(raw []byte, settings config.Config, repoRoot string, dryRun, jsonOutput bool) (applyOperation, error) {
 	front, _, err := frontmatter(string(raw))
 	if err != nil {
 		return applyOperation{}, validation.Wrap(err, "frontmatter", "frontmatter")
@@ -732,7 +734,7 @@ func applyEditDocument(raw []byte, settings config, repoRoot string, dryRun, jso
 	if err != nil {
 		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "edit_selector", Section: "frontmatter", Detail: err.Error()}, err.Error())
 	}
-	planDirectories := settings.planDirs(repoRoot)
+	planDirectories := settings.PlanDirs(repoRoot)
 	planRoot, planDirectory, err := findPlanDirectory(planDirectories, planArg)
 	if err != nil {
 		return applyOperation{}, err

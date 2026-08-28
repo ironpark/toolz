@@ -1,10 +1,8 @@
-package main
+package agentenv
 
 import (
 	"fmt"
 	"strings"
-
-	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
 )
 
 // planr reports the AI coding agent it is running under in two places: as
@@ -12,11 +10,11 @@ import (
 // `config` and `doctor`. Both derive from the same detection so a hook and the
 // diagnostics can never disagree about the environment.
 
-// agentEnvironment returns the agent variables exported to hook commands. They
+// Environment returns the agent variables exported to hook commands. They
 // are always present and empty when planr was invoked from a plain shell, so a
 // hook can test them without worrying about unset variables.
-func agentEnvironment() []string {
-	detection := agentenv.Detect()
+func Environment() []string {
+	detection := Detect()
 	return []string{
 		"PLANR_AGENT=" + string(detection.Agent),
 		"PLANR_AGENT_SESSION=" + detection.SessionID,
@@ -24,17 +22,17 @@ func agentEnvironment() []string {
 	}
 }
 
-// currentAgentDescription renders the detected environment for `config` and
+// CurrentDescription renders the detected environment for `config` and
 // `doctor`.
-func currentAgentDescription() string {
-	return describeAgent(agentenv.Detect())
+func CurrentDescription() string {
+	return Describe(Detect())
 }
 
-// describeAgent names the agent, the variable that gave it away, and the
+// Describe names the agent, the variable that gave it away, and the
 // session it belongs to. The signal is included because it is what a reader
 // needs to reproduce or suppress the detection; the session id ties the run
 // back to the agent transcript that produced it.
-func describeAgent(detection agentenv.Detection) string {
+func Describe(detection Detection) string {
 	if !detection.Detected() {
 		return "none (no AI agent environment detected)"
 	}

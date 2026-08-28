@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/urfave/cli/v3"
 )
 
@@ -17,7 +18,7 @@ func overviewCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	planDirectories, err := planPaths(cwd)
+	planDirectories, err := config.PlanPaths(cwd)
 	if err != nil {
 		return err
 	}

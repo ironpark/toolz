@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/urfave/cli/v3"
 )
 
@@ -37,7 +38,7 @@ func planNameShellComplete(ctx context.Context, cmd *cli.Command) {
 	if err != nil {
 		return
 	}
-	planDirectories, err := planPaths(cwd)
+	planDirectories, err := config.PlanPaths(cwd)
 	if err != nil {
 		return
 	}

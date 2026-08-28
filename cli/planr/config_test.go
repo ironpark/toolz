@@ -11,7 +11,9 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
+	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 )
 
 func TestLoadConfigHooks(t *testing.T) {
@@ -20,23 +22,23 @@ func TestLoadConfigHooks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), contents, 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	value, foundRoot, err := loadConfig(root)
+	value, foundRoot, err := config.Load(root)
 	if err != nil {
-		t.Fatalf("loadConfig() unexpected error: %v", err)
+		t.Fatalf("config.Load() unexpected error: %v", err)
 	}
 	if foundRoot != root {
-		t.Fatalf("loadConfig() root = %q, want %q", foundRoot, root)
+		t.Fatalf("config.Load() root = %q, want %q", foundRoot, root)
 	}
 	if len(value.Ignore) != 1 || value.Ignore[0] != "generated/**" {
 		t.Fatalf("ignore = %#v, want [generated/**]", value.Ignore)
 	}
-	if got, want := value.Hooks.commands("before", hookEventAdd), []string{"echo before"}; !equalStrings(got, want) {
+	if got, want := value.Hooks.Commands("before", hooks.EventAdd), []string{"echo before"}; !equalStrings(got, want) {
 		t.Fatalf("before add hooks = %#v, want %#v", got, want)
 	}
-	if got, want := value.Hooks.commands("after", hookEventDone), []string{"echo after"}; !equalStrings(got, want) {
+	if got, want := value.Hooks.Commands("after", hooks.EventDone), []string{"echo after"}; !equalStrings(got, want) {
 		t.Fatalf("after done hooks = %#v, want %#v", got, want)
 	}
-	if got := value.Hooks.commands("before", hookEventStart); len(got) != 0 {
+	if got := value.Hooks.Commands("before", hooks.EventStart); len(got) != 0 {
 		t.Fatalf("before start hooks = %#v, want empty", got)
 	}
 }
@@ -54,28 +56,28 @@ func TestLoadConfigStopsAtGitRepositoryRoot(t *testing.T) {
 		t.Fatalf("git init: %v", err)
 	}
 
-	value, foundRoot, err := loadConfig(filepath.Join(repoRoot, "nested"))
+	value, foundRoot, err := config.Load(filepath.Join(repoRoot, "nested"))
 	if err != nil {
-		t.Fatalf("loadConfig() unexpected error: %v", err)
+		t.Fatalf("config.Load() unexpected error: %v", err)
 	}
 	if foundRoot != repoRoot {
-		t.Fatalf("loadConfig() root = %q, want %q", foundRoot, repoRoot)
+		t.Fatalf("config.Load() root = %q, want %q", foundRoot, repoRoot)
 	}
 	if value.Language != doc.DefaultLanguage || len(value.PlansDirs) != 1 || value.PlansDirs[0] != "plan" {
-		t.Fatalf("loadConfig() crossed git root: %#v", value)
+		t.Fatalf("config.Load() crossed git root: %#v", value)
 	}
-	if value.configPath != "" {
-		t.Fatalf("default config unexpectedly has a path: %q", value.configPath)
+	if value.Path != "" {
+		t.Fatalf("default config unexpectedly has a path: %q", value.Path)
 	}
 	// The boundary also applies when a command is given a path that does not
 	// exist yet; this keeps a parent config from being selected while creating
 	// a new nested directory.
-	value, foundRoot, err = loadConfig(filepath.Join(repoRoot, "not-yet-created", "nested"))
+	value, foundRoot, err = config.Load(filepath.Join(repoRoot, "not-yet-created", "nested"))
 	if err != nil {
-		t.Fatalf("loadConfig() for a missing nested path unexpected error: %v", err)
+		t.Fatalf("config.Load() for a missing nested path unexpected error: %v", err)
 	}
-	if foundRoot != repoRoot || value.configPath != "" {
-		t.Fatalf("missing nested path crossed git root: root=%q config=%q", foundRoot, value.configPath)
+	if foundRoot != repoRoot || value.Path != "" {
+		t.Fatalf("missing nested path crossed git root: root=%q config=%q", foundRoot, value.Path)
 	}
 }
 
@@ -87,17 +89,17 @@ func TestLoadConfigKeepsAppliedPathAndHookTimeout(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	value, foundRoot, err := loadConfig(root)
+	value, foundRoot, err := config.Load(root)
 	if err != nil {
-		t.Fatalf("loadConfig() unexpected error: %v", err)
+		t.Fatalf("config.Load() unexpected error: %v", err)
 	}
-	if foundRoot != root || value.configPath != path {
-		t.Fatalf("loadConfig() path/root = %q/%q, want %q/%q", value.configPath, foundRoot, path, root)
+	if foundRoot != root || value.Path != path {
+		t.Fatalf("config.Load() path/root = %q/%q, want %q/%q", value.Path, foundRoot, path, root)
 	}
 	if value.Hooks.Timeout != 25*time.Millisecond {
 		t.Fatalf("hooks.timeout = %s, want 25ms", value.Hooks.Timeout)
 	}
-	if got := value.Hooks.timeoutDuration(); got != 25*time.Millisecond {
+	if got := value.Hooks.TimeoutDuration(); got != 25*time.Millisecond {
 		t.Fatalf("timeoutDuration() = %s, want 25ms", got)
 	}
 }
@@ -119,15 +121,15 @@ func TestLoadConfigLanguage(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), []byte(testCase.contents), 0644); err != nil {
 				t.Fatalf("write config: %v", err)
 			}
-			value, _, err := loadConfig(root)
+			value, _, err := config.Load(root)
 			if testCase.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), testCase.wantError) {
-					t.Fatalf("loadConfig() error = %v, want %q", err, testCase.wantError)
+					t.Fatalf("config.Load() error = %v, want %q", err, testCase.wantError)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("loadConfig() unexpected error: %v", err)
+				t.Fatalf("config.Load() unexpected error: %v", err)
 			}
 			if value.Language != testCase.want {
 				t.Fatalf("language = %q, want %q", value.Language, testCase.want)
@@ -136,15 +138,15 @@ func TestLoadConfigLanguage(t *testing.T) {
 	}
 
 	// A repository with no config file at all also defaults to English.
-	value, _, err := loadConfig(t.TempDir())
+	value, _, err := config.Load(t.TempDir())
 	if err != nil {
-		t.Fatalf("loadConfig() unexpected error: %v", err)
+		t.Fatalf("config.Load() unexpected error: %v", err)
 	}
 	if value.Language != doc.English {
 		t.Fatalf("language without a config file = %q, want %q", value.Language, doc.English)
 	}
-	if value.Hooks.Timeout != defaultHookTimeout {
-		t.Fatalf("hook timeout without a config file = %s, want %s", value.Hooks.Timeout, defaultHookTimeout)
+	if value.Hooks.Timeout != hooks.DefaultTimeout {
+		t.Fatalf("hook timeout without a config file = %s, want %s", value.Hooks.Timeout, hooks.DefaultTimeout)
 	}
 }
 
@@ -185,15 +187,15 @@ func readFileString(t *testing.T, path string) string {
 }
 
 func TestValidateHooks(t *testing.T) {
-	valid := hookConfig{
-		Before: []hookRule{{On: []string{hookEventAdd, hookEventDone}, Run: "echo check"}},
+	valid := hooks.Config{
+		Before: []hooks.Rule{{On: []string{hooks.EventAdd, hooks.EventDone}, Run: "echo check"}},
 	}
-	if err := validateHooks(valid); err != nil {
-		t.Fatalf("validateHooks(valid) unexpected error: %v", err)
+	if err := hooks.Validate(valid); err != nil {
+		t.Fatalf("hooks.Validate(valid) unexpected error: %v", err)
 	}
-	invalid := hookConfig{After: []hookRule{{On: []string{"unknown"}, Run: "echo check"}}}
-	if err := validateHooks(invalid); err == nil || !strings.Contains(err.Error(), "unknown event") {
-		t.Fatalf("validateHooks(invalid) error = %v, want unknown event", err)
+	invalid := hooks.Config{After: []hooks.Rule{{On: []string{"unknown"}, Run: "echo check"}}}
+	if err := hooks.Validate(invalid); err == nil || !strings.Contains(err.Error(), "unknown event") {
+		t.Fatalf("hooks.Validate(invalid) error = %v, want unknown event", err)
 	}
 }
 
@@ -203,8 +205,8 @@ func TestLoadConfigRejectsUnknownHookSetting(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), contents, 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	if _, _, err := loadConfig(root); err == nil {
-		t.Fatal("loadConfig() accepted an unknown hook setting")
+	if _, _, err := config.Load(root); err == nil {
+		t.Fatal("config.Load() accepted an unknown hook setting")
 	}
 }
 
@@ -226,8 +228,8 @@ func TestIsIgnoredPath(t *testing.T) {
 func runHookCapture(t *testing.T, event, command string, phaseID int, status string) string {
 	t.Helper()
 	root := t.TempDir()
-	if err := runHook(root, command, "after "+event+" hook #1", event, "00-checkout-v2", phaseID, status, defaultHookTimeout); err != nil {
-		t.Fatalf("runHook() unexpected error: %v", err)
+	if err := hooks.RunOne(root, command, "after "+event+" hook #1", event, "00-checkout-v2", phaseID, status, hooks.DefaultTimeout); err != nil {
+		t.Fatalf("hooks.RunOne() unexpected error: %v", err)
 	}
 	output, err := os.ReadFile(filepath.Join(root, "hook.out"))
 	if err != nil {
@@ -238,7 +240,7 @@ func runHookCapture(t *testing.T, event, command string, phaseID int, status str
 
 func TestRunHookEnvironment(t *testing.T) {
 	command := `printf '%s:%s:%s:%s' "$PLANR_EVENT" "$PLANR_PLAN" "$PLANR_PHASE" "$PLANR_STATUS" > hook.out`
-	if got, want := runHookCapture(t, hookEventDone, command, 2, "done"), "done:00-checkout-v2:2:done"; got != want {
+	if got, want := runHookCapture(t, hooks.EventDone, command, 2, "done"), "done:00-checkout-v2:2:done"; got != want {
 		t.Fatalf("hook output = %q, want %q", got, want)
 	}
 }
@@ -251,11 +253,11 @@ func TestDescribeAgent(t *testing.T) {
 		Level:     agentenv.DetectionDirect,
 	}
 	want := "claude-code (signal=CLAUDE_CODE_CHILD_SESSION, level=direct, session=session-7)"
-	if got := describeAgent(detected); got != want {
-		t.Errorf("describeAgent() = %q, want %q", got, want)
+	if got := agentenv.Describe(detected); got != want {
+		t.Errorf("agentenv.Describe() = %q, want %q", got, want)
 	}
-	if got := describeAgent(agentenv.Detection{}); !strings.HasPrefix(got, "none") {
-		t.Errorf("describeAgent(zero) = %q, want a none result", got)
+	if got := agentenv.Describe(agentenv.Detection{}); !strings.HasPrefix(got, "none") {
+		t.Errorf("agentenv.Describe(zero) = %q, want a none result", got)
 	}
 }
 
@@ -265,26 +267,26 @@ func TestRunHookExportsAgentEnvironment(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_CHILD_SESSION", "1")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-7")
 	command := `printf '%s:%s:%s' "$PLANR_AGENT" "$PLANR_AGENT_SESSION" "$PLANR_AGENT_LEVEL" > hook.out`
-	if got, want := runHookCapture(t, hookEventDone, command, 2, "done"), "claude-code:session-7:direct"; got != want {
+	if got, want := runHookCapture(t, hooks.EventDone, command, 2, "done"), "claude-code:session-7:direct"; got != want {
 		t.Fatalf("hook output = %q, want %q", got, want)
 	}
 }
 
 func TestRunHookPlanEventHasEmptyPhase(t *testing.T) {
 	command := `printf '<%s>' "$PLANR_PHASE" > hook.out`
-	if got, want := runHookCapture(t, hookEventAdd, command, -1, "registered"), "<>"; got != want {
+	if got, want := runHookCapture(t, hooks.EventAdd, command, -1, "registered"), "<>"; got != want {
 		t.Fatalf("hook output = %q, want %q", got, want)
 	}
 }
 
 func TestRunConfiguredHooksPreservesRuleOrder(t *testing.T) {
 	root := t.TempDir()
-	settings := config{Hooks: hookConfig{After: []hookRule{
-		{On: []string{hookEventAdd, hookEventDone}, Run: `printf 'one' >> hook.out`},
-		{On: []string{hookEventDone}, Run: `printf 'two' >> hook.out`},
+	settings := config.Config{Hooks: hooks.Config{After: []hooks.Rule{
+		{On: []string{hooks.EventAdd, hooks.EventDone}, Run: `printf 'one' >> hook.out`},
+		{On: []string{hooks.EventDone}, Run: `printf 'two' >> hook.out`},
 	}}}
-	if err := runConfiguredHooks(root, settings, "after", hookEventDone, "00-checkout-v2", -1, "done"); err != nil {
-		t.Fatalf("runConfiguredHooks() unexpected error: %v", err)
+	if err := hooks.Run(root, settings.Hooks, settings.SkipHooks, "after", hooks.EventDone, "00-checkout-v2", -1, "done"); err != nil {
+		t.Fatalf("hooks.Run() unexpected error: %v", err)
 	}
 	output, err := os.ReadFile(filepath.Join(root, "hook.out"))
 	if err != nil {
@@ -297,12 +299,12 @@ func TestRunConfiguredHooksPreservesRuleOrder(t *testing.T) {
 
 func TestRunConfiguredHooksCanBeSkippedForOneInvocation(t *testing.T) {
 	root := t.TempDir()
-	settings := config{
-		skipHooks: true,
-		Hooks:     hookConfig{After: []hookRule{{On: []string{hookEventDone}, Run: "touch hook.out"}}},
+	settings := config.Config{
+		SkipHooks: true,
+		Hooks:     hooks.Config{After: []hooks.Rule{{On: []string{hooks.EventDone}, Run: "touch hook.out"}}},
 	}
-	if err := runConfiguredHooks(root, settings, "after", hookEventDone, "00-checkout-v2", 0, "done"); err != nil {
-		t.Fatalf("runConfiguredHooks() unexpected error: %v", err)
+	if err := hooks.Run(root, settings.Hooks, settings.SkipHooks, "after", hooks.EventDone, "00-checkout-v2", 0, "done"); err != nil {
+		t.Fatalf("hooks.Run() unexpected error: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "hook.out")); !os.IsNotExist(err) {
 		t.Fatalf("skipHooks still ran the hook; stat error = %v", err)
@@ -342,14 +344,14 @@ func TestNoHooksGlobalFlagSkipsBeforeAndAfterHooks(t *testing.T) {
 
 func TestRunConfiguredHooksUsesConfiguredTimeout(t *testing.T) {
 	root := t.TempDir()
-	settings := config{Hooks: hookConfig{
+	settings := config.Config{Hooks: hooks.Config{
 		Timeout: 20 * time.Millisecond,
-		After:   []hookRule{{On: []string{hookEventDone}, Run: "sleep 1"}},
+		After:   []hooks.Rule{{On: []string{hooks.EventDone}, Run: "sleep 1"}},
 	}}
 	started := time.Now()
-	err := runConfiguredHooks(root, settings, "after", hookEventDone, "00-checkout-v2", -1, "done")
+	err := hooks.Run(root, settings.Hooks, settings.SkipHooks, "after", hooks.EventDone, "00-checkout-v2", -1, "done")
 	if err == nil || !strings.Contains(err.Error(), "timed out after 20ms") {
-		t.Fatalf("runConfiguredHooks() error = %v, want configured timeout", err)
+		t.Fatalf("hooks.Run() error = %v, want configured timeout", err)
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("configured timeout took too long: %s", elapsed)

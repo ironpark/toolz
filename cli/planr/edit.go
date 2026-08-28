@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/urfave/cli/v3"
 )
 
@@ -41,12 +42,12 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	settings, repoRoot, err := loadConfig(cwd)
+	settings, repoRoot, err := config.Load(cwd)
 	if err != nil {
 		return err
 	}
-	settings = commandConfig(settings, cmd)
-	planDirectories := settings.planDirs(repoRoot)
+	settings = commandSettings(settings, cmd)
+	planDirectories := settings.PlanDirs(repoRoot)
 	planArg := selector
 	targetKind := "section"
 	phaseID := -1

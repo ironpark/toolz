@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 )
 
 func TestStatusJSONUsesStableSnakeCaseFields(t *testing.T) {
@@ -66,7 +68,7 @@ func TestOverviewAndNotesJSONKeepEmptyArrays(t *testing.T) {
 	}
 
 	value, err := json.Marshal(makeNotesJSON([]planNote{{
-		at: "2026-08-27T00:00:00Z", plan: "00-demo", event: hookEventDone,
+		at: "2026-08-27T00:00:00Z", plan: "00-demo", event: hooks.EventDone,
 		phase: "01", commit: "0123456789abcdef", shortHash: "0123456", subject: "finish phase",
 	}}))
 	if err != nil {
@@ -110,13 +112,13 @@ func TestShowJSONContainsStructuredPhaseContent(t *testing.T) {
 }
 
 func TestDiagnosticJSONUsesStableStructuredFields(t *testing.T) {
-	config, err := json.Marshal(makeConfigJSON(config{
+	config, err := json.Marshal(makeConfigJSON(config.Config{
 		PlansDirs: []string{"plans-active", "plans-archive"},
 		Ignore:    []string{"tmp/**"},
 		Language:  doc.Korean,
-		Hooks: hookConfig{
+		Hooks: hooks.Config{
 			Timeout: 5,
-			Before:  []hookRule{{On: []string{hookEventDone}, Run: "go test ./..."}},
+			Before:  []hooks.Rule{{On: []string{hooks.EventDone}, Run: "go test ./..."}},
 		},
 	}, "/repo"))
 	if err != nil {

@@ -1,4 +1,4 @@
-package main
+package hooks
 
 import (
 	"context"
@@ -9,32 +9,50 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
 )
 
-const (
-	hookEventNew         = "new"
-	hookEventAdd         = "add"
-	hookEventPhaseAdd    = "phase_add"
-	hookEventStart       = "start"
-	hookEventDone        = "done"
-	hookEventReset       = "reset"
-	hookEventConditional = "conditional"
-	hookEventPlanDone    = "plan_done"
-)
+const DefaultTimeout = 10 * time.Minute
 
-var hookEvents = map[string]bool{
-	hookEventNew:         true,
-	hookEventAdd:         true,
-	hookEventPhaseAdd:    true,
-	hookEventStart:       true,
-	hookEventDone:        true,
-	hookEventReset:       true,
-	hookEventConditional: true,
-	hookEventPlanDone:    true,
+// Config is the hooks block of .planr.yaml.
+type Config struct {
+	Before  []Rule        `yaml:"before"`
+	After   []Rule        `yaml:"after"`
+	Timeout time.Duration `yaml:"timeout"`
 }
 
-func (value hookConfig) commands(when, event string) []string {
-	var rules []hookRule
+// Rule binds one shell command to the events that trigger it.
+type Rule struct {
+	On  []string `yaml:"on"`
+	Run string   `yaml:"run"`
+}
+
+const (
+	EventNew         = "new"
+	EventAdd         = "add"
+	EventPhaseAdd    = "phase_add"
+	EventStart       = "start"
+	EventDone        = "done"
+	EventReset       = "reset"
+	EventConditional = "conditional"
+	EventPlanDone    = "plan_done"
+)
+
+var events = map[string]bool{
+	EventNew:         true,
+	EventAdd:         true,
+	EventPhaseAdd:    true,
+	EventStart:       true,
+	EventDone:        true,
+	EventReset:       true,
+	EventConditional: true,
+	EventPlanDone:    true,
+}
+
+// Commands lists the shell commands bound to when/event.
+func (value Config) Commands(when, event string) []string {
+	var rules []Rule
 	switch when {
 	case "before":
 		rules = value.Before
@@ -43,25 +61,25 @@ func (value hookConfig) commands(when, event string) []string {
 	default:
 		return nil
 	}
-	commands := []string{}
+	Commands := []string{}
 	for _, rule := range rules {
 		for _, candidate := range rule.On {
 			if strings.TrimSpace(candidate) == event && strings.TrimSpace(rule.Run) != "" {
-				commands = append(commands, rule.Run)
+				Commands = append(Commands, rule.Run)
 				break
 			}
 		}
 	}
-	return commands
+	return Commands
 }
 
-func validateHooks(value hookConfig) error {
+func Validate(value Config) error {
 	if value.Timeout < 0 {
 		return fmt.Errorf("hooks.timeout must not be negative")
 	}
 	for _, group := range []struct {
 		name  string
-		rules []hookRule
+		rules []Rule
 	}{
 		{name: "before", rules: value.Before},
 		{name: "after", rules: value.After},
@@ -76,7 +94,7 @@ func validateHooks(value hookConfig) error {
 			seen := map[string]bool{}
 			for _, event := range rule.On {
 				event = strings.TrimSpace(event)
-				if !hookEvents[event] {
+				if !events[event] {
 					return fmt.Errorf("hooks.%s[%d].on contains unknown event %q", group.name, index, event)
 				}
 				if seen[event] {
@@ -89,39 +107,39 @@ func validateHooks(value hookConfig) error {
 	return nil
 }
 
-func runConfiguredHooks(repoRoot string, settings config, when, event, planDirectory string, phaseID int, status string) error {
-	return runConfiguredHooksTo(repoRoot, settings, when, event, planDirectory, phaseID, status, os.Stdout)
+func Run(repoRoot string, value Config, skip bool, when, event, planDirectory string, phaseID int, status string) error {
+	return RunTo(repoRoot, value, skip, when, event, planDirectory, phaseID, status, os.Stdout)
 }
 
-func runConfiguredHooksTo(repoRoot string, settings config, when, event, planDirectory string, phaseID int, status string, outputWriter io.Writer) error {
-	if settings.skipHooks {
+func RunTo(repoRoot string, value Config, skip bool, when, event, planDirectory string, phaseID int, status string, outputWriter io.Writer) error {
+	if skip {
 		return nil
 	}
-	for index, command := range settings.Hooks.commands(when, event) {
+	for index, command := range value.Commands(when, event) {
 		label := fmt.Sprintf("%s %s hook #%d", when, event, index+1)
-		if err := runHookTo(repoRoot, command, label, event, planDirectory, phaseID, status, settings.Hooks.timeoutDuration(), outputWriter); err != nil {
+		if err := RunOneTo(repoRoot, command, label, event, planDirectory, phaseID, status, value.TimeoutDuration(), outputWriter); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// timeoutDuration is the budget for a single hook. Hooks routinely run test
+// TimeoutDuration is the budget for a single hook. Hooks routinely run test
 // suites, so the default is generous, but an unbounded hook would hang planr
 // forever with no indication of which command is stuck. A repository can
 // override it with hooks.timeout.
-func (value hookConfig) timeoutDuration() time.Duration {
+func (value Config) TimeoutDuration() time.Duration {
 	if value.Timeout <= 0 {
-		return defaultHookTimeout
+		return DefaultTimeout
 	}
 	return value.Timeout
 }
 
-func runHook(repoRoot, command, label, event, planDirectory string, phaseID int, status string, timeout time.Duration) error {
-	return runHookTo(repoRoot, command, label, event, planDirectory, phaseID, status, timeout, os.Stdout)
+func RunOne(repoRoot, command, label, event, planDirectory string, phaseID int, status string, timeout time.Duration) error {
+	return RunOneTo(repoRoot, command, label, event, planDirectory, phaseID, status, timeout, os.Stdout)
 }
 
-func runHookTo(repoRoot, command, label, event, planDirectory string, phaseID int, status string, timeout time.Duration, outputWriter io.Writer) error {
+func RunOneTo(repoRoot, command, label, event, planDirectory string, phaseID int, status string, timeout time.Duration, outputWriter io.Writer) error {
 	if strings.TrimSpace(command) == "" {
 		return nil
 	}
@@ -137,7 +155,7 @@ func runHookTo(repoRoot, command, label, event, planDirectory string, phaseID in
 	)
 	// The agent variables describe the process planr itself runs in rather than
 	// the event, so they come from the shared detection in agent.go.
-	hook.Env = append(hook.Env, agentEnvironment()...)
+	hook.Env = append(hook.Env, agentenv.Environment()...)
 	output, err := hook.CombinedOutput()
 	if err != nil {
 		message := strings.TrimSpace(string(output))
