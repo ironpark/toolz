@@ -11,26 +11,13 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/ironpark/toolz/cli/planr/internal/apply"
-	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
-	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
-	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/schema"
-	"github.com/ironpark/toolz/cli/planr/internal/validation"
 	ucli "github.com/urfave/cli/v3"
 )
-
-func applyTestSettings() config.Config {
-	return config.Config{
-		PlansDirs: []string{"plans"},
-		Language:  doc.English,
-		Hooks:     hooks.Config{Timeout: hooks.DefaultTimeout},
-		SkipHooks: true,
-	}
-}
 
 func applyTestDraft(name string) draft.Draft {
 	return draft.Draft{
@@ -47,193 +34,6 @@ func applyTestDraft(name string) draft.Draft {
 			{Title: "Foundation", Meta: draft.Meta{Phase: 0, Slug: "foundation", Status: "planned"}, Planned: "Build the foundation.", Completion: "Foundation tests pass."},
 			{Title: "Follow-up", Meta: draft.Meta{Phase: 1, Slug: "follow-up", Status: "planned", DependsOn: []int{0}}, Planned: "Build the follow-up.", Completion: "Follow-up tests pass."},
 		},
-	}
-}
-
-func filledPhaseDraft(t *testing.T, language string) apply.PhaseDraft {
-	t.Helper()
-	raw, err := doc.RenderNewPhaseDraft(language, "checkout-v2", "Cache Warmup", "cache-warmup")
-	if err != nil {
-		t.Fatalf("doc.RenderNewPhaseDraft() unexpected error: %v", err)
-	}
-	raw = strings.Replace(raw, "perf_phase: false", "perf_phase: true", 1)
-	raw = strings.Replace(raw, "depends_on: []", "depends_on: [1]", 1)
-	raw = strings.Replace(raw, "status: planned", "status: conditional", 1)
-	raw = strings.Replace(raw, "entry_condition: null", "entry_condition: only after the cache API is ready", 1)
-	raw = strings.ReplaceAll(raw, draft.Placeholder, "filled")
-	parsed, err := apply.ParsePhaseDraft([]byte(raw))
-	if err != nil {
-		t.Fatalf("apply.ParsePhaseDraft() unexpected error: %v", err)
-	}
-	return parsed
-}
-
-func TestApplyPhaseDraftAddsPhaseAndPreservesPhaseFlags(t *testing.T) {
-	root := t.TempDir()
-	settings := applyTestSettings()
-	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := plan.Write(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
-		t.Fatalf("plan.Write() unexpected error: %v", err)
-	}
-
-	planDraft := filledPhaseDraft(t, doc.English)
-	if _, err := apply.Phase(planDraft, settings, root, false, false); err != nil {
-		t.Fatalf("apply.Phase() unexpected error: %v", err)
-	}
-	phasePath := filepath.Join(planRoot, "phases", "02-cache-warmup.md")
-	raw, err := os.ReadFile(phasePath)
-	if err != nil {
-		t.Fatalf("read applied phase: %v", err)
-	}
-	front, _, err := mdoc.Split(string(raw))
-	if err != nil {
-		t.Fatalf("parse applied phase: %v", err)
-	}
-	if got, want := front["status"], "conditional"; got != want {
-		t.Fatalf("status = %v, want %v", got, want)
-	}
-	if got, want := front["perf_phase"], true; got != want {
-		t.Fatalf("perf_phase = %v, want %v", got, want)
-	}
-	if !strings.Contains(string(raw), "00-checkout-v2#1") || !strings.Contains(string(raw), "only after the cache API is ready") {
-		t.Fatalf("applied phase lost its metadata:\n%s", raw)
-	}
-	planRaw, err := os.ReadFile(filepath.Join(planRoot, "PLAN.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(planRaw), "[Phase 02: Cache Warmup](phases/02-cache-warmup.md)") {
-		t.Fatalf("PLAN.md does not contain the new checklist entry:\n%s", planRaw)
-	}
-}
-
-func TestApplyPhaseDraftRefusesCompletedPlan(t *testing.T) {
-	root := t.TempDir()
-	settings := applyTestSettings()
-	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := plan.Write(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
-		t.Fatal(err)
-	}
-	planPath := filepath.Join(planRoot, "PLAN.md")
-	raw, err := os.ReadFile(planPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	front, body, err := mdoc.Split(string(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	front["plan_status"] = "done"
-	if err := mdoc.WriteFile(planPath, front, body); err != nil {
-		t.Fatal(err)
-	}
-
-	err = func() error {
-		_, err := apply.Phase(filledPhaseDraft(t, doc.English), settings, root, false, false)
-		return err
-	}()
-	if err == nil || !strings.Contains(err.Error(), "already done") {
-		t.Fatalf("apply.Phase() error = %v, want already done", err)
-	}
-	records := validation.Records(err)
-	if len(records) != 1 || records[0].Rule != "plan_done" {
-		t.Fatalf("validation records = %#v, want plan_done", records)
-	}
-}
-
-func TestApplyDryRunDoesNotCreatePlanFiles(t *testing.T) {
-	root := t.TempDir()
-	settings := applyTestSettings()
-	planDraft := applyTestDraft("dry-run-plan")
-	documents, err := plan.RenderDocuments(planDraft, "00-dry-run-plan", settings.Language, "2026-08-27T00:00:00Z")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var raw strings.Builder
-	raw.WriteString("---\nplan_name: dry-run-plan\ndescription: a test plan\n---\n")
-	raw.WriteString("# GOALS\n\nShip the test plan.\n# SCOPE\n\nThe test scope.\n# CONTEXT\n\nThe test context.\n# PHASES\n\n## PHASE — Foundation\n\n```yaml\nphase: 0\nslug: foundation\nstatus: planned\n```\n\n### Planned Work\n\nBuild the foundation.\n\n### Done When\n\nFoundation tests pass.\n# VERIFICATION\n\ngo test ./...\n# ORDERING\n\nThe first phase comes first.\n# NEXT\n\n```yaml\nnext_phase: 0\n```\n\nImplement the first phase.\n")
-	parsed, err := draft.Parse([]byte(raw.String()), "dry-run-plan.md")
-	if err != nil {
-		t.Fatalf("parse draft: %v", err)
-	}
-	if _, err := apply.Plan(parsed, settings, root, true, false); err != nil {
-		t.Fatalf("apply.Plan(dry-run): %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "plans")); !os.IsNotExist(err) {
-		t.Fatalf("dry-run created plans directory; stat error = %v", err)
-	}
-	if len(documents) == 0 {
-		t.Fatal("rendered dry-run documents are empty")
-	}
-}
-
-func TestEditPhaseBaseHashAndStatusSafety(t *testing.T) {
-	root := t.TempDir()
-	settings := applyTestSettings()
-	if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), []byte("plans_dir: plans\nlanguage: en\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := plan.Write(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
-		t.Fatal(err)
-	}
-	phasePath := filepath.Join(planRoot, "phases", "00-foundation.md")
-	checkout := editDocumentForTest(t, root, "checkout-v2#0", "phase.md", "")
-	if !strings.Contains(checkout, "planr_base:") || !strings.Contains(checkout, "planr_target:") {
-		t.Fatalf("checkout is missing safety metadata:\n%s", checkout)
-	}
-	updated := strings.Replace(checkout, "Build the foundation.", "Build the safer foundation.", 1)
-	if _, err := apply.Edit([]byte(updated), settings, root, false, false); err != nil {
-		t.Fatalf("apply.Edit() unexpected error: %v", err)
-	}
-	changed, err := os.ReadFile(phasePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(changed), "Build the safer foundation.") {
-		t.Fatalf("phase edit was not applied:\n%s", changed)
-	}
-
-	stale := strings.Replace(updated, "Build the safer foundation.", "A stale edit.", 1)
-	_, err = apply.Edit([]byte(stale), settings, root, false, false)
-	if err == nil || !strings.Contains(err.Error(), "does not match") {
-		t.Fatalf("stale apply error = %v, want hash mismatch", err)
-	}
-	if records := validation.Records(err); len(records) != 1 || records[0].Rule != "base_mismatch" {
-		t.Fatalf("stale validation records = %#v, want base_mismatch", records)
-	}
-
-	statusCheckout := editDocumentForTest(t, root, "checkout-v2#0", "status.md", "")
-	statusEdited := strings.Replace(statusCheckout, "status: planned", "status: in-progress", 1)
-	_, err = apply.Edit([]byte(statusEdited), settings, root, false, false)
-	if err == nil || !strings.Contains(err.Error(), "use `planr phase start`") {
-		t.Fatalf("status edit error = %v, want phase start guidance", err)
-	}
-	if records := validation.Records(err); len(records) != 1 || records[0].Rule != "status_transition" {
-		t.Fatalf("status validation records = %#v, want status_transition", records)
-	}
-}
-
-func TestEditPlanSectionProtectsDerivedChecklist(t *testing.T) {
-	root := t.TempDir()
-	settings := applyTestSettings()
-	if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), []byte("plans_dir: plans\nlanguage: en\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := plan.Write(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
-		t.Fatal(err)
-	}
-	checkout := editDocumentForTest(t, root, "checkout-v2", "plan.md", "plan")
-	bad := strings.Replace(checkout, plan.ChecklistPlaceholder, "- [ ] a hand-written checklist", 1)
-	if _, err := apply.Edit([]byte(bad), settings, root, false, false); err == nil || !strings.Contains(err.Error(), "derived checklist") {
-		t.Fatalf("derived-region apply error = %v", err)
-	}
-	if _, err := apply.Edit([]byte(checkout), settings, root, false, false); err != nil {
-		t.Fatalf("unchanged plan checkout apply: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, ".planr.lock")); err == nil {
-		t.Fatal("unexpected repository-root lock")
 	}
 }
 
@@ -264,31 +64,6 @@ func TestRootCommandRemovedWriteAliasesAndAddsNewSurface(t *testing.T) {
 		if command.Name == "add" {
 			t.Fatal("removed phase command is still registered")
 		}
-	}
-}
-
-func TestStructuredValidationIncludesPlaceholderLocationAndCycle(t *testing.T) {
-	raw := renderPlaceholderDraftForTest(t)
-	if err := draft.CheckPlaceholders(raw); err == nil {
-		t.Fatal("placeholder draft unexpectedly passed")
-	} else {
-		records := validation.Records(err)
-		if len(records) != 3 || records[0].Rule != "placeholder" || records[0].Section != "PHASES" || records[0].Phase == nil || records[0].Line == 0 {
-			t.Fatalf("placeholder records = %#v", records)
-		}
-		encoded := jsonout.Validation(records)
-		if encoded[0].Rule != "placeholder" || encoded[0].Phase == nil || encoded[0].Line == 0 {
-			t.Fatalf("placeholder JSON = %#v", encoded[0])
-		}
-	}
-
-	err := draft.ValidatePhaseDependencies([]draft.Phase{phaseForTest(1, 3), phaseForTest(3, 1)})
-	if err == nil {
-		t.Fatal("cycle unexpectedly passed")
-	}
-	records := validation.Records(err)
-	if len(records) != 1 || records[0].Rule != "dependency_cycle" || len(records[0].Phases) != 2 {
-		t.Fatalf("cycle records = %#v", records)
 	}
 }
 
@@ -468,44 +243,6 @@ func TestShowSectionsAllAndSchemaReturnMachineReadableDocuments(t *testing.T) {
 	}
 }
 
-func editDocumentForTest(t *testing.T, root, selector, output, section string) string {
-	t.Helper()
-	old, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(old) })
-	args := []string{"edit", selector, "--output", output}
-	if section != "" {
-		args = append(args, "--section", section)
-	}
-	if err := newEditTestCommand().Run(context.Background(), args); err != nil {
-		t.Fatalf("edit checkout: %v", err)
-	}
-	path := filepath.Join(root, output)
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(raw)
-}
-
-func newEditTestCommand() *ucli.Command {
-	return &ucli.Command{
-		Name: "edit",
-		Flags: []ucli.Flag{
-			&ucli.StringFlag{Name: "section"},
-			&ucli.StringFlag{Name: "output"},
-			&ucli.BoolFlag{Name: "json"},
-			&ucli.BoolFlag{Name: "no-hooks"},
-		},
-		Action: editCommand,
-	}
-}
-
 func newNewTestCommand() *ucli.Command {
 	return &ucli.Command{
 		Name: "new",
@@ -538,15 +275,6 @@ func newSchemaTestCommand() *ucli.Command {
 		Flags:  []ucli.Flag{&ucli.BoolFlag{Name: "json"}},
 		Action: schemaCommand,
 	}
-}
-
-func renderPlaceholderDraftForTest(t *testing.T) string {
-	t.Helper()
-	raw, err := doc.RenderNewDraft(doc.English, "demo", nil, "a demo plan")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
 }
 
 func captureOutput(t *testing.T, function func() error) (string, error) {

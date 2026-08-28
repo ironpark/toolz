@@ -7,6 +7,7 @@ import (
 
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 )
 
@@ -224,3 +225,37 @@ func TestPhaseDependsOnUnknownSlugListsAvailableSlugs(t *testing.T) {
 }
 
 func intPointer(value int) *int { return &value }
+
+func TestStructuredValidationIncludesPlaceholderLocationAndCycle(t *testing.T) {
+	raw := renderPlaceholderDraftForTest(t)
+	if err := draft.CheckPlaceholders(raw); err == nil {
+		t.Fatal("placeholder draft unexpectedly passed")
+	} else {
+		records := validation.Records(err)
+		if len(records) != 3 || records[0].Rule != "placeholder" || records[0].Section != "PHASES" || records[0].Phase == nil || records[0].Line == 0 {
+			t.Fatalf("placeholder records = %#v", records)
+		}
+		encoded := jsonout.Validation(records)
+		if encoded[0].Rule != "placeholder" || encoded[0].Phase == nil || encoded[0].Line == 0 {
+			t.Fatalf("placeholder JSON = %#v", encoded[0])
+		}
+	}
+
+	err := draft.ValidatePhaseDependencies([]draft.Phase{phaseForTest(1, 3), phaseForTest(3, 1)})
+	if err == nil {
+		t.Fatal("cycle unexpectedly passed")
+	}
+	records := validation.Records(err)
+	if len(records) != 1 || records[0].Rule != "dependency_cycle" || len(records[0].Phases) != 2 {
+		t.Fatalf("cycle records = %#v", records)
+	}
+}
+
+func renderPlaceholderDraftForTest(t *testing.T) string {
+	t.Helper()
+	raw, err := doc.RenderNewDraft(doc.English, "demo", nil, "a demo plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
