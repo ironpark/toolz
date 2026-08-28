@@ -11,7 +11,6 @@ A production-ready Obsidian community plugin boilerplate built with Vite 8, Svel
 - Generated `styles.css` at the plugin root
 - Type checking with `svelte-check`
 - ESLint 10 with rules for Obsidian and Svelte
-- Original version bump and GitHub release workflows
 - Mobile-compatible defaults (no Electron or Node runtime APIs)
 
 ## Requirements
@@ -59,13 +58,13 @@ versions.json              Plugin-to-Obsidian compatibility map
 
 Vite bundles Svelte and browser-compatible runtime dependencies. Obsidian, CodeMirror, Electron, Lezer, and Node built-ins are externalized because Obsidian provides them at runtime. The release artifacts are `main.js`, `manifest.json`, and `styles.css`.
 
-Generated files are intentionally ignored by Git and are built by the included release workflow.
+Generated files are intentionally ignored by Git.
 
 ## Release
 
 Update `minAppVersion` in `manifest.json` if needed, then run `pnpm version patch`, `pnpm version minor`, or `pnpm version major`.
 
-Push the commit and its tag. The included workflow builds the plugin and creates a draft GitHub release with the required artifacts. Release tags must be the exact version number without a `v` prefix.
+Release tags must be the exact version number without a `v` prefix.
 
 ## License
 
