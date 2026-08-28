@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/doctor"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
@@ -105,7 +106,7 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 			return err
 		}
 		if section == "plan" {
-			start, end, found := doctorChecklistBounds(body)
+			start, end, found := doctor.ChecklistBounds(body)
 			if !found {
 				return fmt.Errorf("PLAN.md does not contain a # Phases section")
 			}

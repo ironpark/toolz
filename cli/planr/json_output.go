@@ -8,6 +8,7 @@ import (
 
 	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/doctor"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/notes"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
@@ -353,10 +354,10 @@ func makeHookRulesJSON(rules []hooks.Rule) []hookRuleJSON {
 	return result
 }
 
-func makeDoctorJSON(issues []doctorIssue) doctorJSONOutput {
+func makeDoctorJSON(issues []doctor.Issue) doctorJSONOutput {
 	result := make([]doctorIssueJSON, 0, len(issues))
 	for _, issue := range issues {
-		result = append(result, doctorIssueJSON{Location: issue.location, Message: issue.message})
+		result = append(result, doctorIssueJSON{Location: issue.Location, Message: issue.Message})
 	}
 	return doctorJSONOutput{Issues: result}
 }

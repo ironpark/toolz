@@ -9,6 +9,7 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/doctor"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
@@ -44,9 +45,9 @@ func TestDoctorDetectsAndFixesChecklistMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	plan, issues := inspectDoctorPlan(planRoot, "00-checkout-v2")
-	if len(issues) != 0 || len(plan.checklistIssues) == 0 {
-		t.Fatalf("inspectDoctorPlan() issues=%v checklist=%v, want checklist mismatch", issues, plan.checklistIssues)
+	plan, issues := doctor.InspectPlan(planRoot, "00-checkout-v2")
+	if len(issues) != 0 || len(plan.ChecklistIssues) == 0 {
+		t.Fatalf("doctor.InspectPlan() issues=%v checklist=%v, want checklist mismatch", issues, plan.ChecklistIssues)
 	}
 	withWorkingDirectory(t, repoRoot)
 	if err := newDoctorTestCommand().Run(context.Background(), []string{"doctor"}); err == nil {
@@ -62,9 +63,9 @@ func TestDoctorDetectsAndFixesChecklistMismatch(t *testing.T) {
 	if !strings.Contains(string(fixed), "[Phase 00: API Contract](phases/00-api-contract.md)") {
 		t.Fatalf("doctor --fix did not restore checklist:\n%s", fixed)
 	}
-	fixedPlan, fixedIssues := inspectDoctorPlan(planRoot, "00-checkout-v2")
-	if len(fixedIssues) != 0 || len(fixedPlan.checklistIssues) != 0 {
-		t.Fatalf("fixed plan still has issues=%v checklist=%v", fixedIssues, fixedPlan.checklistIssues)
+	fixedPlan, fixedIssues := doctor.InspectPlan(planRoot, "00-checkout-v2")
+	if len(fixedIssues) != 0 || len(fixedPlan.ChecklistIssues) != 0 {
+		t.Fatalf("fixed plan still has issues=%v checklist=%v", fixedIssues, fixedPlan.ChecklistIssues)
 	}
 }
 

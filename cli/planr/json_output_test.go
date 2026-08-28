@@ -8,6 +8,7 @@ import (
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/doctor"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/notes"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
@@ -131,7 +132,7 @@ func TestDiagnosticJSONUsesStableStructuredFields(t *testing.T) {
 		t.Fatalf("config JSON = %s", config)
 	}
 
-	doctor, err := json.Marshal(makeDoctorJSON([]doctorIssue{{location: "plan/PLAN.md", message: "broken checklist"}}))
+	doctor, err := json.Marshal(makeDoctorJSON([]doctor.Issue{{Location: "plan/PLAN.md", Message: "broken checklist"}}))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/doctor"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
@@ -1113,12 +1114,12 @@ func applySectionEdit(raw []byte, currentRaw []byte, target, planDirectory, sect
 	var updatedBody string
 	switch section {
 	case "plan":
-		incomingStart, incomingEnd, incomingFound := doctorChecklistBounds(incomingBody)
+		incomingStart, incomingEnd, incomingFound := doctor.ChecklistBounds(incomingBody)
 		if !incomingFound || strings.TrimSpace(incomingBody[incomingStart:incomingEnd]) != planChecklistPlaceholder {
 			detail := "plan section checkout must keep the derived checklist region unchanged"
 			return applyOperation{}, validation.NewFailure(validation.Record{Rule: "derived_region", Section: "PLAN", Detail: detail}, detail)
 		}
-		start, end, found := doctorChecklistBounds(currentBody)
+		start, end, found := doctor.ChecklistBounds(currentBody)
 		if !found {
 			detail := "PLAN.md does not contain a # Phases section"
 			return applyOperation{}, validation.NewFailure(validation.Record{Rule: "derived_region", Section: "PLAN", Detail: detail}, detail)
