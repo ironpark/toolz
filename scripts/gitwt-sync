@@ -1,0 +1,362 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly MAIN_BRANCH="main"
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  scripts/gitwt-sync [--dry-run]
+
+Direction is selected from the branch on which the command is run:
+
+  main branch       Merge committed main into every linked-worktree branch.
+  any other branch  Merge that branch's committed changes into the worktree
+                    where main is checked out.
+
+Merge targets may contain staged, unstaged, and untracked changes. Those
+changes are checked for conflicts before the target branch is changed, then
+temporarily stashed and restored with their index state after the real merge.
+Source-side uncommitted changes are preserved but are not part of a branch
+merge; only commits belong to the source branch.
+EOF
+  exit 1
+}
+
+canonical_dir() {
+  (cd -- "$1" 2>/dev/null && pwd -P)
+}
+
+quote() {
+  printf '%q' "$1"
+}
+
+has_in_progress_operation() {
+  local worktree=$1 marker marker_path
+  for marker in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD REBASE_HEAD; do
+    marker_path=$(git -C "$worktree" rev-parse --git-path "$marker")
+    [[ -e "$marker_path" ]] && return 0
+  done
+
+  for marker in rebase-merge rebase-apply sequencer; do
+    marker_path=$(git -C "$worktree" rev-parse --git-path "$marker")
+    [[ -e "$marker_path" ]] && return 0
+  done
+
+  return 1
+}
+
+preflight_merge() {
+  local target_ref=$1 source_ref_to_merge=$2 rc
+  if git merge-tree --write-tree "$target_ref" "$source_ref_to_merge" >/dev/null 2>&1; then
+    return 0
+  else
+    rc=$?
+  fi
+
+  [[ $rc -eq 1 ]] && return 1
+  return 2
+}
+
+untracked_conflicts_with_merge() {
+  local worktree=$1 target_ref=$2 source_ref_to_merge=$3
+  local merged_tree path probe object_type rc
+
+  if merged_tree=$(git merge-tree --write-tree "$target_ref" "$source_ref_to_merge" 2>/dev/null); then
+    :
+  else
+    rc=$?
+    [[ $rc -eq 1 ]] && return 0
+    return 2
+  fi
+
+  while IFS= read -r -d '' path; do
+    # An exact file/directory at the untracked path would overwrite it.
+    if git cat-file -e "$merged_tree:$path" 2>/dev/null; then
+      return 0
+    fi
+
+    # A tracked file at an ancestor would replace the untracked path's parent.
+    probe=$path
+    while [[ "$probe" == */* ]]; do
+      probe=${probe%/*}
+      object_type=$(git cat-file -t "$merged_tree:$probe" 2>/dev/null || true)
+      if [[ -n "$object_type" && "$object_type" != "tree" ]]; then
+        return 0
+      fi
+    done
+  done < <(git -C "$worktree" ls-files --others --exclude-standard -z)
+
+  return 1
+}
+
+abort_merge_if_needed() {
+  local worktree=$1 merge_head
+  merge_head=$(git -C "$worktree" rev-parse --git-path MERGE_HEAD)
+  if [[ -e "$merge_head" ]]; then
+    git -C "$worktree" merge --abort >/dev/null 2>&1 || true
+  fi
+}
+
+dry_run=false
+case ${1:-} in
+  "") ;;
+  --dry-run) dry_run=true ;;
+  -h|--help|help) usage ;;
+  *) usage ;;
+esac
+[[ $# -le 1 ]] || usage
+
+[[ "$(git rev-parse --is-inside-work-tree 2>/dev/null || true)" == "true" ]] ||
+  die "run this command inside a Git working tree"
+
+invocation_root=$(canonical_dir "$(git rev-parse --show-toplevel)") ||
+  die "cannot resolve the current working-tree path"
+git_dir=$(canonical_dir "$(git rev-parse --git-dir)") ||
+  die "cannot resolve the Git directory"
+common_dir=$(canonical_dir "$(git rev-parse --git-common-dir)") ||
+  die "cannot resolve the common Git directory"
+
+current_branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+[[ -n "$current_branch" ]] || die "detached HEAD cannot be used as a sync source"
+
+if has_in_progress_operation "$invocation_root"; then
+  die "the source worktree has a Git merge, rebase, cherry-pick, or revert in progress"
+fi
+
+source_ref="refs/heads/$current_branch"
+main_ref="refs/heads/$MAIN_BRANCH"
+git rev-parse --verify --quiet "$source_ref^{commit}" >/dev/null ||
+  die "cannot resolve $source_ref"
+git rev-parse --verify --quiet "$main_ref^{commit}" >/dev/null ||
+  die "cannot resolve $main_ref"
+
+if [[ "$current_branch" == "$MAIN_BRANCH" ]]; then
+  [[ "$git_dir" == "$common_dir" ]] ||
+    die "forward sync from main must be run from the main working tree"
+  sync_mode="main-to-worktrees"
+else
+  sync_mode="branch-to-main"
+fi
+
+echo "SOURCE: $current_branch ($(git rev-parse --short "$source_ref"))"
+echo "DIRECTION: $sync_mode"
+if [[ "$dry_run" == "true" ]]; then
+  echo "MODE: dry-run"
+else
+  echo "MODE: merge"
+fi
+
+if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
+  echo "NOTE: source worktree is dirty; its uncommitted changes are preserved but are not included in the merge"
+fi
+
+total=0
+merged=0
+up_to_date=0
+conflicts=0
+skipped=0
+errors=0
+main_target_found=false
+
+process_target_worktree() {
+  local path=$1 branch_ref=$2 detached=$3 prunable=$4
+  local branch_name preflight_rc dirty=false wip_commit="" untracked_rc stashed=false
+
+  [[ -n "$path" ]] || return 0
+  [[ "$path" != "$invocation_root" ]] || return 0
+  total=$((total + 1))
+
+  if [[ "$prunable" == "true" || ! -d "$path" ]]; then
+    echo "SKIP: $(quote "$path") [missing or prunable]"
+    skipped=$((skipped + 1))
+    return
+  fi
+
+  if [[ "$detached" == "true" || -z "$branch_ref" ]]; then
+    echo "SKIP: $(quote "$path") [detached HEAD]"
+    skipped=$((skipped + 1))
+    return
+  fi
+
+  branch_name=${branch_ref#refs/heads/}
+  if [[ "$branch_ref" == "$source_ref" ]]; then
+    return
+  fi
+
+  if has_in_progress_operation "$path"; then
+    echo "SKIP: $branch_name at $(quote "$path") [Git operation in progress]"
+    skipped=$((skipped + 1))
+    return
+  fi
+
+  [[ -z "$(git -C "$path" status --porcelain --untracked-files=normal)" ]] || dirty=true
+
+  if git merge-base --is-ancestor "$source_ref" "$branch_ref"; then
+    echo "UP-TO-DATE: $branch_name at $(quote "$path")"
+    up_to_date=$((up_to_date + 1))
+    return
+  fi
+
+  if preflight_merge "$branch_ref" "$source_ref"; then
+    preflight_rc=0
+  else
+    preflight_rc=$?
+  fi
+
+  if [[ $preflight_rc -eq 1 ]]; then
+    echo "CONFLICT: $branch_name at $(quote "$path") [committed histories conflict; not merged]"
+    conflicts=$((conflicts + 1))
+    return
+  fi
+
+  if [[ $preflight_rc -ne 0 ]]; then
+    echo "ERROR: $branch_name at $(quote "$path") [merge preflight failed]" >&2
+    errors=$((errors + 1))
+    return
+  fi
+
+  # `git stash create` does not change the worktree. Its tree combines staged
+  # and unstaged tracked content, so merge-tree can detect WIP conflicts before
+  # the target branch or its index is changed.
+  if ! wip_commit=$(git -C "$path" stash create "gitwt-sync preflight" 2>/dev/null); then
+    echo "ERROR: $branch_name at $(quote "$path") [cannot snapshot tracked WIP for preflight]" >&2
+    errors=$((errors + 1))
+    return
+  fi
+
+  if [[ -n "$wip_commit" ]]; then
+    if preflight_merge "$wip_commit" "$source_ref"; then
+      preflight_rc=0
+    else
+      preflight_rc=$?
+    fi
+
+    if [[ $preflight_rc -eq 1 ]]; then
+      echo "CONFLICT: $branch_name at $(quote "$path") [staged or unstaged tracked changes conflict with $current_branch; not merged]"
+      conflicts=$((conflicts + 1))
+      return
+    fi
+
+    if [[ $preflight_rc -ne 0 ]]; then
+      echo "ERROR: $branch_name at $(quote "$path") [WIP preflight failed]" >&2
+      errors=$((errors + 1))
+      return
+    fi
+  fi
+
+  if untracked_conflicts_with_merge "$path" "$branch_ref" "$source_ref"; then
+    echo "CONFLICT: $branch_name at $(quote "$path") [an untracked path would be overwritten; not merged]"
+    conflicts=$((conflicts + 1))
+    return
+  else
+    untracked_rc=$?
+  fi
+
+  if [[ $untracked_rc -ne 1 ]]; then
+    echo "ERROR: $branch_name at $(quote "$path") [untracked-file preflight failed]" >&2
+    errors=$((errors + 1))
+    return
+  fi
+
+  if [[ "$dry_run" == "true" ]]; then
+    if [[ "$dirty" == "true" ]]; then
+      echo "WOULD-MERGE: $current_branch -> $branch_name at $(quote "$path") [dirty target will be preserved]"
+    else
+      echo "WOULD-MERGE: $current_branch -> $branch_name at $(quote "$path")"
+    fi
+    merged=$((merged + 1))
+    return
+  fi
+
+  if [[ "$dirty" == "true" ]]; then
+    if git -C "$path" stash push --include-untracked --message "gitwt-sync temporary stash" >/dev/null; then
+      stashed=true
+    else
+      echo "ERROR: $branch_name at $(quote "$path") [cannot stash target changes]" >&2
+      errors=$((errors + 1))
+      return
+    fi
+  fi
+
+  if GIT_MERGE_AUTOEDIT=no git -C "$path" merge --no-edit --no-overwrite-ignore "$source_ref"; then
+    if [[ "$stashed" == "true" ]] && ! git -C "$path" stash pop --index; then
+      echo "ERROR: $branch_name at $(quote "$path") [$current_branch was merged, but local-change restoration failed; the stash was preserved]" >&2
+      errors=$((errors + 1))
+      return
+    fi
+
+    if [[ -n "$(git -C "$path" diff --name-only --diff-filter=U)" ]]; then
+      echo "ERROR: $branch_name at $(quote "$path") [unexpected unresolved paths after merge]" >&2
+      errors=$((errors + 1))
+      return
+    fi
+
+    if [[ "$dirty" == "true" ]]; then
+      echo "MERGED: $current_branch -> $branch_name at $(quote "$path") [staged, unstaged, and untracked changes restored]"
+    else
+      echo "MERGED: $current_branch -> $branch_name at $(quote "$path")"
+    fi
+    merged=$((merged + 1))
+  else
+    abort_merge_if_needed "$path"
+    if [[ "$stashed" == "true" ]] && ! git -C "$path" stash pop --index; then
+      echo "ERROR: $current_branch -> $branch_name at $(quote "$path") [merge failed and target-change restoration also failed; stash preserved]" >&2
+      errors=$((errors + 1))
+      return
+    fi
+    echo "ERROR: $current_branch -> $branch_name at $(quote "$path") [merge failed; original target changes restored]" >&2
+    errors=$((errors + 1))
+  fi
+}
+
+dispatch_worktree_record() {
+  local path=$1 branch_ref=$2 detached=$3 prunable=$4
+  [[ -n "$path" ]] || return 0
+
+  if [[ "$sync_mode" == "main-to-worktrees" ]]; then
+    process_target_worktree "$path" "$branch_ref" "$detached" "$prunable"
+  elif [[ "$branch_ref" == "$main_ref" ]]; then
+    main_target_found=true
+    process_target_worktree "$path" "$branch_ref" "$detached" "$prunable"
+  fi
+}
+
+worktree_path=""
+worktree_branch=""
+worktree_detached=false
+worktree_prunable=false
+
+while IFS= read -r -d '' field; do
+  if [[ -z "$field" ]]; then
+    dispatch_worktree_record "$worktree_path" "$worktree_branch" "$worktree_detached" "$worktree_prunable"
+    worktree_path=""
+    worktree_branch=""
+    worktree_detached=false
+    worktree_prunable=false
+    continue
+  fi
+
+  case "$field" in
+    "worktree "*) worktree_path=${field#worktree } ;;
+    "branch "*) worktree_branch=${field#branch } ;;
+    detached) worktree_detached=true ;;
+    prunable|"prunable "*) worktree_prunable=true ;;
+  esac
+done < <(git worktree list --porcelain -z)
+
+# Be tolerant of Git versions that do not emit a final empty record.
+dispatch_worktree_record "$worktree_path" "$worktree_branch" "$worktree_detached" "$worktree_prunable"
+
+if [[ "$sync_mode" == "branch-to-main" && "$main_target_found" != "true" ]]; then
+  die "the main branch is not checked out in an available worktree; cannot perform reverse sync"
+fi
+
+echo "SUMMARY: total=$total merged=$merged up-to-date=$up_to_date conflicts=$conflicts skipped=$skipped errors=$errors"
+
+[[ $errors -eq 0 ]] || exit 2
