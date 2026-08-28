@@ -23,16 +23,13 @@ import (
 	"github.com/spf13/afero"
 )
 
-// Fs is the filesystem planr runs on.
-type Fs = afero.Fs
-
 // current is the filesystem the package-level helpers work through. The afero
 // wrapper is what supplies ReadFile/WriteFile/ReadDir on top of the interface.
 var current = &afero.Afero{Fs: afero.NewOsFs()}
 
 // Use swaps in a filesystem and returns a function restoring the previous one.
 // Tests use it; production code never calls it.
-func Use(fsys Fs) func() {
+func Use(fsys afero.Fs) func() {
 	previous := current
 	current = &afero.Afero{Fs: fsys}
 	return func() { current = previous }
@@ -54,9 +51,6 @@ func ReadDir(path string) ([]fs.FileInfo, error) { return current.ReadDir(path) 
 
 // Stat reports the file information for a path.
 func Stat(path string) (fs.FileInfo, error) { return current.Stat(path) }
-
-// Open opens a file for reading.
-func Open(path string) (afero.File, error) { return current.Open(path) }
 
 // WriteFile writes a file, creating it when it does not exist.
 func WriteFile(path string, contents []byte, mode os.FileMode) error {
