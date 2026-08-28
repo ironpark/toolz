@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -247,7 +247,7 @@ func planLevelDependencies(planRoot string) ([]planDependency, error) {
 		return nil, err
 	}
 	dependencies := []planDependency{}
-	for _, raw := range yamlStrings(front["depends_on"]) {
+	for _, raw := range mdoc.Strings(front["depends_on"]) {
 		dependency, err := parseDependency(raw)
 		if err != nil {
 			continue
@@ -315,7 +315,7 @@ func isPlanDraftPath(repoRoot, relativePath string) bool {
 	if err != nil {
 		return false
 	}
-	front, _, err := frontmatter(string(raw))
+	front, _, err := mdoc.Split(string(raw))
 	if err != nil {
 		return false
 	}
@@ -468,7 +468,7 @@ func updatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 	if err != nil {
 		return "", false, err
 	}
-	phaseFront, phaseBody, err := frontmatter(string(phaseRaw))
+	phaseFront, phaseBody, err := mdoc.Split(string(phaseRaw))
 	if err != nil {
 		return "", false, fmt.Errorf("parse %s: %w", filepath.Base(phasePath), err)
 	}
@@ -482,7 +482,7 @@ func updatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 	} else {
 		delete(phaseFront, "completed_at")
 	}
-	if err := writeFrontmatterFile(phasePath, phaseFront, phaseBody); err != nil {
+	if err := mdoc.WriteFile(phasePath, phaseFront, phaseBody); err != nil {
 		return "", false, err
 	}
 
@@ -495,7 +495,7 @@ func updatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 	if err != nil {
 		return "", false, err
 	}
-	planFront, planBody, err := frontmatter(string(planRaw))
+	planFront, planBody, err := mdoc.Split(string(planRaw))
 	if err != nil {
 		return "", false, fmt.Errorf("parse PLAN.md: %w", err)
 	}
@@ -517,7 +517,7 @@ func updatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 	if err != nil {
 		return "", false, fmt.Errorf("update PLAN.md phase checklist: %w", err)
 	}
-	if err := writeFrontmatterFile(planPath, planFront, planBody); err != nil {
+	if err := mdoc.WriteFile(planPath, planFront, planBody); err != nil {
 		return "", false, err
 	}
 	return planDirectory, completed, nil
@@ -602,72 +602,11 @@ func findPhaseFile(planRoot string, phaseID int) (string, error) {
 	return "", fmt.Errorf("phase %02d not found", phaseID)
 }
 
-func writeFrontmatterFile(path string, front map[string]any, body string) error {
-	contents, err := renderFrontmatterDocument(front, body)
-	if err != nil {
-		return fmt.Errorf("encode %s frontmatter: %w", filepath.Base(path), err)
-	}
-	return writeFileAtomically(path, contents)
-}
-
-// writeFileAtomically rewrites a document that may already be tracked in git,
-// so the contents are staged next to the target and renamed into place: an
-// interrupted write leaves the previous contents rather than a truncated
-// document.
-func writeFileAtomically(path, contents string) error {
-	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".")
-	if err != nil {
-		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
-	}
-	defer os.Remove(temporary.Name())
-	if _, err := temporary.WriteString(contents); err != nil {
-		temporary.Close()
-		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
-	}
-	if err := os.Chmod(temporary.Name(), 0644); err != nil {
-		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
-	}
-	if err := os.Rename(temporary.Name(), path); err != nil {
-		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
-	}
-	return nil
-}
-
-// pruneEmptyMeta drops keys whose value carries no information: nil, empty
+// mdoc.PruneEmptyMeta drops keys whose value carries no information: nil, empty
 // strings, and empty collections. Plan documents are read by humans, so an
 // unset field is better left out than written as `key: null` or `key: []`.
 // Booleans and numbers are kept, since false and 0 are real values.
-// completionTimestamp is the stamp written into completed_at frontmatter.
+// completionTimestamp is the stamp written into completed_at mdoc.Split.
 func completionTimestamp() string {
 	return time.Now().UTC().Format(time.RFC3339)
-}
-
-func pruneEmptyMeta(front map[string]any) map[string]any {
-	for key, value := range front {
-		if isEmptyMeta(value) {
-			delete(front, key)
-		}
-	}
-	return front
-}
-
-func isEmptyMeta(value any) bool {
-	switch typed := value.(type) {
-	case nil:
-		return true
-	case string:
-		return strings.TrimSpace(typed) == ""
-	case *string:
-		return typed == nil || strings.TrimSpace(*typed) == ""
-	}
-	switch reflected := reflect.ValueOf(value); reflected.Kind() {
-	case reflect.Slice, reflect.Map, reflect.Array:
-		return reflected.Len() == 0
-	case reflect.Ptr, reflect.Interface:
-		return reflected.IsNil()
-	}
-	return false
 }

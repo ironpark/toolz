@@ -9,6 +9,7 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 )
 
 func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
@@ -210,7 +211,7 @@ func assertPlanStatus(t *testing.T, path, want string) {
 	if err != nil {
 		t.Fatalf("read PLAN.md: %v", err)
 	}
-	front, _, err := frontmatter(string(raw))
+	front, _, err := mdoc.Split(string(raw))
 	if err != nil {
 		t.Fatalf("parse PLAN.md: %v", err)
 	}
@@ -225,7 +226,7 @@ func assertPlanChecklist(t *testing.T, path string, phaseID int, wantDone bool) 
 	if err != nil {
 		t.Fatalf("read PLAN.md: %v", err)
 	}
-	_, body, err := frontmatter(string(raw))
+	_, body, err := mdoc.Split(string(raw))
 	if err != nil {
 		t.Fatalf("parse PLAN.md: %v", err)
 	}

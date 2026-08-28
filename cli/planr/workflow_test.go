@@ -13,6 +13,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 	"github.com/urfave/cli/v3"
 )
@@ -79,7 +80,7 @@ func TestApplyPhaseDraftAddsPhaseAndPreservesPhaseFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read applied phase: %v", err)
 	}
-	front, _, err := frontmatter(string(raw))
+	front, _, err := mdoc.Split(string(raw))
 	if err != nil {
 		t.Fatalf("parse applied phase: %v", err)
 	}
@@ -113,12 +114,12 @@ func TestApplyPhaseDraftRefusesCompletedPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	front, body, err := frontmatter(string(raw))
+	front, body, err := mdoc.Split(string(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
 	front["plan_status"] = "done"
-	if err := writeFrontmatterFile(planPath, front, body); err != nil {
+	if err := mdoc.WriteFile(planPath, front, body); err != nil {
 		t.Fatal(err)
 	}
 

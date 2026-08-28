@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -44,7 +45,7 @@ func phaseRemoveCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	planFront, planBody, err := frontmatter(string(planRaw))
+	planFront, planBody, err := mdoc.Split(string(planRaw))
 	if err != nil {
 		return fmt.Errorf("parse %s/PLAN.md: %w", planDirectory, err)
 	}
@@ -90,12 +91,12 @@ func phaseRemoveCommand(_ context.Context, cmd *cli.Command) error {
 		delete(planFront, "completed_at")
 	}
 
-	if err := writeFrontmatterFile(planPath, planFront, updatedBody); err != nil {
+	if err := mdoc.WriteFile(planPath, planFront, updatedBody); err != nil {
 		return err
 	}
 	if err := os.Remove(phasePath); err != nil {
 		// Keep the documents consistent if the filesystem refuses the removal.
-		if restoreErr := writeFileAtomically(planPath, string(planRaw)); restoreErr != nil {
+		if restoreErr := mdoc.WriteAtomically(planPath, string(planRaw)); restoreErr != nil {
 			return fmt.Errorf("remove %s: %w; restore PLAN.md: %v", filepath.Base(phasePath), err, restoreErr)
 		}
 		return fmt.Errorf("remove %s: %w", filepath.Base(phasePath), err)

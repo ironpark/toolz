@@ -16,6 +16,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -243,14 +244,14 @@ func renderPlanDocuments(d draft, planDirectory, language, registeredAt string) 
 	for _, p := range d.Phases {
 		checklist = append(checklist, phaseChecklistEntry(p.Meta.Phase, p.Title, p.Meta.Slug, p.Meta.Status == "done"))
 		path := phaseDocumentPath(p.Meta.Phase, p.Meta.Slug)
-		contents, err := renderFrontmatterDocument(phaseFrontmatter(planDirectory, p.Meta), phaseDocumentBody(language, p.Title, p.Planned, p.Completion))
+		contents, err := mdoc.Render(phaseFrontmatter(planDirectory, p.Meta), phaseDocumentBody(language, p.Title, p.Planned, p.Completion))
 		if err != nil {
 			return nil, err
 		}
 		documents[path] = contents
 	}
 	meta := map[string]any{"description": d.Description, "registered_at": registeredAt, "plan_status": "in-progress", "depends_on": d.DependsOn, "succeeded_by": nil, "preceded_by": nil}
-	header, err := yaml.Marshal(pruneEmptyMeta(meta))
+	header, err := yaml.Marshal(mdoc.PruneEmptyMeta(meta))
 	if err != nil {
 		return nil, err
 	}
@@ -266,14 +267,6 @@ func renderPlanDocuments(d draft, planDirectory, language, registeredAt string) 
 		text.Ordering, d.Ordering,
 		text.NextTarget, d.NextText)
 	return documents, nil
-}
-
-func renderFrontmatterDocument(front map[string]any, body string) (string, error) {
-	header, err := yaml.Marshal(pruneEmptyMeta(front))
-	if err != nil {
-		return "", err
-	}
-	return "---\n" + string(header) + "---\n" + body, nil
 }
 
 // phaseFilePrefix matches a phase document filename, capturing its number and slug.
@@ -420,7 +413,7 @@ func collectPlanSummaries(planDirectories []string, filter string) ([]planSummar
 			if err != nil {
 				continue
 			}
-			front, _, err := frontmatter(string(raw))
+			front, _, err := mdoc.Split(string(raw))
 			if err != nil {
 				return nil, false, fmt.Errorf("%s: %w", entry.Name(), err)
 			}
@@ -435,7 +428,7 @@ func collectPlanSummaries(planDirectories []string, filter string) ([]planSummar
 				status: status,
 				phases: phases,
 			}
-			for _, dependency := range yamlStrings(front["depends_on"]) {
+			for _, dependency := range mdoc.Strings(front["depends_on"]) {
 				summary.addDependency(dependency)
 			}
 			if status != "done" {
@@ -582,15 +575,6 @@ func statusCommand(_ context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-func markdownTitle(contents string) string {
-	for _, line := range strings.Split(contents, "\n") {
-		if strings.HasPrefix(line, "# ") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "# "))
-		}
-	}
-	return "unnamed phase"
-}
-
 type storedPhase struct {
 	id                  int
 	slug, title, status string
@@ -619,12 +603,12 @@ func readPlanPhases(planRoot string) ([]storedPhase, error) {
 		if err != nil {
 			return nil, err
 		}
-		front, _, err := frontmatter(string(contents))
+		front, _, err := mdoc.Split(string(contents))
 		if err != nil {
 			return nil, fmt.Errorf("%s/%s: %w", filepath.Base(planRoot), entry.Name(), err)
 		}
 		status, _ := front["status"].(string)
-		phases = append(phases, storedPhase{id, match[2], markdownTitle(string(contents)), status, yamlStrings(front["depends_on"])})
+		phases = append(phases, storedPhase{id, match[2], mdoc.Title(string(contents)), status, mdoc.Strings(front["depends_on"])})
 	}
 	sort.Slice(phases, func(i, j int) bool { return phases[i].id < phases[j].id })
 	return phases, nil
@@ -647,15 +631,4 @@ func dependencyLabel(dependency planDependency) string {
 		return dependency.plan
 	}
 	return fmt.Sprintf("%s#%d", dependency.plan, *dependency.phase)
-}
-
-func yamlStrings(value any) []string {
-	values, _ := value.([]any)
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		if text, ok := value.(string); ok {
-			result = append(result, text)
-		}
-	}
-	return result
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -209,9 +210,9 @@ func inspectDoctorPlan(planRoot, directory string) (doctorPlan, []doctorIssue) {
 		plan.phaseDataOK = false
 	} else {
 		if !hasDocumentFrontmatter(string(raw)) {
-			issues = append(issues, doctorIssue{location: plan.directory + "/PLAN.md", message: "missing frontmatter"})
+			issues = append(issues, doctorIssue{location: plan.directory + "/PLAN.md", message: "missing mdoc.Split"})
 		} else {
-			front, body, frontErr := frontmatter(string(raw))
+			front, body, frontErr := mdoc.Split(string(raw))
 			if frontErr != nil {
 				issues = append(issues, doctorIssue{location: plan.directory + "/PLAN.md", message: frontErr.Error()})
 			} else {
@@ -279,18 +280,18 @@ func inspectDoctorPlan(planRoot, directory string) (doctorPlan, []doctorIssue) {
 				continue
 			}
 			if !hasDocumentFrontmatter(string(phaseRaw)) {
-				issues = append(issues, doctorIssue{location: location, message: "missing frontmatter"})
+				issues = append(issues, doctorIssue{location: location, message: "missing mdoc.Split"})
 				plan.phaseDataOK = false
 				continue
 			}
-			phaseFront, _, frontErr := frontmatter(string(phaseRaw))
+			phaseFront, _, frontErr := mdoc.Split(string(phaseRaw))
 			if frontErr != nil {
 				issues = append(issues, doctorIssue{location: location, message: frontErr.Error()})
 				plan.phaseDataOK = false
 				continue
 			}
 			phase := doctorPhase{
-				storedPhase: storedPhase{id: id, slug: match[2], title: markdownTitle(string(phaseRaw)), status: doctorStringValue(phaseFront["status"]), dependencies: yamlStrings(phaseFront["depends_on"])},
+				storedPhase: storedPhase{id: id, slug: match[2], title: mdoc.Title(string(phaseRaw)), status: doctorStringValue(phaseFront["status"]), dependencies: mdoc.Strings(phaseFront["depends_on"])},
 				path:        phasePath,
 				front:       phaseFront,
 			}
@@ -539,7 +540,7 @@ func writeDoctorPlanBody(plan doctorPlan, body string) error {
 	if bodyOffset < 0 || bodyOffset > len(plan.raw) {
 		return fmt.Errorf("could not locate PLAN.md body")
 	}
-	return writeFileAtomically(plan.planPath, plan.raw[:bodyOffset]+body)
+	return mdoc.WriteAtomically(plan.planPath, plan.raw[:bodyOffset]+body)
 }
 
 func checklistState(checked bool) string {
@@ -602,10 +603,10 @@ func doctorHasPhase(plan doctorPlan, id int) bool {
 }
 
 func doctorStringValue(value any) string {
-	return strings.TrimSpace(stringValue(value))
+	return strings.TrimSpace(mdoc.StringValue(value))
 }
 
-// doctorStringList is the strict variant of yamlStrings: a non-list value or a
+// doctorStringList is the strict variant of mdoc.Strings: a non-list value or a
 // list with any non-string element is rejected instead of silently skipped.
 func doctorStringList(value any) ([]string, bool) {
 	values, ok := value.([]any)
@@ -615,7 +616,7 @@ func doctorStringList(value any) ([]string, bool) {
 		}
 		return nil, false
 	}
-	result := yamlStrings(value)
+	result := mdoc.Strings(value)
 	if len(result) != len(values) {
 		return nil, false
 	}

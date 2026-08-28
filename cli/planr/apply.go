@@ -17,6 +17,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 	"github.com/urfave/cli/v3"
 )
@@ -29,7 +30,7 @@ const (
 	planChecklistPlaceholder = "<!-- planr: phase checklist is derived; do not edit -->"
 )
 
-// editEnvelopeKeys are the frontmatter keys that belong to planr's document
+// editEnvelopeKeys are the mdoc.Split keys that belong to planr's document
 // envelopes (edit checkouts and new-phase drafts), not to the stored document.
 var editEnvelopeKeys = []string{
 	"planr_edit",
@@ -255,9 +256,9 @@ func applyCommandError(cmd *cli.Command, err error) error {
 }
 
 func detectApplyDocument(raw []byte, fallback string) (string, any, error) {
-	front, _, err := frontmatter(string(raw))
+	front, _, err := mdoc.Split(string(raw))
 	if err != nil {
-		return "", nil, validation.Wrap(err, "frontmatter", "frontmatter")
+		return "", nil, validation.Wrap(err, "mdoc.Split", "mdoc.Split")
 	}
 	if value, ok := front["planr_edit"].(string); ok && strings.TrimSpace(value) != "" {
 		return applyKindEdit, raw, nil
@@ -283,56 +284,56 @@ func detectApplyDocument(raw []byte, fallback string) (string, any, error) {
 }
 
 func parsePhaseDraft(raw []byte) (phaseDraftInput, error) {
-	front, body, err := frontmatter(string(raw))
+	front, body, err := mdoc.Split(string(raw))
 	if err != nil {
-		return phaseDraftInput{}, validation.Wrap(err, "frontmatter", "frontmatter")
+		return phaseDraftInput{}, validation.Wrap(err, "mdoc.Split", "mdoc.Split")
 	}
 	if err := checkDraftPlaceholders(string(raw)); err != nil {
 		return phaseDraftInput{}, err
 	}
 	plan, ok := front["planr_plan"].(string)
 	if !ok || strings.TrimSpace(plan) == "" {
-		return phaseDraftInput{}, phaseDraftValidationError("frontmatter", "phase draft requires planr_plan")
+		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", "phase draft requires planr_plan")
 	}
 	plan = strings.TrimSpace(plan)
 	title, ok := front["phase_title"].(string)
 	if !ok || strings.TrimSpace(title) == "" {
-		return phaseDraftInput{}, phaseDraftValidationError("frontmatter", "phase draft requires phase_title")
+		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", "phase draft requires phase_title")
 	}
 	title = strings.TrimSpace(title)
 	if strings.ContainsAny(title, "\r\n") {
-		return phaseDraftInput{}, phaseDraftValidationError("frontmatter", "phase title must be a single line")
+		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", "phase title must be a single line")
 	}
 	if _, found := front["phase"]; found {
-		return phaseDraftInput{}, phaseDraftValidationError("frontmatter", "phase number is assigned by planr apply; remove phase from the draft")
+		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", "phase number is assigned by planr apply; remove phase from the draft")
 	}
 	slug, ok := front["slug"].(string)
 	if !ok || !kebab.MatchString(strings.TrimSpace(slug)) {
-		return phaseDraftInput{}, phaseDraftValidationError("frontmatter", fmt.Sprintf("phase slug %q must be lowercase kebab-case", slug))
+		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", fmt.Sprintf("phase slug %q must be lowercase kebab-case", slug))
 	}
 	slug = strings.TrimSpace(slug)
 
 	var meta phaseMeta
 	frontYAML, err := yaml.Marshal(front)
 	if err != nil {
-		return phaseDraftInput{}, phaseDraftValidationError("frontmatter", fmt.Sprintf("parse phase metadata: %v", err))
+		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", fmt.Sprintf("parse phase metadata: %v", err))
 	}
 	if err := yaml.Unmarshal(frontYAML, &meta); err != nil {
-		return phaseDraftInput{}, phaseDraftValidationError("frontmatter", fmt.Sprintf("parse phase metadata: %v", err))
+		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", fmt.Sprintf("parse phase metadata: %v", err))
 	}
 	meta.Phase = -1
 	meta.Slug = slug
 	if meta.Status != "planned" && meta.Status != "conditional" {
-		return phaseDraftInput{}, phaseDraftValidationError("frontmatter", fmt.Sprintf("invalid new phase status %q; use planned or conditional", meta.Status))
+		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", fmt.Sprintf("invalid new phase status %q; use planned or conditional", meta.Status))
 	}
 	if meta.Status == "conditional" && (meta.EntryCondition == nil || strings.TrimSpace(*meta.EntryCondition) == "") {
-		return phaseDraftInput{}, phaseDraftValidationError("frontmatter", "conditional phase requires entry_condition")
+		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", "conditional phase requires entry_condition")
 	}
 	if meta.Status == "planned" && meta.EntryCondition != nil {
-		return phaseDraftInput{}, phaseDraftValidationError("frontmatter", "planned phase cannot set entry_condition")
+		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", "planned phase cannot set entry_condition")
 	}
-	if markdownTitle(body) != title {
-		return phaseDraftInput{}, phaseDraftValidationError("phase", fmt.Sprintf("phase title %q in the body does not match phase_title %q", markdownTitle(body), title))
+	if mdoc.Title(body) != title {
+		return phaseDraftInput{}, phaseDraftValidationError("phase", fmt.Sprintf("phase title %q in the body does not match phase_title %q", mdoc.Title(body), title))
 	}
 	planned, completion, err := splitPhaseDocumentSections(title, body)
 	if err != nil {
@@ -432,13 +433,13 @@ func applyPhaseDraft(d phaseDraftInput, settings config.Config, repoRoot string,
 	if err != nil {
 		return applyOperation{}, err
 	}
-	planFront, planBody, err := frontmatter(string(planRaw))
+	planFront, planBody, err := mdoc.Split(string(planRaw))
 	if err != nil {
 		return applyOperation{}, fmt.Errorf("parse %s/PLAN.md: %w", planDirectory, err)
 	}
 	if status, _ := planFront["plan_status"].(string); status == "done" {
 		detail := fmt.Sprintf("plan %q is already done; new phases can only be applied to open plans", planDirectory)
-		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "plan_done", Section: "frontmatter", Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "plan_done", Section: "mdoc.Split", Detail: detail}, detail)
 	}
 	phases, err := readPlanPhases(planRoot)
 	if err != nil {
@@ -448,7 +449,7 @@ func applyPhaseDraft(d phaseDraftInput, settings config.Config, repoRoot string,
 	for _, phase := range phases {
 		if phase.slug == d.Meta.Slug {
 			detail := fmt.Sprintf("phase slug %q already exists in plan %q", d.Meta.Slug, planDirectory)
-			return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_slug_duplicate", Section: "frontmatter", Detail: detail}, detail)
+			return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_slug_duplicate", Section: "mdoc.Split", Detail: detail}, detail)
 		}
 	}
 	dependencies, err := resolvePhaseDraftDependencies(d.Meta.DependsOnRefs, phases)
@@ -465,15 +466,15 @@ func applyPhaseDraft(d phaseDraftInput, settings config.Config, repoRoot string,
 	if err != nil {
 		return applyOperation{}, fmt.Errorf("update %s/PLAN.md: %w", planDirectory, err)
 	}
-	updatedPlanFront := copyFrontmatter(planFront)
+	updatedPlanFront := mdoc.CopyFront(planFront)
 	updatedPlanFront["plan_status"] = "in-progress"
 	delete(updatedPlanFront, "completed_at")
 	phasePath := filepath.Join(planRoot, phaseDocumentPath(phaseID, meta.Slug))
-	phaseContents, err := renderFrontmatterDocument(phaseFrontmatter(planDirectory, meta), phaseDocumentBody(settings.Language, d.Title, d.Planned, d.Completion))
+	phaseContents, err := mdoc.Render(phaseFrontmatter(planDirectory, meta), phaseDocumentBody(settings.Language, d.Title, d.Planned, d.Completion))
 	if err != nil {
 		return applyOperation{}, err
 	}
-	updatedPlanContents, err := renderFrontmatterDocument(updatedPlanFront, updatedPlanBody)
+	updatedPlanContents, err := mdoc.Render(updatedPlanFront, updatedPlanBody)
 	if err != nil {
 		return applyOperation{}, err
 	}
@@ -489,10 +490,10 @@ func applyPhaseDraft(d phaseDraftInput, settings config.Config, repoRoot string,
 	if err := os.MkdirAll(filepath.Join(planRoot, "phases"), 0755); err != nil {
 		return applyOperation{}, err
 	}
-	if err := writeFileAtomically(phasePath, phaseContents); err != nil {
+	if err := mdoc.WriteAtomically(phasePath, phaseContents); err != nil {
 		return applyOperation{}, err
 	}
-	if err := writeFileAtomically(planPath, updatedPlanContents); err != nil {
+	if err := mdoc.WriteAtomically(planPath, updatedPlanContents); err != nil {
 		_ = os.Remove(phasePath)
 		return applyOperation{}, err
 	}
@@ -524,16 +525,16 @@ func resolvePhaseDraftDependencies(refs []phaseRef, existing []storedPhase) ([]i
 			id, found = bySlug[ref.slug]
 			if !found {
 				detail := fmt.Sprintf("phase dependency %q is neither a phase number nor a slug of an existing phase; available slugs: %s", ref.slug, strings.Join(known, ", "))
-				return nil, validation.NewFailure(validation.Record{Rule: "dependency_reference", Section: "frontmatter", Detail: detail}, detail)
+				return nil, validation.NewFailure(validation.Record{Rule: "dependency_reference", Section: "mdoc.Split", Detail: detail}, detail)
 			}
 		}
 		if id < 0 {
 			detail := fmt.Sprintf("phase dependency %d must be a non-negative phase number", id)
-			return nil, validation.NewFailure(validation.Record{Rule: "dependency_reference", Section: "frontmatter", Detail: detail}, detail)
+			return nil, validation.NewFailure(validation.Record{Rule: "dependency_reference", Section: "mdoc.Split", Detail: detail}, detail)
 		}
 		if seen[id] {
 			detail := fmt.Sprintf("phase dependency %d is listed more than once", id)
-			return nil, validation.NewFailure(validation.Record{Rule: "dependency_duplicate", Section: "frontmatter", Detail: detail}, detail)
+			return nil, validation.NewFailure(validation.Record{Rule: "dependency_duplicate", Section: "mdoc.Split", Detail: detail}, detail)
 		}
 		seen[id] = true
 		dependencies = append(dependencies, id)
@@ -610,7 +611,7 @@ func validateNewPhaseDependencies(planDirectory string, newPhase phaseMeta, titl
 		message := fmt.Sprintf("invalid dependencies for new phase %d: %v", newPhase.Phase, err)
 		records := validation.Records(err)
 		if len(records) == 0 {
-			records = []validation.Record{{Rule: "dependency", Section: "frontmatter", Phase: validation.IntPointer(newPhase.Phase), Detail: err.Error()}}
+			records = []validation.Record{{Rule: "dependency", Section: "mdoc.Split", Phase: validation.IntPointer(newPhase.Phase), Detail: err.Error()}}
 		}
 		return validation.NewFailures(records, message)
 	}
@@ -688,37 +689,24 @@ func absolutePath(path string) string {
 	return value
 }
 
-func copyFrontmatter(front map[string]any) map[string]any {
-	result := make(map[string]any, len(front))
-	for key, value := range front {
-		result[key] = value
-	}
-	return result
-}
-
-func documentHash(raw []byte) string {
-	digest := sha256.Sum256(raw)
-	return "sha256:" + hex.EncodeToString(digest[:])
-}
-
 func applyEditDocument(raw []byte, settings config.Config, repoRoot string, dryRun, jsonOutput bool) (applyOperation, error) {
-	front, _, err := frontmatter(string(raw))
+	front, _, err := mdoc.Split(string(raw))
 	if err != nil {
-		return applyOperation{}, validation.Wrap(err, "frontmatter", "frontmatter")
+		return applyOperation{}, validation.Wrap(err, "mdoc.Split", "mdoc.Split")
 	}
 	selector, ok := front["planr_edit"].(string)
 	if !ok || strings.TrimSpace(selector) == "" {
-		detail := "edit document requires planr_edit in frontmatter"
-		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "edit_identity", Section: "frontmatter", Detail: detail}, detail)
+		detail := "edit document requires planr_edit in mdoc.Split"
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "edit_identity", Section: "mdoc.Split", Detail: detail}, detail)
 	}
 	targetValue, ok := front["planr_target"].(string)
 	if !ok || strings.TrimSpace(targetValue) == "" {
-		detail := "edit document requires planr_target in frontmatter"
-		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "target_required", Section: "frontmatter", Detail: detail}, detail)
+		detail := "edit document requires planr_target in mdoc.Split"
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "target_required", Section: "mdoc.Split", Detail: detail}, detail)
 	}
 	base, ok := front["planr_base"].(string)
 	if !ok || strings.TrimSpace(base) == "" {
-		detail := "edit document requires mandatory planr_base in frontmatter; run planr edit again"
+		detail := "edit document requires mandatory planr_base in mdoc.Split; run planr edit again"
 		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "base_required", Detail: detail}, detail)
 	}
 	if !strings.HasPrefix(base, "sha256:") {
@@ -732,7 +720,7 @@ func applyEditDocument(raw []byte, settings config.Config, repoRoot string, dryR
 	}
 	planArg, targetKind, phaseID, section, err := parseEditDocumentSelector(selector, front)
 	if err != nil {
-		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "edit_selector", Section: "frontmatter", Detail: err.Error()}, err.Error())
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "edit_selector", Section: "mdoc.Split", Detail: err.Error()}, err.Error())
 	}
 	planDirectories := settings.PlanDirs(repoRoot)
 	planRoot, planDirectory, err := findPlanDirectory(planDirectories, planArg)
@@ -771,7 +759,7 @@ func applyEditDocument(raw []byte, settings config.Config, repoRoot string, dryR
 	if err != nil {
 		return applyOperation{}, err
 	}
-	currentHash := documentHash(currentRaw)
+	currentHash := mdoc.Hash(currentRaw)
 	if currentHash != base {
 		detail := fmt.Sprintf("cannot apply edit for %s: planr_base %s does not match the current on-disk document hash %s; run planr edit again", selector, base, currentHash)
 		record := validation.Record{Rule: "base_mismatch", Detail: detail}
@@ -859,7 +847,7 @@ func relativeTargetPath(repoRoot, value string) (string, error) {
 }
 
 func applyPhaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte, target, planRoot, planDirectory string, phaseID int, dryRun, jsonOutput bool) (applyOperation, error) {
-	currentFront, currentBody, err := frontmatter(string(currentRaw))
+	currentFront, currentBody, err := mdoc.Split(string(currentRaw))
 	if err != nil {
 		return applyOperation{}, fmt.Errorf("parse %s: %w", filepath.Base(target), err)
 	}
@@ -867,18 +855,18 @@ func applyPhaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte,
 	incomingStatus, _ := incomingFront["status"].(string)
 	if incomingStatus != currentStatus {
 		detail := fmt.Sprintf("cannot apply phase edit for %s phase %02d: status changed from %q to %q; use `planr phase %s` to change phase status", planDirectory, phaseID, currentStatus, incomingStatus, phaseStatusCommand(incomingStatus))
-		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "status_transition", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "status_transition", Section: "mdoc.Split", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
 	if !phaseStatusValues[currentStatus] {
 		detail := fmt.Sprintf("%s phase %02d has invalid status %q", planDirectory, phaseID, currentStatus)
-		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "status", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "status", Section: "mdoc.Split", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
 	if err := validatePhaseStatusChange(incomingFront, currentStatus); err != nil {
-		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "status_metadata", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: err.Error()}, err.Error())
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "status_metadata", Section: "mdoc.Split", Phase: validation.IntPointer(phaseID), Detail: err.Error()}, err.Error())
 	}
 	if value, found := incomingFront["planr_phase"]; found && fmt.Sprint(value) != strconv.Itoa(phaseID) {
 		detail := fmt.Sprintf("edit document identifies phase %v, but target is phase %02d", value, phaseID)
-		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_identity", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_identity", Section: "mdoc.Split", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
 	phases, err := readPlanPhases(planRoot)
 	if err != nil {
@@ -889,28 +877,28 @@ func applyPhaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte,
 		if len(validation.Records(err)) > 0 {
 			return applyOperation{}, err
 		}
-		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_metadata", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: err.Error()}, err.Error())
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_metadata", Section: "mdoc.Split", Phase: validation.IntPointer(phaseID), Detail: err.Error()}, err.Error())
 	}
 	if value, found := incomingFront["planr_slug"]; found && fmt.Sprint(value) != meta.Slug {
 		detail := fmt.Sprintf("edit document identifies slug %q, but target is %q", value, meta.Slug)
-		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_identity", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_identity", Section: "mdoc.Split", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
 	if value, found := incomingFront["slug"]; found {
 		if fmt.Sprint(value) != meta.Slug {
 			detail := fmt.Sprintf("edit document cannot change phase slug from %q to %q", meta.Slug, value)
-			return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_identity", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
+			return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_identity", Section: "mdoc.Split", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 		}
 	}
 	if meta.Slug != phaseSlugForID(phases, phaseID) {
 		detail := "phase edit cannot change the phase slug"
-		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_identity", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
+		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_identity", Section: "mdoc.Split", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
-	title := markdownTitle(documentBody(raw))
+	title := mdoc.Title(mdoc.Body(raw))
 	if title == "unnamed phase" {
 		detail := "phase document must contain a Markdown title"
 		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_document", Section: "phase", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
-	planned, completion, err := splitPhaseDocumentSections(title, documentBody(raw))
+	planned, completion, err := splitPhaseDocumentSections(title, mdoc.Body(raw))
 	if err != nil {
 		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_document", Section: "phase", Phase: validation.IntPointer(phaseID), Detail: err.Error()}, err.Error())
 	}
@@ -927,19 +915,19 @@ func applyPhaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte,
 	} else {
 		delete(normalizedFront, "completed_at")
 	}
-	newPhase, err := renderFrontmatterDocument(normalizedFront, documentBody(raw))
+	newPhase, err := mdoc.Render(normalizedFront, mdoc.Body(raw))
 	if err != nil {
 		return applyOperation{}, err
 	}
 	documents := map[string]string{target: newPhase}
 	diffs := []applyDiffJSON{{Path: absolutePath(target), Before: string(currentRaw), After: newPhase}}
-	if title != markdownTitle(currentBody) {
+	if title != mdoc.Title(currentBody) {
 		planPath := filepath.Join(planRoot, "PLAN.md")
 		planRaw, readErr := os.ReadFile(planPath)
 		if readErr != nil {
 			return applyOperation{}, readErr
 		}
-		_, planBody, frontErr := frontmatter(string(planRaw))
+		_, planBody, frontErr := mdoc.Split(string(planRaw))
 		if frontErr != nil {
 			return applyOperation{}, frontErr
 		}
@@ -947,7 +935,7 @@ func applyPhaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte,
 		if updateErr != nil {
 			return applyOperation{}, updateErr
 		}
-		updatedPlan, renderErr := documentWithBody(string(planRaw), updatedBody)
+		updatedPlan, renderErr := mdoc.WithBody(string(planRaw), updatedBody)
 		if renderErr != nil {
 			return applyOperation{}, renderErr
 		}
@@ -958,11 +946,11 @@ func applyPhaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte,
 	if dryRun || !op.changed {
 		return op, nil
 	}
-	if err := writeFileAtomically(target, newPhase); err != nil {
+	if err := mdoc.WriteAtomically(target, newPhase); err != nil {
 		return applyOperation{}, err
 	}
 	if planPath, ok := changedPlanPath(documents, target); ok {
-		if err := writeFileAtomically(planPath, documents[planPath]); err != nil {
+		if err := mdoc.WriteAtomically(planPath, documents[planPath]); err != nil {
 			return applyOperation{}, err
 		}
 	}
@@ -993,32 +981,6 @@ func phaseStatusCommand(status string) string {
 	}
 }
 
-func documentBody(raw []byte) string {
-	_, body, err := frontmatter(string(raw))
-	if err != nil {
-		return string(raw)
-	}
-	return body
-}
-
-// documentWithBody replaces only the body of a frontmatter document. Edits to
-// a derived or prose section must not reserialize unrelated frontmatter and
-// accidentally create a noisy change.
-func documentWithBody(raw, body string) (string, error) {
-	if !strings.HasPrefix(raw, "---\n") {
-		return body, nil
-	}
-	_, currentBody, err := frontmatter(raw)
-	if err != nil {
-		return "", err
-	}
-	offset := len(raw) - len(currentBody)
-	if offset < 0 || offset > len(raw) {
-		return "", fmt.Errorf("could not locate document body")
-	}
-	return raw[:offset] + body, nil
-}
-
 func phaseSlugForID(phases []storedPhase, id int) string {
 	for _, phase := range phases {
 		if phase.id == id {
@@ -1045,7 +1007,7 @@ func editablePhaseMeta(front map[string]any, planDirectory string, phaseID int, 
 		return phaseMeta{}, nil, err
 	}
 	meta.DependsOn = dependencies
-	normalizedFront := copyFrontmatter(front)
+	normalizedFront := mdoc.CopyFront(front)
 	normalizedFront["depends_on"] = normalized
 	if err := validateNewPhaseEditDependencies(planDirectory, meta, phases); err != nil {
 		return phaseMeta{}, nil, err
@@ -1138,11 +1100,11 @@ func validateNewPhaseEditDependencies(planDirectory string, edited phaseMeta, ph
 }
 
 func applySectionEdit(raw []byte, currentRaw []byte, target, planDirectory, section string, dryRun, jsonOutput bool) (applyOperation, error) {
-	_, incomingBody, err := frontmatter(string(raw))
+	_, incomingBody, err := mdoc.Split(string(raw))
 	if err != nil {
 		return applyOperation{}, err
 	}
-	_, currentBody, err := frontmatter(string(currentRaw))
+	_, currentBody, err := mdoc.Split(string(currentRaw))
 	if err != nil {
 		return applyOperation{}, err
 	}
@@ -1163,7 +1125,7 @@ func applySectionEdit(raw []byte, currentRaw []byte, target, planDirectory, sect
 	default:
 		updatedBody = incomingBody
 	}
-	updated, err := documentWithBody(string(currentRaw), updatedBody)
+	updated, err := mdoc.WithBody(string(currentRaw), updatedBody)
 	if err != nil {
 		return applyOperation{}, err
 	}
@@ -1175,5 +1137,5 @@ func applySectionEdit(raw []byte, currentRaw []byte, target, planDirectory, sect
 	if !jsonOutput {
 		fmt.Printf("Updated %s\n", target)
 	}
-	return op, writeFileAtomically(target, updated)
+	return op, mdoc.WriteAtomically(target, updated)
 }

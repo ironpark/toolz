@@ -10,6 +10,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 )
 
@@ -178,9 +179,9 @@ func joinOrNone(values []string) string {
 }
 
 func parseDraft(raw []byte, fallback string) (draft, error) {
-	front, body, err := frontmatter(string(raw))
+	front, body, err := mdoc.Split(string(raw))
 	if err != nil {
-		return draft{}, validation.Wrap(err, "frontmatter", "frontmatter")
+		return draft{}, validation.Wrap(err, "mdoc.Split", "mdoc.Split")
 	}
 	matches := topHeading.FindAllStringSubmatchIndex(body, -1)
 	if len(matches) != len(requiredSections) {
@@ -224,17 +225,17 @@ func parseDraft(raw []byte, fallback string) (draft, error) {
 	}
 	if !kebab.MatchString(name) {
 		detail := fmt.Sprintf("plan name %q must be lowercase kebab-case", name)
-		return draft{}, validation.NewFailure(validation.Record{Rule: "plan_name", Section: "frontmatter", Detail: detail}, detail)
+		return draft{}, validation.NewFailure(validation.Record{Rule: "plan_name", Section: "mdoc.Split", Detail: detail}, detail)
 	}
 	description, err := draftDescription(front)
 	if err != nil {
 		detail := fmt.Sprintf("invalid description for plan %q: %v", name, err)
-		return draft{}, validation.NewFailure(validation.Record{Rule: "description", Section: "frontmatter", Detail: err.Error()}, detail)
+		return draft{}, validation.NewFailure(validation.Record{Rule: "description", Section: "mdoc.Split", Detail: err.Error()}, detail)
 	}
-	dependsOn, err := canonicalPlanDependencies(yamlStrings(front["depends_on"]))
+	dependsOn, err := canonicalPlanDependencies(mdoc.Strings(front["depends_on"]))
 	if err != nil {
 		detail := fmt.Sprintf("invalid plan dependencies: %v", err)
-		return draft{}, validation.NewFailure(validation.Record{Rule: "plan_dependency", Section: "frontmatter", Detail: err.Error()}, detail)
+		return draft{}, validation.NewFailure(validation.Record{Rule: "plan_dependency", Section: "mdoc.Split", Detail: err.Error()}, detail)
 	}
 	phases, err := parsePhases(sections["PHASES"])
 	if err != nil {
@@ -303,7 +304,7 @@ func draftPlaceholderRecords(raw string) []validation.Record {
 		records = append(records, record)
 	}
 	if len(records) > 0 && records[0].Section == "" {
-		if front, _, err := frontmatter(raw); err == nil {
+		if front, _, err := mdoc.Split(raw); err == nil {
 			if kind, ok := front["planr_new"].(string); ok && kind == "phase" {
 				for index := range records {
 					records[index].Section = "PHASE"
@@ -366,21 +367,6 @@ func draftDescription(front map[string]any) (string, error) {
 		return "", fmt.Errorf("description must be a string of 200 characters or fewer")
 	}
 	return normalizeDescription(description, false)
-}
-
-func frontmatter(input string) (map[string]any, string, error) {
-	if !strings.HasPrefix(input, "---\n") {
-		return map[string]any{}, input, nil
-	}
-	end := strings.Index(input[4:], "\n---\n")
-	if end < 0 {
-		return nil, "", fmt.Errorf("unterminated document frontmatter")
-	}
-	values := map[string]any{}
-	if err := yaml.Unmarshal([]byte(input[4:end+4]), &values); err != nil {
-		return nil, "", fmt.Errorf("parse document frontmatter: %w", err)
-	}
-	return values, input[end+9:], nil
 }
 
 func parsePhases(section string) ([]draftPhase, error) {
@@ -509,7 +495,7 @@ func validateDraftDependencies(d *draft) error {
 	dependencies, err := normalizePlanDependencies(d.DependsOn, d.Name)
 	if err != nil {
 		message := fmt.Sprintf("invalid dependencies for plan %q: %v", d.Name, err)
-		return validation.NewFailure(validation.Record{Rule: "plan_dependency", Section: "frontmatter", Detail: err.Error()}, message)
+		return validation.NewFailure(validation.Record{Rule: "plan_dependency", Section: "mdoc.Split", Detail: err.Error()}, message)
 	}
 	d.DependsOn = dependencies
 	if err := validatePhaseDependencies(d.Phases); err != nil {

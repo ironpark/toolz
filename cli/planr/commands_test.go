@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 )
 
 func TestNormalizeDescription(t *testing.T) {
@@ -101,9 +102,9 @@ func TestWritePlanStoresDescriptionAndRegisteredAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read PLAN.md: %v", err)
 	}
-	front, _, err := frontmatter(string(raw))
+	front, _, err := mdoc.Split(string(raw))
 	if err != nil {
-		t.Fatalf("frontmatter() unexpected error: %v", err)
+		t.Fatalf("mdoc.Split() unexpected error: %v", err)
 	}
 	if got, _ := front["description"].(string); got != draft.Description {
 		t.Fatalf("description = %q, want %q", got, draft.Description)

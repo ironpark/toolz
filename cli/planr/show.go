@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -172,9 +173,9 @@ func showAllPlan(planRoot, planDirectory string, jsonOutput bool) error {
 	return writeJSON(showAllJSONOutput{
 		Plan:         planName(planDirectory),
 		Directory:    planDirectory,
-		Status:       frontString(front, "plan_status"),
-		Description:  frontString(front, "description"),
-		DependsOn:    yamlStrings(front["depends_on"]),
+		Status:       mdoc.FrontString(front, "plan_status"),
+		Description:  mdoc.FrontString(front, "description"),
+		DependsOn:    mdoc.Strings(front["depends_on"]),
 		Goals:        documents["GOALS.md"],
 		Context:      documents["CONTEXT.md"],
 		PlanDocument: documents["PLAN.md"],
@@ -188,7 +189,7 @@ func readPlanDocument(planRoot, name string) (map[string]any, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	front, body, err := frontmatter(string(raw))
+	front, body, err := mdoc.Split(string(raw))
 	if err != nil {
 		return nil, "", fmt.Errorf("parse %s: %w", name, err)
 	}
@@ -204,7 +205,7 @@ func readPhaseDetails(planRoot, planDirectory string, stored storedPhase) (phase
 	if err != nil {
 		return phaseDetails{}, err
 	}
-	front, body, err := frontmatter(string(raw))
+	front, body, err := mdoc.Split(string(raw))
 	if err != nil {
 		return phaseDetails{}, fmt.Errorf("parse %s: %w", filepath.Base(phasePath), err)
 	}
@@ -216,22 +217,11 @@ func readPhaseDetails(planRoot, planDirectory string, stored storedPhase) (phase
 	if err != nil {
 		return phaseDetails{}, err
 	}
-	details := phaseDetails{plan: planName(planDirectory), directory: planDirectory, id: stored.id, slug: stored.slug, title: stored.title, status: stored.status, plannedWork: plannedWork, doneWhen: doneWhen, dependencies: yamlStrings(front["depends_on"]), file: absPath}
+	details := phaseDetails{plan: planName(planDirectory), directory: planDirectory, id: stored.id, slug: stored.slug, title: stored.title, status: stored.status, plannedWork: plannedWork, doneWhen: doneWhen, dependencies: mdoc.Strings(front["depends_on"]), file: absPath}
 	if status, ok := front["status"].(string); ok && status != "" {
 		details.status = status
 	}
 	return details, nil
-}
-
-func frontString(front map[string]any, key string) string {
-	return stringValue(front[key])
-}
-
-// stringValue is the shared coercion of a frontmatter value into a string; a
-// non-string value reads as empty.
-func stringValue(value any) string {
-	text, _ := value.(string)
-	return text
 }
 
 func printShowBody(label, body string) {

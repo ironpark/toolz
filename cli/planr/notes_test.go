@@ -13,6 +13,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -74,12 +75,12 @@ func TestFrontmatterOmitsEmptyMetadata(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		front, _, err := frontmatter(string(raw))
+		front, _, err := mdoc.Split(string(raw))
 		if err != nil {
 			t.Fatalf("parse %s: %v", path, err)
 		}
 		for key, value := range front {
-			if isEmptyMeta(value) {
+			if mdoc.IsEmptyMeta(value) {
 				t.Errorf("%s kept empty metadata %q: %#v", filepath.Base(path), key, value)
 			}
 		}
@@ -166,7 +167,7 @@ func frontmatterValue(t *testing.T, path, key string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	front, _, err := frontmatter(string(raw))
+	front, _, err := mdoc.Split(string(raw))
 	if err != nil {
 		t.Fatalf("parse %s: %v", path, err)
 	}

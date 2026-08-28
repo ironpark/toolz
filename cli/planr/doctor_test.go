@@ -83,7 +83,7 @@ func TestDoctorDetectsBrokenDependencyAndFrontmatter(t *testing.T) {
 	withWorkingDirectory(t, repoRoot)
 	err := newDoctorTestCommand().Run(context.Background(), []string{"doctor"})
 	if err == nil {
-		t.Fatal("doctor accepted broken dependency/frontmatter")
+		t.Fatal("doctor accepted broken dependency/mdoc.Split")
 	}
 	if !strings.Contains(err.Error(), "problem") {
 		t.Fatalf("doctor error = %v, want problem summary", err)

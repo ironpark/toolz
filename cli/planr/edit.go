@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/urfave/cli/v3"
 )
 
@@ -85,11 +86,11 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 	checkoutFront := map[string]any{}
 	var body string
 	if targetKind == "phase" {
-		front, phaseBody, frontErr := frontmatter(string(raw))
+		front, phaseBody, frontErr := mdoc.Split(string(raw))
 		if frontErr != nil {
 			return fmt.Errorf("parse %s: %w", filepath.Base(target), frontErr)
 		}
-		checkoutFront = copyFrontmatter(front)
+		checkoutFront = mdoc.CopyFront(front)
 		editSelector += strconv.Itoa(phaseID)
 		checkoutFront["planr_phase"] = phaseID
 		checkoutFront["planr_slug"] = phaseSlugFromPath(target)
@@ -97,7 +98,7 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 	} else {
 		editSelector = planName(planDirectory)
 		checkoutFront["planr_section"] = section
-		_, body, err = frontmatter(string(raw))
+		_, body, err = mdoc.Split(string(raw))
 		if err != nil {
 			return err
 		}
@@ -111,13 +112,13 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 	}
 	checkoutFront["planr_edit"] = editSelector
 	checkoutFront["planr_target"] = targetRelative
-	checkoutFront["planr_base"] = documentHash(raw)
-	document, err := renderFrontmatterDocument(checkoutFront, body)
+	checkoutFront["planr_base"] = mdoc.Hash(raw)
+	document, err := mdoc.Render(checkoutFront, body)
 	if err != nil {
 		return err
 	}
 	if cmd.Bool("json") {
-		return writeJSON(editJSONOutput{Kind: targetKind, Selector: editSelector, Section: section, Target: targetRelative, Base: documentHash(raw), Document: document})
+		return writeJSON(editJSONOutput{Kind: targetKind, Selector: editSelector, Section: section, Target: targetRelative, Base: mdoc.Hash(raw), Document: document})
 	}
 	output := cmd.String("output")
 	if output == "" {
@@ -135,7 +136,7 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 	if err := os.MkdirAll(filepath.Dir(absOutput), 0755); err != nil {
 		return err
 	}
-	if err := writeFileAtomically(absOutput, document); err != nil {
+	if err := mdoc.WriteAtomically(absOutput, document); err != nil {
 		return err
 	}
 	fmt.Printf("Checked out %s\n", absOutput)
