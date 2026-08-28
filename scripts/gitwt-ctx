@@ -12,9 +12,9 @@ die() {
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  scripts/gitwt-ctx status
-  scripts/gitwt-ctx set --purpose <text> --dev-dir <path>
-  scripts/gitwt-ctx check-path <path>
+  scripts/worktree-context status
+  scripts/worktree-context set --purpose <text> --dev-dir <path>
+  scripts/worktree-context check-path <path>
 
 Commands:
   status      Show whether this is a Git worktree and print its metadata.
@@ -39,6 +39,17 @@ detect_context() {
 
   WORKTREE_ROOT=$(canonical_dir "$(git rev-parse --show-toplevel)") ||
     die "cannot resolve the worktree root"
+
+  local git_dir common_dir
+  git_dir=$(canonical_dir "$(git rev-parse --git-dir)") ||
+    die "cannot resolve the Git directory"
+  common_dir=$(canonical_dir "$(git rev-parse --git-common-dir)") ||
+    die "cannot resolve the common Git directory"
+
+  if [[ "$git_dir" == "$common_dir" ]]; then
+    SKIP_REASON="main-worktree"
+    return
+  fi
 
   CONTEXT_KIND="worktree"
   SKIP_REASON=""
