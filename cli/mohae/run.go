@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -33,8 +34,7 @@ func newRunCommand() *cli.Command {
 			// in the order the flags were given. Replacing rather than
 			// appending keeps `--prompt` meaning the same thing whatever the
 			// config happened to contain.
-			&cli.StringSliceFlag{Name: "prompt", Aliases: []string{"p"}, Usage: "replace the conversation with these inline prompts, one turn each (repeatable)"},
-			&cli.StringSliceFlag{Name: "prompt-file", Aliases: []string{"P"}, Usage: "replace the conversation with these prompt files, one turn each (repeatable)"},
+			&cli.StringSliceFlag{Name: "prompt", Aliases: []string{"p"}, Usage: "replace the conversation with these prompts, one turn each; a file://PATH value reads the turn from a file (repeatable)"},
 			&cli.StringSliceFlag{Name: "prompt-when", Usage: "expr condition gating the prompt at the same position; use '' to leave one unconditional (repeatable)"},
 			&cli.StringFlag{Name: "agent-md", Usage: "override the AGENTS.md installed in the workspace"},
 			&cli.StringFlag{Name: "init-script", Usage: "override the workspace setup script"},
@@ -279,31 +279,37 @@ func applyRunOverrides(cmd *cli.Command, configs []*Config) error {
 	return nil
 }
 
+// promptFileScheme marks a --prompt value that names a file rather than the
+// text of a turn.
+const promptFileScheme = "file://"
+
 // overridePrompts builds the conversation named on the command line, or nil if
-// none was. --prompt and --prompt-file stay mutually exclusive because a
-// conversation drawn from both would have no defined turn order.
+// none was. A single repeatable flag carries both kinds of turn so that the
+// order the flags were typed in is the order the turns are sent; two flags
+// would leave the interleaving undefined.
 func overridePrompts(cmd *cli.Command) ([]Prompt, error) {
-	texts, files := cmd.StringSlice("prompt"), cmd.StringSlice("prompt-file")
-	if len(texts) > 0 && len(files) > 0 {
-		return nil, fmt.Errorf("--prompt and --prompt-file are mutually exclusive")
-	}
+	values := cmd.StringSlice("prompt")
 	conditions := cmd.StringSlice("prompt-when")
-	count := len(texts) + len(files)
-	if count == 0 {
+	if len(values) == 0 {
 		if len(conditions) > 0 {
-			return nil, fmt.Errorf("--prompt-when needs --prompt or --prompt-file to attach to")
+			return nil, fmt.Errorf("--prompt-when needs --prompt to attach to")
 		}
 		return nil, nil
 	}
-	if len(conditions) > count {
-		return nil, fmt.Errorf("%d --prompt-when values for %d prompt(s)", len(conditions), count)
+	if len(conditions) > len(values) {
+		return nil, fmt.Errorf("%d --prompt-when values for %d prompt(s)", len(conditions), len(values))
 	}
-	prompts := make([]Prompt, 0, count)
-	for _, text := range texts {
-		prompts = append(prompts, Prompt{Text: text})
-	}
-	for _, file := range files {
-		prompts = append(prompts, Prompt{File: absoluteOverride(file)})
+	prompts := make([]Prompt, 0, len(values))
+	for _, value := range values {
+		path, isFile := strings.CutPrefix(value, promptFileScheme)
+		if !isFile {
+			prompts = append(prompts, Prompt{Text: value})
+			continue
+		}
+		if path == "" {
+			return nil, fmt.Errorf("--prompt %q names no file", value)
+		}
+		prompts = append(prompts, Prompt{File: absoluteOverride(path)})
 	}
 	for index, condition := range conditions {
 		prompts[index].When = condition

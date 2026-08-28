@@ -197,9 +197,12 @@ func (s *fakeServer) awaitReply(ch <-chan *wireMessage) *wireMessage {
 }
 
 // serveHandshake answers initialize and consumes the initialized
-// notification. It runs on its own goroutine because dial blocks on it.
-func (s *fakeServer) serveHandshake(result InitializeResult) {
+// notification. It runs on its own goroutine because dial blocks on it, and
+// returns a channel closed once the handshake traffic has been drained.
+func (s *fakeServer) serveHandshake(result InitializeResult) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		req, ok := s.tryNext()
 		if !ok || req.Method != "initialize" {
 			s.t.Errorf("fake server: expected initialize, got %v", req)
@@ -210,6 +213,7 @@ func (s *fakeServer) serveHandshake(result InitializeResult) {
 			s.t.Errorf("fake server: expected initialized, got %v", ack)
 		}
 	}()
+	return done
 }
 
 // defaultInitializeResult is the handshake result used by most tests.
@@ -223,7 +227,7 @@ var defaultInitializeResult = InitializeResult{
 func connect(t *testing.T, opts Options) (*Client, *fakeServer) {
 	t.Helper()
 	server := newFakeServer(t)
-	server.serveHandshake(defaultInitializeResult)
+	handshake := server.serveHandshake(defaultInitializeResult)
 
 	client, err := dial(context.Background(), opts, server.toClientR, server.clientW, func() error {
 		server.close()
@@ -231,6 +235,14 @@ func connect(t *testing.T, opts Options) (*Client, *fakeServer) {
 	})
 	if err != nil {
 		t.Fatalf("dial: %v", err)
+	}
+	// dial returns as soon as it writes the initialized notification, so wait
+	// for the handshake goroutine to drain it. Otherwise it races the test for
+	// the next message on the inbox.
+	select {
+	case <-handshake:
+	case <-time.After(fakeTimeout):
+		t.Fatal("fake server: timed out completing the handshake")
 	}
 	t.Cleanup(func() { _ = client.Close() })
 	return client, server

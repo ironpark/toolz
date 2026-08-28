@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -218,14 +219,36 @@ func TestRunOverridesReachEveryConfig(t *testing.T) {
 	}
 }
 
-func TestRunRejectsTwoPromptSources(t *testing.T) {
+func TestRunPromptMixesInlineAndFileTurnsInOrder(t *testing.T) {
 	directory := chdir(t)
-	if err := os.WriteFile(filepath.Join(directory, DefaultConfigName), []byte(minimalConfig), 0o644); err != nil {
+	command := flagsOnly(newRunCommand())
+	arguments := []string{"run", "--prompt", "file://PROMPT.md", "--prompt", "inline", "--prompt", "file://" + filepath.Join(directory, "SECOND.md")}
+	if err := command.Run(context.Background(), arguments); err != nil {
 		t.Fatal(err)
 	}
-	err := run(t, "run", "--prompt", "inline", "--prompt-file", "PROMPT.md")
-	if err == nil || errors.Is(err, errNotImplemented) {
-		t.Fatalf("run = %v, want a mutual-exclusion error", err)
+	prompts, err := overridePrompts(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The turns keep the order the flags were typed in, and a relative
+	// file://path is pinned to the working directory rather than the config's.
+	want := []Prompt{
+		{File: filepath.Join(directory, "PROMPT.md")},
+		{Text: "inline"},
+		{File: filepath.Join(directory, "SECOND.md")},
+	}
+	if !reflect.DeepEqual(prompts, want) {
+		t.Errorf("prompts = %+v, want %+v", prompts, want)
+	}
+}
+
+func TestRunRejectsAnEmptyPromptFileURL(t *testing.T) {
+	command := flagsOnly(newRunCommand())
+	if err := command.Run(context.Background(), []string{"run", "--prompt", "file://"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := overridePrompts(command); err == nil {
+		t.Fatal("overridePrompts = nil, want an error naming no file")
 	}
 }
 
