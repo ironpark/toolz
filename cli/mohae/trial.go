@@ -124,6 +124,11 @@ func runConversation(ctx context.Context, config *Config, workspace *Workspace, 
 	for index := range config.Prompts {
 		prompt := &config.Prompts[index]
 		turn := TurnResult{Index: index + 1, Name: prompt.Name}
+		// Resolved before the skip checks so a skipped turn still records which
+		// prompt it was: an index alone does not say what the run left out. A
+		// read failure only ends the trial if the prompt is actually sent.
+		text, textErr := promptText(config, *prompt)
+		turn.Prompt = text
 
 		if !prompt.DependenciesMet(sent) {
 			turn.Skipped = "after: " + strings.Join(prompt.After, ", ") + " did not run"
@@ -148,11 +153,9 @@ func runConversation(ctx context.Context, config *Config, workspace *Workspace, 
 			continue
 		}
 
-		text, err := promptText(config, *prompt)
-		if err != nil {
-			return turns, usage, err
+		if textErr != nil {
+			return turns, usage, textErr
 		}
-		turn.Prompt = text
 		if options.ShowDialogue {
 			fmt.Fprintf(out, "\n> %s\n\n", strings.TrimSpace(text))
 		}

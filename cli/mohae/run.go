@@ -88,6 +88,13 @@ func runAction(ctx context.Context, cmd *cli.Command) error {
 		Out: newLockedWriter(cmd.Writer),
 	}
 
+	// Before the run, so a machine that has been benchmarking for weeks does not
+	// carry every failed trial's copy forever. Reported rather than silent: the
+	// directories being reclaimed are debugging material.
+	if pruned := PruneStaleWorkspaces(StaleWorkspaceAge); pruned > 0 {
+		fmt.Fprintf(cmd.Writer, "pruned %d workspace(s) left by earlier runs\n", pruned)
+	}
+
 	results := runTrials(ctx, configs, concurrency, cmd.Bool("fail-fast"), trialOptions)
 
 	rendered, err := RenderReport(output, results, reportOptions)

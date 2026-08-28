@@ -35,12 +35,15 @@ type Response struct {
 // TokenUsage is a turn's token spend. The categories are kept apart rather than
 // summed because a cached read and a fresh input token cost different amounts,
 // and `--detailed-tokens` exists to show that difference.
+//
+// The JSON names are part of the report file format, so they are spelled out in
+// the same snake_case the rest of the document uses.
 type TokenUsage struct {
-	Input      int
-	Output     int
-	CacheRead  int
-	CacheWrite int
-	CostUSD    float64
+	Input      int     `json:"input"`
+	Output     int     `json:"output"`
+	CacheRead  int     `json:"cache_read"`
+	CacheWrite int     `json:"cache_write"`
+	CostUSD    float64 `json:"cost_usd"`
 }
 
 // Total is every token the turn touched, cached or not.

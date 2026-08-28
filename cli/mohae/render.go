@@ -165,6 +165,14 @@ func renderTerminal(results []TrialResult, options ReportOptions) string {
 			if options.ShowDialogue && turn.Sent {
 				fmt.Fprintf(out, "        %d. %s\n", turn.Index, truncate(turn.Response, 72))
 			}
+			if turn.Skipped != "" {
+				// The turn count alone says a prompt was dropped but not which
+				// one or why, which is the first thing a false condition needs.
+				fmt.Fprintf(out, "        turn %d skipped: %s\n", turn.Index, turn.Skipped)
+				if options.ShowDialogue && turn.Prompt != "" {
+					fmt.Fprintf(out, "          %s\n", truncate(firstLine(turn.Prompt), 72))
+				}
+			}
 			if turn.Error != "" {
 				fmt.Fprintf(out, "        turn %d failed: %s\n", turn.Index, firstLine(turn.Error))
 			}

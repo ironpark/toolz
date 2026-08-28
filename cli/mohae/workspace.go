@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Workspace is one trial's isolated copy of the configured source tree.
@@ -150,6 +151,38 @@ func (w *Workspace) Cleanup() error {
 	base := w.base
 	w.base = ""
 	return os.RemoveAll(base)
+}
+
+// StaleWorkspaceAge is how long a left-behind workspace is kept before a later
+// run reclaims it. A failed trial's directory is the only record of what the
+// agent did, so it outlives the run by a wide margin — but a trial is bounded
+// by limits.timeout_seconds, so nothing this old can still be in use.
+const StaleWorkspaceAge = 24 * time.Hour
+
+// PruneStaleWorkspaces removes trial directories older than maxAge from the
+// temporary directory and reports how many it removed. Failing trials keep
+// their workspace deliberately, and without this they would accumulate there
+// for as long as the machine lives. Errors on individual directories are
+// ignored: reclaiming disk is never worth failing a run over.
+func PruneStaleWorkspaces(maxAge time.Duration) int {
+	entries, err := os.ReadDir(os.TempDir())
+	if err != nil {
+		return 0
+	}
+	removed := 0
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "mohae-") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || time.Since(info.ModTime()) < maxAge {
+			continue
+		}
+		if os.RemoveAll(filepath.Join(os.TempDir(), entry.Name())) == nil {
+			removed++
+		}
+	}
+	return removed
 }
 
 // copyTree copies a directory recursively, preserving modes so an executable
