@@ -4,7 +4,7 @@ Both runners build the ``planr`` binary, copy a fixture from ``cli/planr/fixture
 and drive the CLI against it.  Every invocation gets its own timestamped
 directory under ``cli/planr/run`` holding that run's artifacts.  This module holds
 the parts they have in common; it deliberately depends only on the standard
-library so the plan scenario runs without the Codex SDK installed.
+library so the shared helpers run without the Codex SDK installed.
 """
 
 from __future__ import annotations
@@ -424,7 +424,7 @@ def fixture_dir(name: str) -> pathlib.Path:
     """Resolve a fixture directory under fixtures/.
 
     fixtures/MANIFEST.yaml documents what each one is for, but it is not read
-    here: the plan scenario must run on a bare interpreter and there is no YAML
+    here: the harness must run on a bare interpreter and there is no YAML
     parser in the standard library.
     """
 

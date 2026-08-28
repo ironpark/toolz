@@ -11,6 +11,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/planlock"
 )
 
 // Plan registers a plan draft as a new numbered plan directory.
@@ -20,7 +21,7 @@ func Plan(d draft.Draft, settings config.Config, repoRoot string, dryRun bool, o
 		return Operation{}, fmt.Errorf("no plans directory is configured")
 	}
 	if !dryRun {
-		lock, err := plan.AcquireDirectoryLock(planDirectories[0])
+		lock, err := planlock.AcquireDirectory(planDirectories[0])
 		if err != nil {
 			return Operation{}, err
 		}

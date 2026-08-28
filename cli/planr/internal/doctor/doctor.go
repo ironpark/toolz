@@ -13,6 +13,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
 
 type Issue struct {
@@ -92,7 +93,7 @@ func InspectPlan(planRoot, directory string) (Inspection, []Issue) {
 	}
 	issues := []Issue{}
 
-	raw, err := os.ReadFile(inspection.planPath)
+	raw, err := vfs.ReadFile(inspection.planPath)
 	if err != nil {
 		issues = append(issues, Issue{Location: inspection.Directory, Message: fmt.Sprintf("cannot read PLAN.md: %v", err)})
 		inspection.PhaseDataOK = false
@@ -116,7 +117,7 @@ func InspectPlan(planRoot, directory string) (Inspection, []Issue) {
 	}
 
 	phaseDirectory := filepath.Join(planRoot, "phases")
-	entries, readErr := os.ReadDir(phaseDirectory)
+	entries, readErr := vfs.ReadDir(phaseDirectory)
 	if readErr != nil {
 		if os.IsNotExist(readErr) {
 			issues = append(issues, Issue{Location: inspection.Directory + "/phases", Message: "directory does not exist"})
@@ -161,7 +162,7 @@ func InspectPlan(planRoot, directory string) (Inspection, []Issue) {
 			slugs[match[2]] = entry.Name()
 
 			phasePath := filepath.Join(phaseDirectory, entry.Name())
-			phaseRaw, readPhaseErr := os.ReadFile(phasePath)
+			phaseRaw, readPhaseErr := vfs.ReadFile(phasePath)
 			if readPhaseErr != nil {
 				issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("cannot read phase: %v", readPhaseErr)})
 				inspection.PhaseDataOK = false

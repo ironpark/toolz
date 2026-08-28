@@ -1,4 +1,4 @@
-package plan
+package planlock
 
 import (
 	"fmt"
@@ -8,11 +8,34 @@ import (
 )
 
 const (
-	LockFileName      = ".planr.lock"
+	FileName = ".planr.lock"
+
+	// DefaultTimeout bounds how long an acquire waits for a competing planr
+	// process to release the lock before reporting a clear failure.
+	DefaultTimeout = 2 * time.Second
+
 	planLockPollDelay = 25 * time.Millisecond
 )
 
-var LockTimeout = 2 * time.Second
+// Option customizes a single acquire call.
+type Option func(*settings)
+
+type settings struct {
+	timeout time.Duration
+}
+
+// WithTimeout overrides how long the acquire waits before giving up.
+func WithTimeout(timeout time.Duration) Option {
+	return func(current *settings) { current.timeout = timeout }
+}
+
+func resolve(options []Option) settings {
+	resolved := settings{timeout: DefaultTimeout}
+	for _, apply := range options {
+		apply(&resolved)
+	}
+	return resolved
+}
 
 type Lock struct {
 	file *os.File
@@ -20,33 +43,33 @@ type Lock struct {
 	kind string
 }
 
-// AcquireLock opens the lock file inside an existing plan directory. The
+// AcquirePlan opens the lock file inside an existing plan directory. The
 // directory is intentionally not created here: if a plan was moved while a
 // command was waiting, recreating its old path would be worse than reporting a
 // clear failure.
-func AcquireLock(planRoot string) (*Lock, error) {
-	return acquireAdvisoryLock(planRoot, "plan", false)
+func AcquirePlan(planRoot string, options ...Option) (*Lock, error) {
+	return acquireAdvisoryLock(planRoot, "plan", false, resolve(options))
 }
 
-// AcquireDirectoryLock serializes operations that add or move plan
+// AcquireDirectory serializes operations that add or move plan
 // directories. Unlike a plan lock, its parent may not exist yet.
-func AcquireDirectoryLock(plansRoot string) (*Lock, error) {
-	return acquireAdvisoryLock(plansRoot, "plans directory", true)
+func AcquireDirectory(plansRoot string, options ...Option) (*Lock, error) {
+	return acquireAdvisoryLock(plansRoot, "plans directory", true, resolve(options))
 }
 
-func acquireAdvisoryLock(directory, kind string, createParent bool) (*Lock, error) {
+func acquireAdvisoryLock(directory, kind string, createParent bool, config settings) (*Lock, error) {
 	if createParent {
 		if err := os.MkdirAll(directory, 0755); err != nil {
 			return nil, fmt.Errorf("cannot prepare %s lock directory %s: %w", kind, directory, err)
 		}
 	}
-	path := filepath.Join(directory, LockFileName)
+	path := filepath.Join(directory, FileName)
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open %s lock %s: %w", kind, path, err)
 	}
 	lock := &Lock{file: file, path: path, kind: kind}
-	deadline := time.Now().Add(LockTimeout)
+	deadline := time.Now().Add(config.timeout)
 	for {
 		if err := tryAdvisoryLock(file); err == nil {
 			return lock, nil
@@ -56,7 +79,7 @@ func acquireAdvisoryLock(directory, kind string, createParent bool) (*Lock, erro
 		}
 		if time.Now().After(deadline) {
 			_ = file.Close()
-			return nil, fmt.Errorf("cannot acquire %s lock %s within %s; another planr process may be changing this state", kind, path, LockTimeout)
+			return nil, fmt.Errorf("cannot acquire %s lock %s within %s; another planr process may be changing this state", kind, path, config.timeout)
 		}
 		time.Sleep(planLockPollDelay)
 	}

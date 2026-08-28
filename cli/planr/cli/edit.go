@@ -13,6 +13,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -69,7 +70,7 @@ func editCommand(_ context.Context, cmd *ucli.Command) error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(absOutput); err == nil {
+	if _, err := vfs.Stat(absOutput); err == nil {
 		return fmt.Errorf("editable file already exists: %s", absOutput)
 	} else if !os.IsNotExist(err) {
 		return err

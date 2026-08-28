@@ -13,7 +13,9 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/planlock"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
 
 // Phase adds a new phase to an existing plan from a new-phase draft.
@@ -24,7 +26,7 @@ func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun bool, o
 		return Operation{}, err
 	}
 	if !dryRun {
-		lock, err := plan.AcquireLock(planRoot)
+		lock, err := planlock.AcquirePlan(planRoot)
 		if err != nil {
 			return Operation{}, err
 		}
@@ -32,7 +34,7 @@ func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun bool, o
 	}
 
 	planPath := filepath.Join(planRoot, "PLAN.md")
-	planRaw, err := os.ReadFile(planPath)
+	planRaw, err := vfs.ReadFile(planPath)
 	if err != nil {
 		return Operation{}, err
 	}

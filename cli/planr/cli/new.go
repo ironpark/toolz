@@ -14,6 +14,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -56,7 +57,7 @@ func newPlanCommand(cmd *ucli.Command) error {
 		return err
 	}
 	if !cmd.Bool("json") {
-		if _, err := os.Stat(absOutput); err == nil {
+		if _, err := vfs.Stat(absOutput); err == nil {
 			return fmt.Errorf("draft file already exists: %s", absOutput)
 		} else if !os.IsNotExist(err) {
 			return err
@@ -150,7 +151,7 @@ func newPhaseCommand(cmd *ucli.Command, selector string) error {
 		return err
 	}
 	if !cmd.Bool("json") {
-		if _, err := os.Stat(absOutput); err == nil {
+		if _, err := vfs.Stat(absOutput); err == nil {
 			return fmt.Errorf("draft file already exists: %s", absOutput)
 		} else if !os.IsNotExist(err) {
 			return err

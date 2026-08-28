@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
 
 type Config struct {
@@ -86,7 +87,7 @@ func Discover(start string) (Location, error) {
 	current := absolute
 	for {
 		path := filepath.Join(current, ".planr.yaml")
-		_, statErr := os.Stat(path)
+		_, statErr := vfs.Stat(path)
 		if statErr == nil {
 			if !insideWorktree {
 				baseRoot = current
@@ -153,7 +154,7 @@ func Default() Config {
 }
 
 func ParseFile(path string) (Config, error) {
-	contents, err := os.ReadFile(path)
+	contents, err := vfs.ReadFile(path)
 	if err != nil {
 		return Config{}, err
 	}

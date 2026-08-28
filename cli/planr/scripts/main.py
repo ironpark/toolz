@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Entry point for the planr development scripts.
 
-Two runners live here.  ``scenario`` reproduces the checkout release output and
-needs nothing but the standard library; ``codex`` drives a Codex evaluation
-and needs the ``openai-codex`` SDK, so it is imported only when that
-command is actually requested.
+Only the Codex evaluation lives here.  It needs the ``openai-codex`` SDK, so
+the runner is imported only when the command is actually requested and
+``--help`` keeps working on a bare interpreter.
 """
 
 from __future__ import annotations
@@ -18,7 +17,6 @@ USAGE = """\
 Usage: python3 cli/planr/scripts/main.py <command> [options]
 
 Commands:
-  scenario [clean]      reproduce the checkout release status/overview output
   codex [options]       run an isolated Codex evaluation
   codex analyze <dir>   re-analyze a previous Codex run
   codex clean           remove Codex run directories
@@ -39,12 +37,9 @@ def run(argv: list[str]) -> int:
     if command in {"-h", "--help", "help"}:
         print(USAGE)
         return 0
-    if command == "scenario":
-        import scenario
-
-        return scenario.main(rest)
     if command == "codex":
-        # Imported lazily so `scenario` never pays for the Codex SDK.
+        # Imported lazily so `--help` and unknown commands never pay for the
+        # Codex SDK.
         import codex
 
         return codex.main(rest)

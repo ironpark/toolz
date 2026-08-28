@@ -12,6 +12,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -66,7 +67,7 @@ func initCommand(_ context.Context, cmd *ucli.Command) error {
 	existed := make([]string, 0, len(plansDirs))
 	for _, directory := range plansDirs {
 		path := filepath.Join(root, directory)
-		switch _, statErr := os.Stat(path); {
+		switch _, statErr := vfs.Stat(path); {
 		case statErr == nil:
 			existed = append(existed, path)
 			continue
@@ -108,7 +109,7 @@ func initTarget(cwd string) (root string, existing string, repositoryErr error, 
 		// upward search has no boundary, and an unrelated .planr.yaml in some
 		// ancestor must not decide anything here.
 		path := filepath.Join(cwd, ".planr.yaml")
-		if _, statErr := os.Stat(path); statErr == nil {
+		if _, statErr := vfs.Stat(path); statErr == nil {
 			return cwd, path, repositoryErr, nil
 		} else if !errors.Is(statErr, os.ErrNotExist) {
 			return "", "", repositoryErr, statErr

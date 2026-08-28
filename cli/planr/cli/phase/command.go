@@ -15,6 +15,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/notes"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/planlock"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -97,7 +98,7 @@ func run(cmd *ucli.Command, status string) error {
 	if err != nil {
 		return err
 	}
-	planLock, err := plan.AcquireLock(planRoot)
+	planLock, err := planlock.AcquirePlan(planRoot)
 	if err != nil {
 		return err
 	}

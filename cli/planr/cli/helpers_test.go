@@ -1,6 +1,9 @@
 package cli
 
-import "github.com/ironpark/toolz/cli/planr/internal/plan"
+import (
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/planlock"
+)
 
 // updatePhaseStatus is a test helper: it resolves a plan, takes its lock, and
 // updates one phase's status, matching what the phase command does without the
@@ -10,7 +13,7 @@ func updatePhaseStatus(planDirectories []string, planArg string, phaseID int, st
 	if err != nil {
 		return false, err
 	}
-	planLock, err := plan.AcquireLock(planRoot)
+	planLock, err := planlock.AcquirePlan(planRoot)
 	if err != nil {
 		return false, err
 	}

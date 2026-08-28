@@ -29,15 +29,13 @@ uv run --with pytest --project cli/planr/scripts \
 
 | 명령 | 하는 일 | 필요한 도구 |
 | --- | --- | --- |
-| `main.py scenario` | checkout 출시 시나리오의 `status`, `overview`, `notes` 출력 재현 | Python, Go, Git |
-| `main.py scenario clean` | scenario 실행 디렉터리 삭제 | Python |
 | `main.py codex` | 격리 저장소에서 Codex 평가 실행 | uv, Go, Git, Codex 로그인 |
 | `main.py codex variants` | 픽스처별 요청·지침 변형 조회 | Python |
 | `main.py codex analyze <dir>` | 이전 실행 결과 재분석 | Python |
 | `main.py codex clean` | Codex 실행 디렉터리와 임시 작업공간 삭제 | Python |
 
-Codex SDK는 평가를 시작할 때만 불러옵니다. 따라서 `scenario`, `variants`, `analyze`,
-`clean`은 SDK 없이도 실행할 수 있습니다. 공통 준비·정리와 하네스 설정 처리는
+Codex SDK는 평가를 시작할 때만 불러옵니다. 따라서 `variants`, `analyze`, `clean`은
+SDK 없이도 실행할 수 있습니다. 공통 준비·정리와 하네스 설정 처리는
 [`scripts/common.py`](../scripts/common.py), Codex 세션은
 [`scripts/codex.py`](../scripts/codex.py), 결과 분석은
 [`scripts/analyze.py`](../scripts/analyze.py)에 있습니다.
@@ -49,7 +47,6 @@ Codex SDK는 평가를 시작할 때만 불러옵니다. 따라서 `scenario`, `
 
 ```text
 cli/planr/run/
-├── 20260826-123846-scenario/
 ├── 20260826-123851-codex/
 └── 20260826-124012-codex-regex/
 ```
@@ -68,7 +65,6 @@ Codex가 수정하는 작업공간은 `run/` 바깥의 시스템 임시 디렉�
 
 | 픽스처 | 목적 |
 | --- | --- |
-| `plan-scenario` | 완료·진행·대기·부분 완료 plan을 만들어 조회 출력을 재현 |
 | `codex-harness` | 기존의 작은 Go 프로젝트를 수정하는 기본 평가 |
 | `codex-greenfield` | 빈 저장소에서 다중 명령 할 일 CLI를 만드는 평가 |
 | `codex-regex` | 표준 regexp 없이 정규식 엔진을 구현하는 깊이 중심 평가 |
@@ -94,15 +90,18 @@ Codex가 수정하는 작업공간은 `run/` 바깥의 시스템 임시 디렉�
 요청 본문에 planr 워크플로를 반복해서 적지 않아야 에이전트가 저장소 지침을 발견하고
 따르는지 측정할 수 있습니다.
 
-## scenario 재현
+## checkout 출시 시나리오
+
+완료·진행·대기·부분 완료 plan이 섞인 상태에서 `status`, `overview`, `notes`가 무엇을
+보여주는지는 Go 테스트로 검증합니다. 에이전트가 필요 없는 순수 plan 생성 시나리오라
+픽스처와 Python 실행기 대신 [`cli/scenario_test.go`](../cli/scenario_test.go)에 있습니다.
 
 ```sh
-python3 cli/planr/scripts/main.py scenario
-python3 cli/planr/scripts/main.py scenario clean
+cd cli/planr
+go test ./cli/ -run Scenario -v
 ```
 
-scenario는 `plan-scenario`를 복사해 Git 저장소로 초기화하고 다음 상태를 실제 CLI 호출로
-만듭니다.
+테스트는 임시 Git 저장소에 다음 상태를 실제 명령 호출로 만듭니다.
 
 - 완료된 인증 기반 plan
 - 진행 중 checkout plan
@@ -110,9 +109,13 @@ scenario는 `plan-scenario`를 복사해 Git 저장소로 초기화하고 다음
 - 일부 phase만 완료된 rollout plan
 - `status`에서 숨겨지는 무관한 완료 plan
 
-의존성은 공개 인터페이스인 초안 frontmatter로 입력하고 상태는 `planr phase` 명령으로
-변경합니다. 생성된 내부 문서를 직접 치환하지 않으므로 실제 CLI가 거부할 상태를 억지로
-만들지 않으며, 초안 계약이 바뀌면 시나리오도 명확하게 실패합니다.
+다섯 plan은 모두 [`internal/plantest/fixtures/checkout-v2.md`](../internal/plantest/fixtures/checkout-v2.md)
+초안 본문 하나를 이름과 의존성만 바꿔 재사용합니다. 픽스처는 `embed`로 묶여
+`plantest.Fixtures()`가 `io/fs` 트리로 돌려주므로 테스트가 파일 경로가 아니라
+`fs.FS`를 읽습니다. 의존성은 공개 인터페이스인 초안 frontmatter로 입력하고 상태는
+`planr phase` 명령으로 변경합니다. 생성된 내부 문서를 직접 치환하지 않으므로 실제
+CLI가 거부할 상태를 억지로 만들지 않으며, 초안 계약이 바뀌면 시나리오도 명확하게
+실패합니다.
 
 ## Codex 평가
 

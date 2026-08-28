@@ -15,6 +15,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/planlock"
 	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 	"github.com/ironpark/toolz/cli/planr/internal/schema"
 	ucli "github.com/urfave/cli/v3"
@@ -168,7 +169,7 @@ func TestNewJSONProducesPlanAndPhaseTemplatesWithoutFiles(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "checkout-v2-second-phase.md")); !os.IsNotExist(err) {
 		t.Fatalf("new phase --json wrote a draft file; stat error=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "plans", "00-checkout-v2", plan.LockFileName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "plans", "00-checkout-v2", planlock.FileName)); !os.IsNotExist(err) {
 		t.Fatalf("new phase --json wrote a lock file; stat error=%v", err)
 	}
 }

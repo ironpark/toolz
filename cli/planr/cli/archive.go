@@ -8,6 +8,8 @@ import (
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/planlock"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -46,7 +48,7 @@ func archiveCommand(_ context.Context, cmd *ucli.Command) error {
 		return fmt.Errorf("plan %q is not done; only completed plans can be archived", sourceDirectory)
 	}
 
-	directoryLock, err := plan.AcquireDirectoryLock(planDirectories[0])
+	directoryLock, err := planlock.AcquireDirectory(planDirectories[0])
 	if err != nil {
 		return err
 	}
@@ -67,7 +69,7 @@ func archiveCommand(_ context.Context, cmd *ucli.Command) error {
 	if !completed {
 		return fmt.Errorf("plan %q is not done; only completed plans can be archived", sourceDirectory)
 	}
-	planLock, err := plan.AcquireLock(sourceRoot)
+	planLock, err := planlock.AcquirePlan(sourceRoot)
 	if err != nil {
 		return err
 	}
@@ -84,7 +86,7 @@ func archiveCommand(_ context.Context, cmd *ucli.Command) error {
 		return fmt.Errorf("create archive directory %s: %w", destination, err)
 	}
 	target := filepath.Join(destination, sourceDirectory)
-	if _, err := os.Stat(target); err == nil {
+	if _, err := vfs.Stat(target); err == nil {
 		return fmt.Errorf("archive destination already contains plan %q", sourceDirectory)
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("inspect archive destination %s: %w", target, err)

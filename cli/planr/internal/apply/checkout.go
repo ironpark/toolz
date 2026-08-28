@@ -2,13 +2,14 @@ package apply
 
 import (
 	"fmt"
-	"os"
+
 	"path/filepath"
 	"strconv"
 
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
 
 // CheckoutDocument is an editable copy of a stored plan document, wrapped in
@@ -30,7 +31,7 @@ func Checkout(repoRoot, planRoot, planDirectory string, phaseID int, section str
 	if err != nil {
 		return CheckoutDocument{}, err
 	}
-	raw, err := os.ReadFile(target)
+	raw, err := vfs.ReadFile(target)
 	if err != nil {
 		return CheckoutDocument{}, err
 	}
@@ -89,7 +90,7 @@ func editTarget(planRoot, planDirectory string, phaseID int, section string) (st
 		target, err = plan.FindPhaseFile(planRoot, phaseID)
 	} else {
 		target = filepath.Join(planRoot, plan.SectionFile(section))
-		_, err = os.Stat(target)
+		_, err = vfs.Stat(target)
 	}
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", planDirectory, err)

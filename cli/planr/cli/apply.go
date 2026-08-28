@@ -3,15 +3,15 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
-	"os"
-
 	"github.com/ironpark/toolz/cli/planr/internal/apply"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 	ucli "github.com/urfave/cli/v3"
+	"io"
+	"os"
 )
 
 func applyCommand(_ context.Context, cmd *ucli.Command) error {
@@ -35,7 +35,7 @@ func applyCommand(_ context.Context, cmd *ucli.Command) error {
 		raw = apply.UnwrapJSONDocument(raw)
 	} else {
 		fallback = cmd.Args().First()
-		raw, err = os.ReadFile(fallback)
+		raw, err = vfs.ReadFile(fallback)
 	}
 	if err != nil {
 		return applyCommandError(cmd, err)

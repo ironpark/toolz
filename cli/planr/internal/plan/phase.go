@@ -14,6 +14,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
 
 var StatusValues = map[string]bool{
@@ -196,7 +197,7 @@ func isPlanDraftPath(repoRoot, relativePath string) bool {
 	if !strings.EqualFold(filepath.Ext(relativePath), ".md") {
 		return false
 	}
-	raw, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(relativePath)))
+	raw, err := vfs.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(relativePath)))
 	if err != nil {
 		return false
 	}
@@ -346,13 +347,13 @@ func AlreadyDone(planRoot string) (bool, error) {
 
 // UpdatePhaseStatusLocked writes one phase's status and refreshes the derived
 // PLAN.md checklist, reporting whether the change completed the whole plan. The
-// caller must already hold the plan lock from AcquireLock.
+// caller must already hold the plan lock from planlock.AcquirePlan.
 func UpdatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status string) (bool, error) {
 	phasePath, err := FindPhaseFile(planRoot, phaseID)
 	if err != nil {
 		return false, fmt.Errorf("%s: %w", planDirectory, err)
 	}
-	phaseRaw, err := os.ReadFile(phasePath)
+	phaseRaw, err := vfs.ReadFile(phasePath)
 	if err != nil {
 		return false, err
 	}
@@ -379,7 +380,7 @@ func UpdatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 		return false, err
 	}
 	planPath := filepath.Join(planRoot, "PLAN.md")
-	planRaw, err := os.ReadFile(planPath)
+	planRaw, err := vfs.ReadFile(planPath)
 	if err != nil {
 		return false, err
 	}
@@ -444,7 +445,7 @@ func FindDirectory(planDirectories []string, planArg string) (string, string, er
 	}
 	matches := []match{}
 	for _, plans := range planDirectories {
-		entries, err := os.ReadDir(plans)
+		entries, err := vfs.ReadDir(plans)
 		if os.IsNotExist(err) {
 			continue
 		}
@@ -470,7 +471,7 @@ func FindDirectory(planDirectories []string, planArg string) (string, string, er
 }
 
 func FindPhaseFile(planRoot string, phaseID int) (string, error) {
-	entries, err := os.ReadDir(filepath.Join(planRoot, "phases"))
+	entries, err := vfs.ReadDir(filepath.Join(planRoot, "phases"))
 	if err != nil {
 		return "", fmt.Errorf("read phases: %w", err)
 	}
