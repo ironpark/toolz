@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-
 	"path/filepath"
 	"strconv"
 	"strings"

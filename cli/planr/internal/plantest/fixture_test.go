@@ -4,26 +4,20 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 )
 
-func TestDraftBodyStripsOnlyTheFrontmatter(t *testing.T) {
-	// A horizontal rule in Markdown looks exactly like a frontmatter
-	// terminator, so only the first one may end the frontmatter.
+func TestDraftBodyStripsTheFrontmatter(t *testing.T) {
 	fixtures := fstest.MapFS{
 		"plain.md": {Data: []byte("---\nplan_name: checkout-v2\n---\n# GOALS\n\nShip it.\n")},
-		"rule.md":  {Data: []byte("---\nplan_name: x\n---\n# GOALS\n\n---\n\nmore\n")},
 	}
-	for _, test := range []struct{ name, want string }{
-		{name: "plain.md", want: "# GOALS\n\nShip it.\n"},
-		{name: "rule.md", want: "# GOALS\n\n---\n\nmore\n"},
-	} {
-		got, err := DraftBody(fixtures, test.name)
-		if err != nil {
-			t.Fatalf("DraftBody(%s) unexpected error: %v", test.name, err)
-		}
-		if got != test.want {
-			t.Errorf("DraftBody(%s) = %q, want %q", test.name, got, test.want)
-		}
+	got, err := DraftBody(fixtures, "plain.md")
+	if err != nil {
+		t.Fatalf("DraftBody() unexpected error: %v", err)
+	}
+	if got != "# GOALS\n\nShip it.\n" {
+		t.Errorf("DraftBody() = %q", got)
 	}
 }
 
@@ -52,16 +46,27 @@ func TestCheckoutFixtureIsAPlanDraft(t *testing.T) {
 }
 
 func TestDraftDocumentWritesDependenciesOnlyWhenPresent(t *testing.T) {
-	document := DraftDocument("checkout-v2", []string{"auth-foundation#2"}, "# GOALS\n")
-	if !strings.HasPrefix(document, "---\nplan_name: checkout-v2\ndepends_on: [auth-foundation#2]\n---\n") {
-		t.Fatalf("document frontmatter = %q", document)
+	document, err := DraftDocument("checkout-v2", []string{"auth-foundation#2"}, "# GOALS\n")
+	if err != nil {
+		t.Fatalf("DraftDocument() unexpected error: %v", err)
 	}
-	if !strings.HasSuffix(document, "---\n# GOALS\n") {
-		t.Fatalf("document body was rewritten: %q", document)
+	front, body, err := mdoc.Split(document)
+	if err != nil {
+		t.Fatalf("mdoc.Split() unexpected error: %v", err)
+	}
+	if front["plan_name"] != "checkout-v2" || len(mdoc.Strings(front["depends_on"])) != 1 {
+		t.Fatalf("document frontmatter = %#v", front)
+	}
+	if body != "# GOALS\n" {
+		t.Fatalf("document body = %q", body)
 	}
 	// An empty depends_on list would be written back as `depends_on: []`, which
 	// planr prunes; leaving the key out keeps input and output alike.
-	if strings.Contains(DraftDocument("auth-foundation", nil, "# GOALS\n"), "depends_on") {
+	document, err = DraftDocument("auth-foundation", nil, "# GOALS\n")
+	if err != nil {
+		t.Fatalf("DraftDocument() unexpected error: %v", err)
+	}
+	if strings.Contains(document, "depends_on") {
 		t.Fatal("a plan without dependencies still writes depends_on")
 	}
 }

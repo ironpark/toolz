@@ -52,12 +52,12 @@ func TestHostFilesystemKeepsOSErrorSemantics(t *testing.T) {
 }
 
 func TestNameAndPathRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "plans", "00-checkout-v2")
-	name, err := Name(path)
+	want := filepath.Join(t.TempDir(), "plans", "00-checkout-v2")
+	name, err := Name(want)
 	if err != nil {
 		t.Fatalf("Name() unexpected error: %v", err)
 	}
-	if Path(name) != path {
-		t.Fatalf("Path(Name(%q)) = %q", path, Path(name))
+	if path(name) != want {
+		t.Fatalf("path(Name(%q)) = %q", want, path(name))
 	}
 }

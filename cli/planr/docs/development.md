@@ -5,6 +5,17 @@
 이 문서는 `planr` 자체를 수정하고 검증하는 기여자를 위한 내용입니다. 일반적인 사용에는
 필요하지 않습니다.
 
+## 파일 읽기 경로
+
+planr이 읽는 모든 문서 — 설정, plan 디렉터리, phase 문서, 초안 — 는
+[`internal/vfs`](../internal/vfs)를 지나갑니다. `vfs.ReadFile`, `vfs.ReadDir`,
+`vfs.Stat`은 호스트 경로를 받아 `io/fs` 이름으로 옮긴 뒤 현재 `fs.FS`에서 읽고,
+`vfs.Use(fsys)`로 테스트가 인메모리 트리를 끼워 넣을 수 있습니다. 기본값은 os 패키지로
+곧장 넘기는 `hostFS`라 실제 실행에는 변환 비용이 없습니다.
+
+쓰기·잠금·git 접근은 `io/fs`가 읽기 전용이므로 os 패키지에 그대로 둡니다. 새 읽기를
+추가할 때 `os.ReadFile` 대신 `vfs.ReadFile`을 쓰면 이 경계가 유지됩니다.
+
 ## 로컬 검증
 
 Go 모듈은 [`cli/planr`](..)에 독립적으로 구성되어 있습니다.

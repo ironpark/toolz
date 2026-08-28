@@ -4,7 +4,8 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"strings"
+
+	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 )
 
 // CheckoutFixture is the draft document the scenario test registers as several
@@ -31,33 +32,27 @@ func Fixtures() fs.FS {
 
 // DraftBody returns the named draft with its frontmatter removed, so one
 // fixture body can be registered under several plan names and dependencies.
-//
-// Only the first `---` line terminates the frontmatter: a horizontal rule in
-// the body looks exactly the same and must not truncate the document.
+// A fixture that lost its frontmatter is an error rather than a whole-file
+// body: it would otherwise be registered under the draft's own name.
 func DraftBody(fsys fs.FS, name string) (string, error) {
 	raw, err := fs.ReadFile(fsys, name)
 	if err != nil {
 		return "", err
 	}
-	contents := string(raw)
-	if !strings.HasPrefix(contents, "---\n") {
+	front, body, err := mdoc.Split(string(raw))
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", name, err)
+	}
+	if len(front) == 0 {
 		return "", fmt.Errorf("%s: draft has no frontmatter", name)
 	}
-	end := strings.Index(contents[3:], "\n---\n")
-	if end < 0 {
-		return "", fmt.Errorf("%s: draft frontmatter is unterminated", name)
-	}
-	return contents[3+end+len("\n---\n"):], nil
+	return body, nil
 }
 
 // DraftDocument writes the frontmatter for one plan in front of a draft body,
-// producing the document `planr apply` reads.
-func DraftDocument(planName string, dependsOn []string, body string) string {
-	front := "plan_name: " + planName + "\n"
-	if len(dependsOn) > 0 {
-		// An empty depends_on list would be pruned back out of the generated
-		// plan, so the key is written only when it carries something.
-		front += "depends_on: [" + strings.Join(dependsOn, ", ") + "]\n"
-	}
-	return "---\n" + front + "---\n" + body
+// producing the document `planr apply` reads. An empty dependency list is
+// pruned by mdoc.Render, which keeps the input identical to what planr writes
+// back out.
+func DraftDocument(planName string, dependsOn []string, body string) (string, error) {
+	return mdoc.Render(map[string]any{"plan_name": planName, "depends_on": dependsOn}, body)
 }

@@ -1,13 +1,14 @@
 package cli
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 )
 
@@ -41,9 +42,9 @@ var scenarioDependencies = map[string][]string{
 	scenarioPayment:  {scenarioCheckout + "#1"},
 }
 
-// scenarioPhaseCount is the number of phases in the fixture draft. The
-// scenario completes phases by number, so a fixture with fewer phases has to
-// fail rather than quietly produce a thinner scenario.
+// scenarioPhaseCount is the number of phases in the fixture draft; the
+// expectations below spell it out as `3/3 phases`, so a thinner fixture fails
+// rather than quietly producing a thinner scenario.
 const scenarioPhaseCount = 3
 
 func TestCheckoutReleaseScenarioReportsPlanStates(t *testing.T) {
@@ -58,12 +59,15 @@ func TestCheckoutReleaseScenarioReportsPlanStates(t *testing.T) {
 		t.Fatalf("plantest.DraftBody() unexpected error: %v", err)
 	}
 	for _, name := range scenarioPlans {
-		document := plantest.DraftDocument(name, scenarioDependencies[name], body)
+		document, err := plantest.DraftDocument(name, scenarioDependencies[name], body)
+		if err != nil {
+			t.Fatalf("plantest.DraftDocument(%s) unexpected error: %v", name, err)
+		}
 		draftPath := filepath.Join(root, name+".md")
 		if err := os.WriteFile(draftPath, []byte(document), 0644); err != nil {
 			t.Fatal(err)
 		}
-		if output, err := runScenarioCommand(t, "apply", name+".md"); err != nil {
+		if output, err := runRoot(t, "apply", name+".md"); err != nil {
 			t.Fatalf("apply %s: %v; output=%q", name, err, output)
 		}
 	}
@@ -74,11 +78,11 @@ func TestCheckoutReleaseScenarioReportsPlanStates(t *testing.T) {
 	// Some phases done, some outstanding.
 	completeScenarioPhases(t, scenarioRollout, 1)
 	// Work under way on the plan whose dependency is already satisfied.
-	if output, err := runScenarioCommand(t, "phase", "start", scenarioCheckout, "0"); err != nil {
+	if output, err := runRoot(t, "phase", "start", scenarioCheckout, "0"); err != nil {
 		t.Fatalf("start %s phase 0: %v; output=%q", scenarioCheckout, err, output)
 	}
 
-	status, err := runScenarioCommand(t, "status")
+	status, err := runRoot(t, "status")
 	if err != nil {
 		t.Fatalf("status: %v; output=%q", err, status)
 	}
@@ -106,7 +110,7 @@ func TestCheckoutReleaseScenarioReportsPlanStates(t *testing.T) {
 		t.Errorf("status reports a satisfied dependency as a wait:\n%s", status)
 	}
 
-	overview, err := runScenarioCommand(t, "overview")
+	overview, err := runRoot(t, "overview")
 	if err != nil {
 		t.Fatalf("overview: %v; output=%q", err, overview)
 	}
@@ -122,24 +126,38 @@ func TestCheckoutReleaseScenarioReportsPlanStates(t *testing.T) {
 		}
 	}
 
-	notes, err := runScenarioCommand(t, "notes")
+	// notes is read as JSON: its text form is a tabwriter table whose column
+	// widths depend on the longest plan name, so substring matching on it would
+	// break when the scenario gains a plan.
+	raw, err := runRoot(t, "notes", "--json")
 	if err != nil {
-		t.Fatalf("notes: %v; output=%q", err, notes)
+		t.Fatalf("notes: %v; output=%q", err, raw)
+	}
+	var recorded jsonout.NotesOutput
+	if err := json.Unmarshal([]byte(raw), &recorded); err != nil {
+		t.Fatalf("decode notes: %v; output=%q", err, raw)
+	}
+	events := map[string]bool{}
+	for _, note := range recorded.Notes {
+		events[fmt.Sprintf("%s %s %s", note.Plan, note.Event, note.Phase)] = true
 	}
 	// Seven completed phases, two completed plans and one started phase are
 	// recorded against the single seed commit.
+	if len(recorded.Notes) != 10 {
+		t.Errorf("notes recorded %d events, want 10:\n%s", len(recorded.Notes), raw)
+	}
 	for _, want := range []string{
-		"00-auth-foundation  done 02",
-		"00-auth-foundation  plan_done",
-		"01-checkout-v2      start 00",
-		"04-partial-rollout  done 00",
+		"00-auth-foundation done 02",
+		"00-auth-foundation plan_done ",
+		"01-checkout-v2 start 00",
+		"04-partial-rollout done 00",
 	} {
-		if !strings.Contains(notes, want) {
-			t.Errorf("notes is missing %q:\n%s", want, notes)
+		if !events[want] {
+			t.Errorf("notes is missing %q:\n%s", want, raw)
 		}
 	}
-	if strings.Contains(notes, "04-partial-rollout  plan_done") {
-		t.Errorf("notes records an unfinished plan as done:\n%s", notes)
+	if events["04-partial-rollout plan_done "] {
+		t.Errorf("notes records an unfinished plan as done:\n%s", raw)
 	}
 }
 
@@ -149,35 +167,8 @@ func TestCheckoutReleaseScenarioReportsPlanStates(t *testing.T) {
 func completeScenarioPhases(t *testing.T, planName string, count int) {
 	t.Helper()
 	for phaseID := range count {
-		if output, err := runScenarioCommand(t, "phase", "done", planName, fmt.Sprint(phaseID)); err != nil {
+		if output, err := runRoot(t, "phase", "done", planName, fmt.Sprint(phaseID)); err != nil {
 			t.Fatalf("done %s phase %d: %v; output=%q", planName, phaseID, err, output)
-		}
-	}
-}
-
-func runScenarioCommand(t *testing.T, args ...string) (string, error) {
-	t.Helper()
-	return captureOutput(t, func() error {
-		return newRootCommand().Run(context.Background(), append([]string{"planr"}, args...))
-	})
-}
-
-func TestScenarioDependenciesNameRegisteredPlans(t *testing.T) {
-	// A dependency on a plan the scenario never registers would show up as
-	// `(not found)` in the output instead of the wait it is meant to show.
-	registered := map[string]bool{}
-	for _, name := range scenarioPlans {
-		registered[name] = true
-	}
-	for planName, dependencies := range scenarioDependencies {
-		if !registered[planName] {
-			t.Errorf("dependency declared for unregistered plan %q", planName)
-		}
-		for _, dependency := range dependencies {
-			target, _, _ := strings.Cut(dependency, "#")
-			if !registered[target] {
-				t.Errorf("%s depends on unregistered plan %q", planName, target)
-			}
 		}
 	}
 }

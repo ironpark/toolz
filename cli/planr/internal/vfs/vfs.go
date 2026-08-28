@@ -8,7 +8,11 @@
 //
 // Callers keep passing host paths, because planr resolves plan roots as host
 // paths and reports them back to the user. Name translates a host path into
-// the io/fs name it has in the FS below, and Host reverses the translation.
+// the io/fs name it has in the FS below, and path reverses the translation.
+//
+// A filesystem swapped in through Use has to report a missing file the way the
+// os package does — as an error satisfying errors.Is(err, fs.ErrNotExist) —
+// because callers treat a missing plans directory as an empty one.
 package vfs
 
 import (
@@ -19,15 +23,11 @@ import (
 	"strings"
 )
 
-// FS is the filesystem planr reads. The optional io/fs interfaces are required
-// rather than optional so an injected filesystem cannot silently fall back to
-// the slower generic implementations for the operations planr leans on.
-type FS interface {
-	fs.FS
-	fs.ReadFileFS
-	fs.ReadDirFS
-	fs.StatFS
-}
+// FS is the filesystem planr reads. Any fs.FS will do: the helpers below go
+// through fs.ReadFile, fs.ReadDir and fs.Stat, which use the optional io/fs
+// interfaces when the filesystem implements them. Keeping it to fs.FS is what
+// lets a test hand in an embed.FS or an fs.Sub of one.
+type FS = fs.FS
 
 // current is the filesystem the package-level helpers read through.
 var current FS = hostFS{}
@@ -40,14 +40,11 @@ func Use(fsys FS) func() {
 	return func() { current = previous }
 }
 
-// Current returns the filesystem reads go through.
-func Current() FS { return current }
-
 // Name converts a host path into its io/fs name. Relative paths are resolved
 // against the working directory first, so the name does not depend on where
 // the process happens to be.
-func Name(path string) (string, error) {
-	absolute, err := filepath.Abs(path)
+func Name(hostPath string) (string, error) {
+	absolute, err := filepath.Abs(hostPath)
 	if err != nil {
 		return "", err
 	}
@@ -60,13 +57,13 @@ func Name(path string) (string, error) {
 		name = "."
 	}
 	if !fs.ValidPath(name) {
-		return "", fmt.Errorf("%s: not a readable path", path)
+		return "", fmt.Errorf("%s: not a readable path", hostPath)
 	}
 	return name, nil
 }
 
-// Path reverses Name, turning an io/fs name back into a host path.
-func Path(name string) string {
+// path reverses Name, turning an io/fs name back into a host path.
+func path(name string) string {
 	host := filepath.FromSlash(name)
 	if filepath.VolumeName(host) != "" {
 		return host
@@ -75,8 +72,11 @@ func Path(name string) string {
 }
 
 // ReadFile reads the file at a host path.
-func ReadFile(path string) ([]byte, error) {
-	name, err := Name(path)
+func ReadFile(hostPath string) ([]byte, error) {
+	if _, ok := current.(hostFS); ok {
+		return os.ReadFile(hostPath)
+	}
+	name, err := Name(hostPath)
 	if err != nil {
 		return nil, err
 	}
@@ -84,8 +84,11 @@ func ReadFile(path string) ([]byte, error) {
 }
 
 // ReadDir lists the directory at a host path.
-func ReadDir(path string) ([]fs.DirEntry, error) {
-	name, err := Name(path)
+func ReadDir(hostPath string) ([]fs.DirEntry, error) {
+	if _, ok := current.(hostFS); ok {
+		return os.ReadDir(hostPath)
+	}
+	name, err := Name(hostPath)
 	if err != nil {
 		return nil, err
 	}
@@ -93,19 +96,24 @@ func ReadDir(path string) ([]fs.DirEntry, error) {
 }
 
 // Stat reports the file information for a host path.
-func Stat(path string) (fs.FileInfo, error) {
-	name, err := Name(path)
+func Stat(hostPath string) (fs.FileInfo, error) {
+	if _, ok := current.(hostFS); ok {
+		return os.Stat(hostPath)
+	}
+	name, err := Name(hostPath)
 	if err != nil {
 		return nil, err
 	}
 	return fs.Stat(current, name)
 }
 
-// hostFS is the machine's filesystem seen through io/fs. It keeps the os
-// package's errors, so os.IsNotExist and friends still hold for callers.
+// hostFS is the machine's filesystem seen through io/fs, and the default the
+// helpers above short-circuit to: a host path needs no translation to reach
+// the os package, which is also what keeps its errors — and so os.IsNotExist
+// — intact for callers.
 type hostFS struct{}
 
-func (hostFS) Open(name string) (fs.File, error)          { return os.Open(Path(name)) }
-func (hostFS) ReadFile(name string) ([]byte, error)       { return os.ReadFile(Path(name)) }
-func (hostFS) ReadDir(name string) ([]fs.DirEntry, error) { return os.ReadDir(Path(name)) }
-func (hostFS) Stat(name string) (fs.FileInfo, error)      { return os.Stat(Path(name)) }
+func (hostFS) Open(name string) (fs.File, error)          { return os.Open(path(name)) }
+func (hostFS) ReadFile(name string) ([]byte, error)       { return os.ReadFile(path(name)) }
+func (hostFS) ReadDir(name string) ([]fs.DirEntry, error) { return os.ReadDir(path(name)) }
+func (hostFS) Stat(name string) (fs.FileInfo, error)      { return os.Stat(path(name)) }
