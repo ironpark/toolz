@@ -1,0 +1,9 @@
+{
+	"id": "svelte-vite-plugin",
+	"name": "Svelte Vite Plugin",
+	"version": "1.0.0",
+	"minAppVersion": "1.0.0",
+	"description": "A modern Obsidian plugin starter powered by Vite and Svelte 5.",
+	"author": "Your name",
+	"isDesktopOnly": false
+}
