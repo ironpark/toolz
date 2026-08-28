@@ -47,6 +47,7 @@ toolz/
 - ![](assets/status/initial.svg) **[`mohae`](cli/mohae/)** CLI, MCP 서버, 에이전트 스킬을 재현 가능한 환경에서 실행하고 비교·평가합니다.
 - ![](assets/status/ready.svg) **[`planr`](cli/planr/)** Markdown 계획을 규격화해 저장하고 phase 단위로 진행 상태를 관리합니다.
 - ![](assets/status/validation.svg) **[`sanbo`](cli/sanbo/)** [`getpaseo/paseo-relay`](https://github.com/getpaseo/paseo-relay)의 공개 프로토콜·운영 설정과 호환되는 드롭인 교체를 목표로 합니다.
+- ![](assets/status/initial.svg) **[`skpt`](cli/skpt/)** 하나의 공통 정의를 Claude Code, Codex 등 플랫폼별 에이전트 스킬로 컴파일합니다.
 
 ## 에이전트 스킬
 
