@@ -12,9 +12,9 @@ die() {
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  scripts/worktree-context status
-  scripts/worktree-context set --purpose <text> --dev-dir <path>
-  scripts/worktree-context check-path <path>
+  scripts/gitwt-ctx status
+  scripts/gitwt-ctx set --purpose <text> --dev-dir <path>
+  scripts/gitwt-ctx check-path <path>
 
 Commands:
   status      Show whether this is a Git worktree and print its metadata.
