@@ -15,6 +15,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
 
@@ -64,8 +65,8 @@ func testDraft() draft.Draft {
 func TestFrontmatterOmitsEmptyMetadata(t *testing.T) {
 	plansRoot := t.TempDir()
 	planRoot := filepath.Join(plansRoot, "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", doc.Korean); err != nil {
-		t.Fatalf("writePlan() unexpected error: %v", err)
+	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.Korean); err != nil {
+		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 
 	for _, path := range []string{
@@ -99,8 +100,8 @@ func TestFrontmatterOmitsEmptyMetadata(t *testing.T) {
 func TestCompletionStampsFrontmatter(t *testing.T) {
 	plansRoot := t.TempDir()
 	planRoot := filepath.Join(plansRoot, "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", doc.Korean); err != nil {
-		t.Fatalf("writePlan() unexpected error: %v", err)
+	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.Korean); err != nil {
+		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 
 	if _, done, err := updatePhaseStatus([]string{plansRoot}, "checkout-v2", 0, "done"); err != nil || !done {
@@ -130,7 +131,7 @@ func TestPhaseStartRecordsNoteForCurrentHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(root, "plan", "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	old, err := os.Getwd()

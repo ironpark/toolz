@@ -61,8 +61,11 @@ func TestMessageOriginRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &o); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if o.Kind != OriginPeer || o.From != "agent://x" || o.VerifiedPeerPID == nil || *o.VerifiedPeerPID != 42 {
+	if o.Kind != OriginPeer || o.From != "agent://x" || o.VerifiedPeerPID != 42 {
 		t.Fatalf("unexpected origin: %+v", o)
+	}
+	if len(o.Extra) != 0 {
+		t.Fatalf("extra = %v, want none", o.Extra)
 	}
 	out, err := json.Marshal(o)
 	if err != nil {
@@ -70,6 +73,32 @@ func TestMessageOriginRoundTrip(t *testing.T) {
 	}
 	if string(out) != raw {
 		t.Fatalf("marshal = %s, want %s", out, raw)
+	}
+}
+
+func TestMessageOriginExtraRoundTrip(t *testing.T) {
+	t.Parallel()
+	const raw = `{"kind":"peer","from":"agent://x","hop":2,"trace":{"id":"t1"}}`
+	var o MessageOrigin
+	if err := json.Unmarshal([]byte(raw), &o); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if o.Extra["hop"] != float64(2) {
+		t.Fatalf("extra = %v, want hop 2", o.Extra)
+	}
+	out, err := json.Marshal(o)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if got["kind"] != OriginPeer || got["hop"] != float64(2) {
+		t.Fatalf("marshal = %s", out)
+	}
+	if trace, ok := got["trace"].(map[string]any); !ok || trace["id"] != "t1" {
+		t.Fatalf("trace lost: %s", out)
 	}
 }
 

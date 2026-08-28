@@ -9,19 +9,20 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 )
 
 func TestStatusJSONUsesStableSnakeCaseFields(t *testing.T) {
 	phase := 1
-	summaries := []planSummary{{
-		name:   "checkout-v2",
-		label:  "plan/00-checkout-v2",
-		status: "in-progress",
-		phases: []storedPhase{
-			{id: 0, slug: "foundation", title: "Foundation", status: "done"},
-			{id: phase, slug: "ui", title: "Checkout UI", status: "planned"},
+	summaries := []plan.Summary{{
+		Name:   "checkout-v2",
+		Label:  "plan/00-checkout-v2",
+		Status: "in-progress",
+		Phases: []plan.StoredPhase{
+			{ID: 0, Slug: "foundation", Title: "Foundation", Status: "done"},
+			{ID: phase, Slug: "ui", Title: "Checkout UI", Status: "planned"},
 		},
-		wait: []string{"platform-refresh"},
+		Wait: []string{"platform-refresh"},
 	}}
 
 	raw, err := json.Marshal(makeStatusJSON(summaries))
@@ -87,12 +88,12 @@ func TestOverviewAndNotesJSONKeepEmptyArrays(t *testing.T) {
 }
 
 func TestShowJSONContainsStructuredPhaseContent(t *testing.T) {
-	value, err := json.Marshal(makeShowJSON(phaseDetails{
-		plan: "checkout-v2", directory: "00-checkout-v2", id: 2,
-		slug: "rollout", title: "Gradual Rollout", status: "conditional",
-		plannedWork: "- move traffic", doneWhen: "- metrics are stable",
-		dependencies: []string{"00-checkout-v2#1"},
-		file:         filepath.Join(string(filepath.Separator), "repo", "phases", "02-rollout.md"),
+	value, err := json.Marshal(makeShowJSON(plan.Details{
+		Plan: "checkout-v2", Directory: "00-checkout-v2", ID: 2,
+		Slug: "rollout", Title: "Gradual Rollout", Status: "conditional",
+		PlannedWork: "- move traffic", DoneWhen: "- metrics are stable",
+		Dependencies: []string{"00-checkout-v2#1"},
+		File:         filepath.Join(string(filepath.Separator), "repo", "phases", "02-rollout.md"),
 	}))
 	if err != nil {
 		t.Fatal(err)

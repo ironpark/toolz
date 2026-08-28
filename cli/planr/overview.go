@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
 
@@ -25,15 +26,15 @@ func overviewCommand(_ context.Context, cmd *cli.Command) error {
 	// Collect every plan before resolving dependencies. When a single plan is
 	// requested, its dependencies may live outside the filtered result and
 	// still need to be classified as done, in-progress, or missing correctly.
-	summaries, _, err := collectPlanSummaries(planDirectories, "")
+	summaries, _, err := plan.CollectSummaries(planDirectories, "")
 	if err != nil {
 		return err
 	}
-	annotatePlanWaits(summaries)
+	plan.AnnotateWaits(summaries)
 	if filter := cmd.Args().First(); filter != "" {
 		matched := summaries[:0]
 		for _, summary := range summaries {
-			if summary.name == filter || filepath.Base(summary.label) == filter {
+			if summary.Name == filter || filepath.Base(summary.Label) == filter {
 				matched = append(matched, summary)
 			}
 		}
@@ -51,18 +52,18 @@ func overviewCommand(_ context.Context, cmd *cli.Command) error {
 		fmt.Println("No plans found")
 		return nil
 	}
-	printPlanGroups(summaries, func(name string, summary planSummary) {
-		status := summary.status
+	printPlanGroups(summaries, func(name string, summary plan.Summary) {
+		status := summary.Status
 		if status == "" {
 			status = "unknown"
 		}
-		done, total, next := summary.progress()
+		done, total, next := summary.Progress()
 		fmt.Printf("  %s: %s (%d/%d phases)", name, status, done, total)
 		if next != "" {
 			fmt.Printf("; next: %s", next)
 		}
 		fmt.Println()
-		printPlanList("wait", summary.wait)
+		printPlanList("wait", summary.Wait)
 	})
 	return nil
 }

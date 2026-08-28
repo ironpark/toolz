@@ -16,6 +16,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
@@ -65,7 +66,7 @@ func recordCompletionNote(repoRoot, planDirectory, event string, phaseID int) er
 	if phaseID >= 0 {
 		phase = fmt.Sprintf("%02d", phaseID)
 	}
-	line := noteLine(planDirectory, event, phase, completionTimestamp())
+	line := noteLine(planDirectory, event, phase, plan.CompletionTimestamp())
 	return appendNote(repository, head.Hash(), line)
 }
 
@@ -265,7 +266,7 @@ func readPlanNotes(repoRoot, planFilter string) ([]planNote, error) {
 			}
 			// Notes record the numbered directory, but every other command
 			// accepts the bare plan name too, so both are matched here.
-			if planFilter != "" && note.plan != planFilter && plan.Name(note.plan) != planFilter {
+			if planFilter != "" && note.plan != planFilter && draft.Name(note.plan) != planFilter {
 				continue
 			}
 			note.commit, note.shortHash, note.subject = target.String(), shortHash, subject

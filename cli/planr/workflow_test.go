@@ -15,6 +15,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 	"github.com/urfave/cli/v3"
 )
@@ -68,8 +69,8 @@ func TestApplyPhaseDraftAddsPhaseAndPreservesPhaseFlags(t *testing.T) {
 	root := t.TempDir()
 	settings := applyTestSettings()
 	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := writePlan(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
-		t.Fatalf("writePlan() unexpected error: %v", err)
+	if err := plan.Write(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
+		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 
 	planDraft := filledPhaseDraft(t, doc.English)
@@ -107,7 +108,7 @@ func TestApplyPhaseDraftRefusesCompletedPlan(t *testing.T) {
 	root := t.TempDir()
 	settings := applyTestSettings()
 	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := writePlan(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	planPath := filepath.Join(planRoot, "PLAN.md")
@@ -141,7 +142,7 @@ func TestApplyDryRunDoesNotCreatePlanFiles(t *testing.T) {
 	root := t.TempDir()
 	settings := applyTestSettings()
 	planDraft := applyTestDraft("dry-run-plan")
-	documents, err := renderPlanDocuments(planDraft, "00-dry-run-plan", settings.Language, "2026-08-27T00:00:00Z")
+	documents, err := plan.RenderDocuments(planDraft, "00-dry-run-plan", settings.Language, "2026-08-27T00:00:00Z")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +171,7 @@ func TestEditPhaseBaseHashAndStatusSafety(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := writePlan(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	phasePath := filepath.Join(planRoot, "phases", "00-foundation.md")
@@ -217,7 +218,7 @@ func TestEditPlanSectionProtectsDerivedChecklist(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := writePlan(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	checkout := editDocumentForTest(t, root, "checkout-v2", "plan.md", "plan")
@@ -368,7 +369,7 @@ func TestNewJSONProducesPlanAndPhaseTemplatesWithoutFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), []byte("plans_dir: plans\nlanguage: ko\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writePlan(filepath.Join(root, "plans", "00-checkout-v2"), applyTestDraft("checkout-v2"), "00-checkout-v2", doc.Korean); err != nil {
+	if err := plan.Write(filepath.Join(root, "plans", "00-checkout-v2"), applyTestDraft("checkout-v2"), "00-checkout-v2", doc.Korean); err != nil {
 		t.Fatal(err)
 	}
 	withWorkingDirectory(t, root)
@@ -416,7 +417,7 @@ func TestShowSectionsAllAndSchemaReturnMachineReadableDocuments(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), []byte("plans_dir: plans\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writePlan(filepath.Join(root, "plans", "00-checkout-v2"), applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(filepath.Join(root, "plans", "00-checkout-v2"), applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	withWorkingDirectory(t, root)

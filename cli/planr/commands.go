@@ -5,18 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"sort"
-	"strconv"
 	"strings"
-	"time"
 
-	"github.com/goccy/go-yaml"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
-	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
@@ -37,8 +31,8 @@ func newCommand(_ context.Context, cmd *cli.Command) error {
 
 func newPlanCommand(cmd *cli.Command) error {
 	name := cmd.Args().First()
-	if !plan.KebabPattern.MatchString(name) {
-		return fmt.Errorf("plan name %q must be lowercase plan.KebabPattern-case", name)
+	if !draft.KebabPattern.MatchString(name) {
+		return fmt.Errorf("plan name %q must be lowercase kebab-case", name)
 	}
 	descriptionInput := cmd.String("description")
 	if cmd.NArg() == 2 {
@@ -47,7 +41,7 @@ func newPlanCommand(cmd *cli.Command) error {
 		}
 		descriptionInput = cmd.Args().Get(1)
 	}
-	description, err := plan.RequireDescription(descriptionInput)
+	description, err := draft.RequireDescription(descriptionInput)
 	if err != nil {
 		return err
 	}
@@ -66,7 +60,7 @@ func newPlanCommand(cmd *cli.Command) error {
 			return err
 		}
 	}
-	dependsOn, err := plan.NormalizeDependencies(cmd.StringSlice("depends-on"), name)
+	dependsOn, err := draft.NormalizeDependencies(cmd.StringSlice("depends-on"), name)
 	if err != nil {
 		return fmt.Errorf("invalid dependencies for plan %q: %w", name, err)
 	}
@@ -102,322 +96,12 @@ func newPlanCommand(cmd *cli.Command) error {
 	return nil
 }
 
-// planDirectoryPrefix matches a numbered plan directory name, capturing its
-// index and plan name.
-var planDirectoryPrefix = regexp.MustCompile(`^(\d+)-(.+)$`)
-
-func nextPlanDirectory(planDirectories []string, name string) (string, error) {
-	maxIndex := -1
-	for _, directory := range planDirectories {
-		entries, err := os.ReadDir(directory)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return "", err
-		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			match := planDirectoryPrefix.FindStringSubmatch(entry.Name())
-			if len(match) != 3 {
-				continue
-			}
-			if match[2] == name {
-				return "", fmt.Errorf("plan %q already exists", name)
-			}
-			index, err := strconv.Atoi(match[1])
-			if err != nil {
-				continue
-			}
-			if index > maxIndex {
-				maxIndex = index
-			}
-		}
-	}
-	return fmt.Sprintf("%02d-%s", maxIndex+1, name), nil
-}
-
-func writePlan(root string, d draft.Draft, planDirectory, language string) error {
-	documents, err := renderPlanDocuments(d, planDirectory, language, time.Now().UTC().Format(time.RFC3339))
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Join(root, "phases"), 0755); err != nil {
-		return err
-	}
-	for relative, contents := range documents {
-		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(relative)), []byte(contents), 0644); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// renderPlanDocuments produces the complete set of files written when a plan
-// is registered. Keeping this separate from writePlan lets apply --dry-run
-// return the exact resulting documents without touching the repository.
-func renderPlanDocuments(d draft.Draft, planDirectory, language, registeredAt string) (map[string]string, error) {
-	text := doc.StringsFor(language)
-	documents := map[string]string{
-		"GOALS.md":   "# GOALS\n\n" + d.Goals + "\n",
-		"CONTEXT.md": "# SCOPE\n\n" + d.Scope + "\n\n# CONTEXT\n\n" + d.Context + "\n",
-	}
-	checklist := []string{}
-	for _, p := range d.Phases {
-		checklist = append(checklist, phaseChecklistEntry(p.Meta.Phase, p.Title, p.Meta.Slug, p.Meta.Status == "done"))
-		path := phaseDocumentPath(p.Meta.Phase, p.Meta.Slug)
-		contents, err := mdoc.Render(phaseFrontmatter(planDirectory, p.Meta), phaseDocumentBody(language, p.Title, p.Planned, p.Completion))
-		if err != nil {
-			return nil, err
-		}
-		documents[path] = contents
-	}
-	meta := map[string]any{"description": d.Description, "registered_at": registeredAt, "plan_status": "in-progress", "depends_on": d.DependsOn, "succeeded_by": nil, "preceded_by": nil}
-	header, err := yaml.Marshal(mdoc.PruneEmptyMeta(meta))
-	if err != nil {
-		return nil, err
-	}
-	nextDoc := ""
-	for _, p := range d.Phases {
-		if p.Meta.Phase == d.NextPhase {
-			nextDoc = phaseDocumentPath(p.Meta.Phase, p.Meta.Slug)
-		}
-	}
-	documents["PLAN.md"] = fmt.Sprintf("---\n%s---\n> NEXT: %s ([Phase %d](%s))\n\n# Phases\n\n%s\n\n# %s\n\n%s\n\n# %s\n\n%s\n\n# %s\n\n%s\n",
-		header, d.NextText, d.NextPhase, nextDoc, strings.Join(checklist, "\n"),
-		text.Verification, d.Verification,
-		text.Ordering, d.Ordering,
-		text.NextTarget, d.NextText)
-	return documents, nil
-}
-
-// phaseFilePrefix matches a phase document filename, capturing its number and slug.
-var phaseFilePrefix = regexp.MustCompile(`^(\d+)-(.*)\.md$`)
-
-// phaseDocumentPath is the plan-relative location of a phase document. The
-// same shape is matched by phaseFilePrefix when reading phases back.
-func phaseDocumentPath(id int, slug string) string {
-	return fmt.Sprintf("phases/%02d-%s.md", id, slug)
-}
-
-func phaseChecklistEntry(id int, title, slug string, done bool) string {
-	checkmark := " "
-	if done {
-		checkmark = "x"
-	}
-	return fmt.Sprintf("- [%s] [Phase %02d: %s](%s)", checkmark, id, title, phaseDocumentPath(id, slug))
-}
-
-// transformChecklistEntry rewrites the single checklist line for a phase in a
-// PLAN.md body. transform receives the matching line (including its trailing
-// newline, when present) and returns the replacement plus true to count the
-// line as handled; returning an empty replacement drops the line, and false
-// keeps the original line without counting it as a match.
-func transformChecklistEntry(body string, phaseID int, transform func(line string) (string, bool)) (string, error) {
-	marker := fmt.Sprintf("[Phase %02d:", phaseID)
-	lines := strings.SplitAfter(body, "\n")
-	matched := 0
-	result := make([]string, 0, len(lines))
-	for _, line := range lines {
-		if !strings.Contains(line, marker) || !strings.Contains(strings.TrimSpace(line), "- [") {
-			result = append(result, line)
-			continue
-		}
-		replacement, handled := transform(line)
-		if !handled {
-			result = append(result, line)
-			continue
-		}
-		matched++
-		if replacement != "" {
-			result = append(result, replacement)
-		}
-	}
-	if matched == 0 {
-		return body, fmt.Errorf("checklist entry for phase %02d not found", phaseID)
-	}
-	if matched > 1 {
-		return body, fmt.Errorf("multiple checklist entries found for phase %02d", phaseID)
-	}
-	return strings.Join(result, ""), nil
-}
-
-func phaseFrontmatter(planDirectory string, meta draft.Meta) map[string]any {
-	dependencies := make([]string, len(meta.DependsOn))
-	for index, dependency := range meta.DependsOn {
-		dependencies[index] = fmt.Sprintf("%s#%d", planDirectory, dependency)
-	}
-	return map[string]any{
-		"status":          meta.Status,
-		"entry_condition": meta.EntryCondition,
-		"perf_phase":      meta.PerfPhase,
-		"depends_on":      dependencies,
-		"blocks":          []string{},
-	}
-}
-
-func phaseDocumentBody(language, title, planned, completion string) string {
-	text := doc.StringsFor(language)
-	return fmt.Sprintf("> DONE-WHEN: %s\n> NEXT: %s\n\n# %s\n\n## %s\n\n%s\n\n## %s\n\n%s\n",
-		firstPhaseLine(completion), text.NoNext, title, text.PlannedWork, planned, text.DoneWhen, completion)
-}
-
-func firstPhaseLine(value string) string {
-	return strings.TrimPrefix(strings.TrimSpace(strings.SplitN(value, "\n", 2)[0]), "- ")
-}
-
-// planSummary is the shared on-disk view of a plan used by both `status` and
-// `overview`; each command only differs in how it renders it.
-type planSummary struct {
-	name, label, status string
-	dependsOn           []plan.Dependency
-	phases              []storedPhase
-	wait                []string
-}
-
-func (p *planSummary) addDependency(raw string) {
-	dependency, err := plan.ParseDependency(raw)
-	if err != nil {
-		return
-	}
-	for _, existing := range p.dependsOn {
-		if existing.Plan == dependency.Plan && plan.SameDependencyPhase(existing, dependency) {
-			return
-		}
-	}
-	p.dependsOn = append(p.dependsOn, dependency)
-}
-
-// progress reports completed and total phase counts plus the first phase that
-// is not done yet.
-func (p planSummary) progress() (done, total int, next string) {
-	for _, phase := range p.phases {
-		total++
-		if phase.status == "done" {
-			done++
-		} else if next == "" {
-			next = phase.title
-		}
-	}
-	return done, total, next
-}
-
-// collectPlanSummaries reads every plan under planDirectories, optionally
-// keeping only the one matching filter (by directory or plan name).
-func collectPlanSummaries(planDirectories []string, filter string) ([]planSummary, bool, error) {
-	summaries := []planSummary{}
-	foundDirectory := false
-	for _, plans := range planDirectories {
-		entries, err := os.ReadDir(plans)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return nil, false, err
-		}
-		foundDirectory = true
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			if filter != "" && entry.Name() != filter && plan.Name(entry.Name()) != filter {
-				continue
-			}
-			planRoot := filepath.Join(plans, entry.Name())
-			raw, err := os.ReadFile(filepath.Join(planRoot, "PLAN.md"))
-			if err != nil {
-				continue
-			}
-			front, _, err := mdoc.Split(string(raw))
-			if err != nil {
-				return nil, false, fmt.Errorf("%s: %w", entry.Name(), err)
-			}
-			phases, err := readPlanPhases(planRoot)
-			if err != nil {
-				return nil, false, err
-			}
-			status, _ := front["plan_status"].(string)
-			summary := planSummary{
-				name:   plan.Name(entry.Name()),
-				label:  filepath.Join(filepath.Base(plans), entry.Name()),
-				status: status,
-				phases: phases,
-			}
-			for _, dependency := range mdoc.Strings(front["depends_on"]) {
-				summary.addDependency(dependency)
-			}
-			if status != "done" {
-				for _, phase := range phases {
-					for _, dependency := range phase.dependencies {
-						if _, _, found := strings.Cut(dependency, "#"); found {
-							summary.addDependency(dependency)
-						}
-					}
-				}
-			}
-			summaries = append(summaries, summary)
-		}
-	}
-	return summaries, foundDirectory, nil
-}
-
-// annotatePlanWaits fills in each summary's unmet dependencies and returns the
-// set of plans some open plan still depends on.
-func annotatePlanWaits(summaries []planSummary) map[string]bool {
-	required := map[string]bool{}
-	byName := map[string]*planSummary{}
-	for index := range summaries {
-		byName[summaries[index].name] = &summaries[index]
-	}
-	for index := range summaries {
-		summary := &summaries[index]
-		if summary.status == "done" {
-			continue
-		}
-		for _, dependency := range summary.dependsOn {
-			required[dependency.Plan] = true
-			if dependency.Plan == summary.name {
-				continue
-			}
-			label := plan.DependencyLabel(dependency)
-			target, found := byName[dependency.Plan]
-			if !found {
-				summary.wait = append(summary.wait, label+" (not found)")
-				continue
-			}
-			if dependency.Phase == nil {
-				if target.status != "done" {
-					summary.wait = append(summary.wait, fmt.Sprintf("%s (%s)", label, target.status))
-				}
-				continue
-			}
-			phaseFound := false
-			for _, phase := range target.phases {
-				if phase.id != *dependency.Phase {
-					continue
-				}
-				phaseFound = true
-				if phase.status != "done" {
-					summary.wait = append(summary.wait, fmt.Sprintf("%s (%s)", label, phase.status))
-				}
-				break
-			}
-			if !phaseFound {
-				summary.wait = append(summary.wait, label+" (phase not found)")
-			}
-		}
-	}
-	return required
-}
-
 // printPlanGroups prints each summary grouped by its plans directory, letting
 // the caller render the per-plan detail lines.
-func printPlanGroups(summaries []planSummary, render func(name string, summary planSummary)) {
+func printPlanGroups(summaries []plan.Summary, render func(name string, summary plan.Summary)) {
 	currentDirectory := ""
 	for _, summary := range summaries {
-		directory, name := filepath.Split(summary.label)
+		directory, name := filepath.Split(summary.Label)
 		if directory != currentDirectory {
 			fmt.Printf("%s\n", directory)
 			currentDirectory = directory
@@ -448,7 +132,7 @@ func statusCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	summaries, _, err := collectPlanSummaries(planDirectories, cmd.Args().First())
+	summaries, _, err := plan.CollectSummaries(planDirectories, cmd.Args().First())
 	if err != nil {
 		return err
 	}
@@ -463,12 +147,12 @@ func statusCommand(_ context.Context, cmd *cli.Command) error {
 			return nil
 		}
 	}
-	requiredPlans := annotatePlanWaits(summaries)
+	requiredPlans := plan.AnnotateWaits(summaries)
 	if cmd.NArg() == 0 {
 		// Completed plans stay hidden unless an open plan still depends on them.
 		visible := summaries[:0]
 		for _, summary := range summaries {
-			if summary.status != "done" || requiredPlans[summary.name] {
+			if summary.Status != "done" || requiredPlans[summary.Name] {
 				visible = append(visible, summary)
 			}
 		}
@@ -477,56 +161,17 @@ func statusCommand(_ context.Context, cmd *cli.Command) error {
 	if cmd.Bool("json") {
 		return writeJSON(makeStatusJSON(summaries))
 	}
-	printPlanGroups(summaries, func(name string, summary planSummary) {
-		done, total, _ := summary.progress()
-		fmt.Printf("  %s: %s (%d/%d phases done)\n", name, summary.status, done, total)
+	printPlanGroups(summaries, func(name string, summary plan.Summary) {
+		done, total, _ := summary.Progress()
+		fmt.Printf("  %s: %s (%d/%d phases done)\n", name, summary.Status, done, total)
 		remaining := []string{}
-		for _, phase := range summary.phases {
-			if phase.status != "done" {
-				remaining = append(remaining, fmt.Sprintf("%s (%s)", phase.title, phase.status))
+		for _, phase := range summary.Phases {
+			if phase.Status != "done" {
+				remaining = append(remaining, fmt.Sprintf("%s (%s)", phase.Title, phase.Status))
 			}
 		}
 		printPlanList("remaining", remaining)
-		printPlanList("wait", summary.wait)
+		printPlanList("wait", summary.Wait)
 	})
 	return nil
-}
-
-type storedPhase struct {
-	id                  int
-	slug, title, status string
-	dependencies        []string
-}
-
-func readPlanPhases(planRoot string) ([]storedPhase, error) {
-	entries, err := os.ReadDir(filepath.Join(planRoot, "phases"))
-	if err != nil {
-		return nil, fmt.Errorf("read phases for %s: %w", filepath.Base(planRoot), err)
-	}
-	phases := []storedPhase{}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		match := phaseFilePrefix.FindStringSubmatch(entry.Name())
-		if len(match) != 3 {
-			continue
-		}
-		id, err := strconv.Atoi(match[1])
-		if err != nil {
-			continue
-		}
-		contents, err := os.ReadFile(filepath.Join(planRoot, "phases", entry.Name()))
-		if err != nil {
-			return nil, err
-		}
-		front, _, err := mdoc.Split(string(contents))
-		if err != nil {
-			return nil, fmt.Errorf("%s/%s: %w", filepath.Base(planRoot), entry.Name(), err)
-		}
-		status, _ := front["status"].(string)
-		phases = append(phases, storedPhase{id, match[2], mdoc.Title(string(contents)), status, mdoc.Strings(front["depends_on"])})
-	}
-	sort.Slice(phases, func(i, j int) bool { return phases[i].id < phases[j].id })
-	return phases, nil
 }

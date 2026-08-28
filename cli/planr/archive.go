@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
 
@@ -29,7 +30,7 @@ func archiveCommand(_ context.Context, cmd *cli.Command) error {
 	if len(planDirectories) < 2 {
 		return fmt.Errorf("archive requires at least two plans_dirs entries")
 	}
-	sourceRoot, sourceDirectory, err := findPlanDirectory(planDirectories, cmd.Args().First())
+	sourceRoot, sourceDirectory, err := plan.FindDirectory(planDirectories, cmd.Args().First())
 	if err != nil {
 		return err
 	}
@@ -37,7 +38,7 @@ func archiveCommand(_ context.Context, cmd *cli.Command) error {
 	if filepath.Clean(filepath.Dir(sourceRoot)) == filepath.Clean(destination) {
 		return fmt.Errorf("plan %q is already in the archive directory %s", sourceDirectory, destination)
 	}
-	completed, err := planAlreadyDone(sourceRoot)
+	completed, err := plan.AlreadyDone(sourceRoot)
 	if err != nil {
 		return fmt.Errorf("validate %s: %w", sourceDirectory, err)
 	}
@@ -52,14 +53,14 @@ func archiveCommand(_ context.Context, cmd *cli.Command) error {
 	defer directoryLock.close()
 	// Re-resolve after waiting for the directory lock. Another archive may have
 	// moved this plan while the initial validation was in progress.
-	sourceRoot, sourceDirectory, err = findPlanDirectory(planDirectories, cmd.Args().First())
+	sourceRoot, sourceDirectory, err = plan.FindDirectory(planDirectories, cmd.Args().First())
 	if err != nil {
 		return err
 	}
 	if filepath.Clean(filepath.Dir(sourceRoot)) == filepath.Clean(destination) {
 		return fmt.Errorf("plan %q is already in the archive directory %s", sourceDirectory, destination)
 	}
-	completed, err = planAlreadyDone(sourceRoot)
+	completed, err = plan.AlreadyDone(sourceRoot)
 	if err != nil {
 		return fmt.Errorf("validate %s: %w", sourceDirectory, err)
 	}
@@ -71,7 +72,7 @@ func archiveCommand(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 	defer planLock.close()
-	completed, err = planAlreadyDone(sourceRoot)
+	completed, err = plan.AlreadyDone(sourceRoot)
 	if err != nil {
 		return fmt.Errorf("validate %s: %w", sourceDirectory, err)
 	}

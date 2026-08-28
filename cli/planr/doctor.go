@@ -52,7 +52,7 @@ func (r *doctorReporter) printf(format string, values ...any) {
 }
 
 type doctorPhase struct {
-	storedPhase
+	plan.StoredPhase
 	path  string
 	front map[string]any
 }
@@ -171,7 +171,7 @@ func doctorCommand(_ context.Context, cmd *cli.Command) error {
 
 	byName := map[string]doctorPlan{}
 	for _, record := range plans {
-		name := plan.Name(record.directory)
+		name := draft.Name(record.directory)
 		if previous, found := byName[name]; found {
 			reporter.add(doctorIssue{location: record.directory, message: fmt.Sprintf("duplicate plan name %q also exists at %s", name, previous.directory)})
 			continue
@@ -212,7 +212,7 @@ func inspectDoctorPlan(planRoot, directory string) (doctorPlan, []doctorIssue) {
 		record.phaseDataOK = false
 	} else {
 		if !hasDocumentFrontmatter(string(raw)) {
-			issues = append(issues, doctorIssue{location: record.directory + "/PLAN.md", message: "missing mdoc.Split"})
+			issues = append(issues, doctorIssue{location: record.directory + "/PLAN.md", message: "missing frontmatter"})
 		} else {
 			front, body, frontErr := mdoc.Split(string(raw))
 			if frontErr != nil {
@@ -249,9 +249,9 @@ func inspectDoctorPlan(planRoot, directory string) (doctorPlan, []doctorIssue) {
 				continue
 			}
 			location := record.directory + "/phases/" + entry.Name()
-			match := phaseFilePrefix.FindStringSubmatch(entry.Name())
-			if len(match) != 3 || !plan.KebabPattern.MatchString(match[2]) {
-				issues = append(issues, doctorIssue{location: location, message: "invalid phase filename; expected NN-lowercase-plan.KebabPattern-case.md"})
+			match := plan.PhaseFilePrefix.FindStringSubmatch(entry.Name())
+			if len(match) != 3 || !draft.KebabPattern.MatchString(match[2]) {
+				issues = append(issues, doctorIssue{location: location, message: "invalid phase filename; expected NN-lowercase-kebab-case.md"})
 				record.phaseDataOK = false
 				continue
 			}
@@ -282,7 +282,7 @@ func inspectDoctorPlan(planRoot, directory string) (doctorPlan, []doctorIssue) {
 				continue
 			}
 			if !hasDocumentFrontmatter(string(phaseRaw)) {
-				issues = append(issues, doctorIssue{location: location, message: "missing mdoc.Split"})
+				issues = append(issues, doctorIssue{location: location, message: "missing frontmatter"})
 				record.phaseDataOK = false
 				continue
 			}
@@ -293,7 +293,7 @@ func inspectDoctorPlan(planRoot, directory string) (doctorPlan, []doctorIssue) {
 				continue
 			}
 			phase := doctorPhase{
-				storedPhase: storedPhase{id: id, slug: match[2], title: mdoc.Title(string(phaseRaw)), status: doctorStringValue(phaseFront["status"]), dependencies: mdoc.Strings(phaseFront["depends_on"])},
+				StoredPhase: plan.StoredPhase{ID: id, Slug: match[2], Title: mdoc.Title(string(phaseRaw)), Status: doctorStringValue(phaseFront["status"]), Dependencies: mdoc.Strings(phaseFront["depends_on"])},
 				path:        phasePath,
 				front:       phaseFront,
 			}
@@ -304,7 +304,7 @@ func inspectDoctorPlan(planRoot, directory string) (doctorPlan, []doctorIssue) {
 			issues = append(issues, phaseIssues...)
 			record.phases = append(record.phases, phase)
 		}
-		sort.Slice(record.phases, func(i, j int) bool { return record.phases[i].id < record.phases[j].id })
+		sort.Slice(record.phases, func(i, j int) bool { return record.phases[i].ID < record.phases[j].ID })
 		if len(record.phases) == 0 {
 			issues = append(issues, doctorIssue{location: record.directory + "/phases", message: "no phase documents found"})
 			record.phaseDataOK = false
@@ -316,7 +316,7 @@ func inspectDoctorPlan(planRoot, directory string) (doctorPlan, []doctorIssue) {
 		planStatus := doctorStringValue(record.front["plan_status"])
 		expected := "done"
 		for _, phase := range record.phases {
-			if phase.status != "done" {
+			if phase.Status != "done" {
 				expected = "in-progress"
 				break
 			}
@@ -346,18 +346,18 @@ func validateDoctorPlanFrontmatter(directory string, front map[string]any) []doc
 		} else {
 			seen := map[string]bool{}
 			for _, raw := range dependencies {
-				dependency, err := plan.ParseDependency(strings.TrimSpace(raw))
+				dependency, err := draft.ParseDependency(strings.TrimSpace(raw))
 				if err != nil {
 					issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("broken dependency %q: %v", raw, err)})
 					continue
 				}
-				canonical := plan.DependencyLabel(dependency)
+				canonical := draft.DependencyLabel(dependency)
 				if seen[canonical] {
 					issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("duplicate dependency %q", raw)})
 				}
 				seen[canonical] = true
-				if dependency.Plan == plan.Name(directory) {
-					issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("plan cannot depend on itself: %s", plan.DependencyLabel(dependency))})
+				if dependency.Plan == draft.Name(directory) {
+					issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("plan cannot depend on itself: %s", draft.DependencyLabel(dependency))})
 				}
 			}
 		}
@@ -378,10 +378,10 @@ func validateDoctorPlanFrontmatter(directory string, front map[string]any) []doc
 func validateDoctorPhase(directory string, phase doctorPhase) []doctorIssue {
 	location := directory + "/phases/" + filepath.Base(phase.path)
 	issues := []doctorIssue{}
-	if !phaseStatusValues[phase.status] {
-		issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("status %q is invalid", phase.status)})
+	if !plan.StatusValues[phase.Status] {
+		issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("status %q is invalid", phase.Status)})
 	}
-	if err := validatePhaseStatusChange(phase.front, phase.status); err != nil {
+	if err := plan.ValidateStatusChange(phase.front, phase.Status); err != nil {
 		issues = append(issues, doctorIssue{location: location, message: err.Error()})
 	}
 	if value, found := phase.front["depends_on"]; found {
@@ -390,13 +390,13 @@ func validateDoctorPhase(directory string, phase doctorPhase) []doctorIssue {
 			issues = append(issues, doctorIssue{location: location, message: "depends_on must be a list of strings"})
 		} else {
 			for _, raw := range dependencies {
-				dependency, err := plan.ParseDependency(strings.TrimSpace(raw))
+				dependency, err := draft.ParseDependency(strings.TrimSpace(raw))
 				if err != nil {
 					issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("broken dependency %q: %v", raw, err)})
 					continue
 				}
-				if dependency.Plan != plan.Name(directory) || dependency.Phase == nil {
-					issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("phase dependency %q must reference a phase in %s", raw, plan.Name(directory))})
+				if dependency.Plan != draft.Name(directory) || dependency.Phase == nil {
+					issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("phase dependency %q must reference a phase in %s", raw, draft.Name(directory))})
 				}
 			}
 		}
@@ -409,7 +409,7 @@ func validateDoctorPhase(directory string, phase doctorPhase) []doctorIssue {
 			issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("completed_at is not valid RFC3339: %v", err)})
 		}
 	}
-	if phase.title == "unnamed phase" {
+	if phase.Title == "unnamed phase" {
 		issues = append(issues, doctorIssue{location: location, message: "missing Markdown phase title"})
 	}
 	return issues
@@ -490,22 +490,22 @@ func compareDoctorChecklist(record doctorPlan) []doctorIssue {
 	}
 	phaseIDs := map[int]bool{}
 	for _, phase := range record.phases {
-		phaseIDs[phase.id] = true
-		entry, found := byID[phase.id]
+		phaseIDs[phase.ID] = true
+		entry, found := byID[phase.ID]
 		if !found {
-			issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("phase file %02d-%s.md has no checklist entry", phase.id, phase.slug)})
+			issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("phase file %02d-%s.md has no checklist entry", phase.ID, phase.Slug)})
 			continue
 		}
-		expectedPath := filepath.ToSlash(phaseDocumentPath(phase.id, phase.slug))
+		expectedPath := filepath.ToSlash(plan.PhaseDocumentPath(phase.ID, phase.Slug))
 		if entry.path != expectedPath {
-			issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("checklist phase %02d links to %q; expected %q", phase.id, entry.path, expectedPath)})
+			issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("checklist phase %02d links to %q; expected %q", phase.ID, entry.path, expectedPath)})
 		}
-		if entry.title != phase.title {
-			issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("checklist phase %02d title %q does not match phase file title %q", phase.id, entry.title, phase.title)})
+		if entry.title != phase.Title {
+			issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("checklist phase %02d title %q does not match phase file title %q", phase.ID, entry.title, phase.Title)})
 		}
-		expectedChecked := phase.status == "done"
+		expectedChecked := phase.Status == "done"
 		if entry.checked != expectedChecked {
-			issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("checklist phase %02d is %s but phase file status is %q", phase.id, checklistState(entry.checked), phase.status)})
+			issues = append(issues, doctorIssue{location: location, message: fmt.Sprintf("checklist phase %02d is %s but phase file status is %q", phase.ID, checklistState(entry.checked), phase.Status)})
 		}
 	}
 	for _, entry := range record.checklist {
@@ -522,10 +522,10 @@ func repairDoctorChecklist(body string, phases []doctorPhase) (string, error) {
 		return "", fmt.Errorf("PLAN.md does not contain a # Phases section")
 	}
 	sortedPhases := append([]doctorPhase{}, phases...)
-	sort.Slice(sortedPhases, func(i, j int) bool { return sortedPhases[i].id < sortedPhases[j].id })
+	sort.Slice(sortedPhases, func(i, j int) bool { return sortedPhases[i].ID < sortedPhases[j].ID })
 	entries := make([]string, 0, len(sortedPhases))
 	for _, phase := range sortedPhases {
-		entries = append(entries, phaseChecklistEntry(phase.id, phase.title, phase.slug, phase.status == "done"))
+		entries = append(entries, plan.ChecklistEntry(phase.ID, phase.Title, phase.Slug, phase.Status == "done"))
 	}
 	replacement := "\n"
 	if len(entries) > 0 {
@@ -558,7 +558,7 @@ func checkDoctorPlanDependencies(reporter *doctorReporter, record doctorPlan, by
 		if value, found := record.front["depends_on"]; found {
 			if dependencies, ok := doctorStringList(value); ok {
 				for _, raw := range dependencies {
-					dependency, err := plan.ParseDependency(strings.TrimSpace(raw))
+					dependency, err := draft.ParseDependency(strings.TrimSpace(raw))
 					if err != nil {
 						continue
 					}
@@ -580,15 +580,15 @@ func checkDoctorPlanDependencies(reporter *doctorReporter, record doctorPlan, by
 	}
 	drafts := make([]draft.Phase, 0, len(record.phases))
 	for _, phase := range record.phases {
-		meta := draft.Meta{Phase: phase.id, Slug: phase.slug, Status: phase.status}
-		for _, raw := range phase.dependencies {
-			dependency, err := plan.ParseDependency(strings.TrimSpace(raw))
-			if err != nil || dependency.Phase == nil || dependency.Plan != plan.Name(record.directory) {
+		meta := draft.Meta{Phase: phase.ID, Slug: phase.Slug, Status: phase.Status}
+		for _, raw := range phase.Dependencies {
+			dependency, err := draft.ParseDependency(strings.TrimSpace(raw))
+			if err != nil || dependency.Phase == nil || dependency.Plan != draft.Name(record.directory) {
 				continue
 			}
 			meta.DependsOn = append(meta.DependsOn, *dependency.Phase)
 		}
-		drafts = append(drafts, draft.Phase{Title: phase.title, Meta: meta})
+		drafts = append(drafts, draft.Phase{Title: phase.Title, Meta: meta})
 	}
 	if err := draft.ValidatePhaseDependencies(drafts); err != nil {
 		reporter.add(doctorIssue{location: record.directory, message: "broken phase dependency graph: " + err.Error()})
@@ -597,7 +597,7 @@ func checkDoctorPlanDependencies(reporter *doctorReporter, record doctorPlan, by
 
 func doctorHasPhase(record doctorPlan, id int) bool {
 	for _, phase := range record.phases {
-		if phase.id == id {
+		if phase.ID == id {
 			return true
 		}
 	}

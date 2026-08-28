@@ -1,7 +1,6 @@
-package main
+package plan
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,150 +11,35 @@ import (
 	"time"
 
 	git "github.com/go-git/go-git/v5"
-	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
-	"github.com/ironpark/toolz/cli/planr/internal/plan"
-	"github.com/urfave/cli/v3"
 )
 
-var phaseStatusValues = map[string]bool{
+var StatusValues = map[string]bool{
 	"planned":     true,
 	"conditional": true,
 	"in-progress": true,
 	"done":        true,
 }
 
-func phaseSetCommand(_ context.Context, cmd *cli.Command) error {
-	return phaseCommand(cmd, strings.TrimSpace(cmd.String("status")))
-}
-
-func phaseShortcutCommand(status string) func(context.Context, *cli.Command) error {
-	return func(_ context.Context, cmd *cli.Command) error {
-		return phaseCommand(cmd, status)
-	}
-}
-
-func phaseCommand(cmd *cli.Command, status string) error {
-	if cmd.NArg() != 2 {
-		return fmt.Errorf("phase command requires <plan-name> <phase-number>")
-	}
-	if !phaseStatusValues[status] {
-		return fmt.Errorf("invalid phase status %q; use planned, conditional, in-progress, or done", status)
-	}
-	phaseID, err := strconv.Atoi(cmd.Args().Get(1))
-	if err != nil || phaseID < 0 {
-		return fmt.Errorf("phase number %q must be a non-negative integer", cmd.Args().Get(1))
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	settings, repoRoot, err := config.Load(cwd)
-	if err != nil {
-		return err
-	}
-	settings = commandSettings(settings, cmd)
-	planDirectories := settings.PlanDirs(repoRoot)
-	planRoot, planDirectory, err := findPlanDirectory(planDirectories, cmd.Args().First())
-	if err != nil {
-		return err
-	}
-	planLock, err := acquirePlanLock(planRoot)
-	if err != nil {
-		return err
-	}
-	defer planLock.close()
-	event := phaseHookEvent(status)
-	willComplete := false
-	planWasDone := false
-	if status == "done" {
-		planWasDone, err = planAlreadyDone(planRoot)
-		if err != nil {
-			return err
-		}
-	}
-	if status == "done" && len(settings.Hooks.Commands("before", hooks.EventPlanDone)) > 0 {
-		willComplete, err = phaseWillComplete(planRoot, phaseID)
-		if err != nil {
-			return err
-		}
-		willComplete = willComplete && !planWasDone
-	}
-	if !cmd.Bool("force") {
-		// Starting or completing a phase out of order silently invalidates the
-		// ordering the plan was validated against, so the same graph `apply`
-		// checked is enforced here too.
-		if err := ensureDependenciesMet(planDirectories, planRoot, planDirectory, phaseID, status); err != nil {
-			return err
-		}
-		if status == "done" {
-			if err := ensureCleanSource(repoRoot, planDirectories, settings.Ignore); err != nil {
-				return err
-			}
-		}
-	}
-	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", event, planDirectory, phaseID, status); err != nil {
-		return err
-	}
-	if willComplete {
-		if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventPlanDone, planDirectory, -1, "done"); err != nil {
-			return err
-		}
-	}
-	var completed bool
-	planDirectory, completed, err = updatePhaseStatusLocked(planRoot, planDirectory, phaseID, status)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Updated %s phase %02d: %s\n", planDirectory, phaseID, status)
-	// Link the completion to the commit it landed on, for `planr notes`.
-	if status == "in-progress" {
-		if err := recordCompletionNote(repoRoot, planDirectory, hooks.EventStart, phaseID); err != nil {
-			warnStartNoteFailure(err)
-		}
-	}
-	if status == "done" {
-		if err := recordCompletionNote(repoRoot, planDirectory, hooks.EventDone, phaseID); err != nil {
-			warnNoteFailure(err)
-		}
-	}
-	if completed {
-		fmt.Printf("Plan %s marked done\n", planDirectory)
-		if !planWasDone {
-			if err := recordCompletionNote(repoRoot, planDirectory, hooks.EventPlanDone, -1); err != nil {
-				warnNoteFailure(err)
-			}
-		}
-	}
-	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "after", event, planDirectory, phaseID, status); err != nil {
-		return err
-	}
-	if completed && status == "done" && !planWasDone {
-		if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventPlanDone, planDirectory, -1, "done"); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ensureDependenciesMet refuses to advance a phase whose prerequisites are not
+// EnsureDependenciesMet refuses to advance a phase whose prerequisites are not
 // done. It covers both the phase's own depends_on and the plan-level
 // depends_on in PLAN.md, which is what `status` reports as `wait`. Resetting a
 // phase to planned or conditional moves backwards and is never blocked.
-func ensureDependenciesMet(planDirectories []string, planRoot, planDirectory string, phaseID int, status string) error {
+func EnsureDependenciesMet(planDirectories []string, planRoot, planDirectory string, phaseID int, status string) error {
 	if status != "in-progress" && status != "done" {
 		return nil
 	}
-	phases, err := readPlanPhases(planRoot)
+	phases, err := ReadPhases(planRoot)
 	if err != nil {
 		return err
 	}
-	local := map[int]storedPhase{}
-	var target *storedPhase
+	local := map[int]StoredPhase{}
+	var target *StoredPhase
 	for index, phase := range phases {
-		local[phase.id] = phase
-		if phase.id == phaseID {
+		local[phase.ID] = phase
+		if phase.ID == phaseID {
 			target = &phases[index]
 		}
 	}
@@ -165,23 +49,23 @@ func ensureDependenciesMet(planDirectories []string, planRoot, planDirectory str
 	}
 
 	unmet := []string{}
-	for _, raw := range target.dependencies {
-		dependency, parseErr := plan.ParseDependency(raw)
+	for _, raw := range target.Dependencies {
+		dependency, parseErr := draft.ParseDependency(raw)
 		if parseErr != nil {
 			unmet = append(unmet, fmt.Sprintf("%s (unreadable dependency)", raw))
 			continue
 		}
-		if dependency.Plan == plan.Name(planDirectory) && dependency.Phase != nil {
+		if dependency.Plan == draft.Name(planDirectory) && dependency.Phase != nil {
 			phase, found := local[*dependency.Phase]
 			switch {
 			case !found:
 				unmet = append(unmet, fmt.Sprintf("phase %02d (not found)", *dependency.Phase))
-			case phase.status != "done":
-				unmet = append(unmet, fmt.Sprintf("phase %02d %q (%s)", phase.id, phase.title, phase.status))
+			case phase.Status != "done":
+				unmet = append(unmet, fmt.Sprintf("phase %02d %q (%s)", phase.ID, phase.Title, phase.Status))
 			}
 			continue
 		}
-		if reason := unmetPlanDependency(planDirectories, dependency); reason != "" {
+		if reason := unmetDependency(planDirectories, dependency); reason != "" {
 			unmet = append(unmet, reason)
 		}
 	}
@@ -190,7 +74,7 @@ func ensureDependenciesMet(planDirectories []string, planRoot, planDirectory str
 		return err
 	}
 	for _, dependency := range planDependencies {
-		if reason := unmetPlanDependency(planDirectories, dependency); reason != "" {
+		if reason := unmetDependency(planDirectories, dependency); reason != "" {
 			unmet = append(unmet, reason)
 		}
 	}
@@ -205,18 +89,18 @@ func ensureDependenciesMet(planDirectories []string, planRoot, planDirectory str
 		planDirectory, phaseID, status, strings.Join(lines, "\n"))
 }
 
-// unmetPlanDependency describes why a dependency on another plan is not
+// unmetDependency describes why a dependency on another plan is not
 // satisfied, or returns an empty string when it is. A dependency naming a plan
 // that was never registered counts as unmet: drafts may reference plans that do
 // not exist yet, but work cannot proceed past one.
-func unmetPlanDependency(planDirectories []string, dependency plan.Dependency) string {
-	label := plan.DependencyLabel(dependency)
-	planRoot, _, err := findPlanDirectory(planDirectories, dependency.Plan)
+func unmetDependency(planDirectories []string, dependency draft.Dependency) string {
+	label := draft.DependencyLabel(dependency)
+	planRoot, _, err := FindDirectory(planDirectories, dependency.Plan)
 	if err != nil {
 		return fmt.Sprintf("%s (not registered)", label)
 	}
 	if dependency.Phase == nil {
-		done, err := planAlreadyDone(planRoot)
+		done, err := AlreadyDone(planRoot)
 		if err != nil {
 			return fmt.Sprintf("%s (unreadable)", label)
 		}
@@ -225,16 +109,16 @@ func unmetPlanDependency(planDirectories []string, dependency plan.Dependency) s
 		}
 		return ""
 	}
-	phases, err := readPlanPhases(planRoot)
+	phases, err := ReadPhases(planRoot)
 	if err != nil {
 		return fmt.Sprintf("%s (unreadable)", label)
 	}
 	for _, phase := range phases {
-		if phase.id != *dependency.Phase {
+		if phase.ID != *dependency.Phase {
 			continue
 		}
-		if phase.status != "done" {
-			return fmt.Sprintf("%s (%s)", label, phase.status)
+		if phase.Status != "done" {
+			return fmt.Sprintf("%s (%s)", label, phase.Status)
 		}
 		return ""
 	}
@@ -242,14 +126,14 @@ func unmetPlanDependency(planDirectories []string, dependency plan.Dependency) s
 }
 
 // planLevelDependencies reads the depends_on list from a plan's PLAN.md.
-func planLevelDependencies(planRoot string) ([]plan.Dependency, error) {
-	front, _, err := readPlanDocument(planRoot, "PLAN.md")
+func planLevelDependencies(planRoot string) ([]draft.Dependency, error) {
+	front, _, err := ReadDocument(planRoot, "PLAN.md")
 	if err != nil {
 		return nil, err
 	}
-	dependencies := []plan.Dependency{}
+	dependencies := []draft.Dependency{}
 	for _, raw := range mdoc.Strings(front["depends_on"]) {
-		dependency, err := plan.ParseDependency(raw)
+		dependency, err := draft.ParseDependency(raw)
 		if err != nil {
 			continue
 		}
@@ -258,8 +142,8 @@ func planLevelDependencies(planRoot string) ([]plan.Dependency, error) {
 	return dependencies, nil
 }
 
-func ensureCleanSource(repoRoot string, planDirectories, ignore []string) error {
-	paths, err := uncommittedSourcePaths(repoRoot, planDirectories, ignore)
+func EnsureCleanSource(repoRoot string, planDirectories, ignore []string) error {
+	paths, err := UncommittedSourcePaths(repoRoot, planDirectories, ignore)
 	if err != nil {
 		return fmt.Errorf("cannot check uncommitted source changes: %w; use --force to bypass this check", err)
 	}
@@ -273,7 +157,7 @@ func ensureCleanSource(repoRoot string, planDirectories, ignore []string) error 
 	return fmt.Errorf("cannot mark phase done while source changes are uncommitted:\n%s\ncommit the source changes first or use --force", strings.Join(lines, "\n"))
 }
 
-func uncommittedSourcePaths(repoRoot string, planDirectories, ignore []string) ([]string, error) {
+func UncommittedSourcePaths(repoRoot string, planDirectories, ignore []string) ([]string, error) {
 	repository, err := git.PlainOpenWithOptions(repoRoot, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
 	if err != nil {
 		return nil, err
@@ -357,7 +241,7 @@ func (p ignorePattern) match(path string) bool {
 	return !strings.ContainsAny(p.raw, "*?") && (path == p.raw || strings.HasPrefix(path, strings.TrimSuffix(p.raw, "/")+"/"))
 }
 
-func isIgnoredPath(relativePath string, patterns []string) bool {
+func IsIgnoredPath(relativePath string, patterns []string) bool {
 	return matchesIgnorePatterns(relativePath, compileIgnorePatterns(patterns))
 }
 
@@ -412,7 +296,7 @@ func isGeneratedPlanPath(repoRoot string, planDirectories []string, relativePath
 	return false
 }
 
-func phaseHookEvent(status string) string {
+func HookEvent(status string) string {
 	switch status {
 	case "planned":
 		return hooks.EventReset
@@ -427,8 +311,8 @@ func phaseHookEvent(status string) string {
 	}
 }
 
-func phaseWillComplete(planRoot string, phaseID int) (bool, error) {
-	phases, err := readPlanPhases(planRoot)
+func WillComplete(planRoot string, phaseID int) (bool, error) {
+	phases, err := ReadPhases(planRoot)
 	if err != nil {
 		return false, err
 	}
@@ -437,11 +321,11 @@ func phaseWillComplete(planRoot string, phaseID int) (bool, error) {
 	}
 	found := false
 	for _, phase := range phases {
-		if phase.id == phaseID {
+		if phase.ID == phaseID {
 			found = true
 			continue
 		}
-		if phase.status != "done" {
+		if phase.Status != "done" {
 			return false, nil
 		}
 	}
@@ -451,8 +335,8 @@ func phaseWillComplete(planRoot string, phaseID int) (bool, error) {
 	return true, nil
 }
 
-func planAlreadyDone(planRoot string) (bool, error) {
-	front, _, err := readPlanDocument(planRoot, "PLAN.md")
+func AlreadyDone(planRoot string) (bool, error) {
+	front, _, err := ReadDocument(planRoot, "PLAN.md")
 	if err != nil {
 		return false, err
 	}
@@ -460,8 +344,8 @@ func planAlreadyDone(planRoot string) (bool, error) {
 	return status == "done", nil
 }
 
-func updatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status string) (string, bool, error) {
-	phasePath, err := findPhaseFile(planRoot, phaseID)
+func UpdatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status string) (string, bool, error) {
+	phasePath, err := FindPhaseFile(planRoot, phaseID)
 	if err != nil {
 		return "", false, fmt.Errorf("%s: %w", planDirectory, err)
 	}
@@ -473,13 +357,13 @@ func updatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 	if err != nil {
 		return "", false, fmt.Errorf("parse %s: %w", filepath.Base(phasePath), err)
 	}
-	if err := validatePhaseStatusChange(phaseFront, status); err != nil {
+	if err := ValidateStatusChange(phaseFront, status); err != nil {
 		return "", false, fmt.Errorf("%s phase %02d: %w", planDirectory, phaseID, err)
 	}
 	phaseFront["status"] = status
 	// completed_at records when the phase reached done; reopening it clears the stamp.
 	if status == "done" {
-		phaseFront["completed_at"] = completionTimestamp()
+		phaseFront["completed_at"] = CompletionTimestamp()
 	} else {
 		delete(phaseFront, "completed_at")
 	}
@@ -487,7 +371,7 @@ func updatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 		return "", false, err
 	}
 
-	phases, err := readPlanPhases(planRoot)
+	phases, err := ReadPhases(planRoot)
 	if err != nil {
 		return "", false, err
 	}
@@ -502,19 +386,19 @@ func updatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 	}
 	completed := len(phases) > 0
 	for _, phase := range phases {
-		if phase.status != "done" {
+		if phase.Status != "done" {
 			completed = false
 			break
 		}
 	}
 	if completed {
 		planFront["plan_status"] = "done"
-		planFront["completed_at"] = completionTimestamp()
+		planFront["completed_at"] = CompletionTimestamp()
 	} else {
 		planFront["plan_status"] = "in-progress"
 		delete(planFront, "completed_at")
 	}
-	planBody, err = updatePhaseChecklist(planBody, phaseID, status == "done")
+	planBody, err = UpdateChecklist(planBody, phaseID, status == "done")
 	if err != nil {
 		return "", false, fmt.Errorf("update PLAN.md phase checklist: %w", err)
 	}
@@ -524,12 +408,12 @@ func updatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 	return planDirectory, completed, nil
 }
 
-func updatePhaseChecklist(body string, phaseID int, done bool) (string, error) {
+func UpdateChecklist(body string, phaseID int, done bool) (string, error) {
 	checkmark := " "
 	if done {
 		checkmark = "x"
 	}
-	return transformChecklistEntry(body, phaseID, func(line string) (string, bool) {
+	return TransformChecklistEntry(body, phaseID, func(line string) (string, bool) {
 		open := strings.Index(line, "[")
 		if open < 0 || open+2 >= len(line) || line[open+2] != ']' {
 			return "", false
@@ -538,7 +422,7 @@ func updatePhaseChecklist(body string, phaseID int, done bool) (string, error) {
 	})
 }
 
-func validatePhaseStatusChange(front map[string]any, status string) error {
+func ValidateStatusChange(front map[string]any, status string) error {
 	if status == "conditional" {
 		condition, _ := front["entry_condition"].(string)
 		if strings.TrimSpace(condition) == "" {
@@ -551,7 +435,7 @@ func validatePhaseStatusChange(front map[string]any, status string) error {
 	return nil
 }
 
-func findPlanDirectory(planDirectories []string, planArg string) (string, string, error) {
+func FindDirectory(planDirectories []string, planArg string) (string, string, error) {
 	type match struct {
 		root, directory string
 	}
@@ -568,7 +452,7 @@ func findPlanDirectory(planDirectories []string, planArg string) (string, string
 			if !entry.IsDir() {
 				continue
 			}
-			if entry.Name() == planArg || plan.Name(entry.Name()) == planArg {
+			if entry.Name() == planArg || draft.Name(entry.Name()) == planArg {
 				matches = append(matches, match{root: filepath.Join(plans, entry.Name()), directory: entry.Name()})
 			}
 		}
@@ -582,7 +466,7 @@ func findPlanDirectory(planDirectories []string, planArg string) (string, string
 	return matches[0].root, matches[0].directory, nil
 }
 
-func findPhaseFile(planRoot string, phaseID int) (string, error) {
+func FindPhaseFile(planRoot string, phaseID int) (string, error) {
 	entries, err := os.ReadDir(filepath.Join(planRoot, "phases"))
 	if err != nil {
 		return "", fmt.Errorf("read phases: %w", err)
@@ -591,7 +475,7 @@ func findPhaseFile(planRoot string, phaseID int) (string, error) {
 		if entry.IsDir() {
 			continue
 		}
-		match := phaseFilePrefix.FindStringSubmatch(entry.Name())
+		match := PhaseFilePrefix.FindStringSubmatch(entry.Name())
 		if len(match) != 3 {
 			continue
 		}
@@ -607,7 +491,7 @@ func findPhaseFile(planRoot string, phaseID int) (string, error) {
 // strings, and empty collections. Plan documents are read by humans, so an
 // unset field is better left out than written as `key: null` or `key: []`.
 // Booleans and numbers are kept, since false and 0 are real values.
-// completionTimestamp is the stamp written into completed_at mdoc.Split.
-func completionTimestamp() string {
+// CompletionTimestamp is the stamp written into completed_at mdoc.Split.
+func CompletionTimestamp() string {
 	return time.Now().UTC().Format(time.RFC3339)
 }

@@ -29,31 +29,31 @@ func TestNormalizeDescription(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := plan.NormalizeDescription(test.value, test.required)
+			got, err := draft.NormalizeDescription(test.value, test.required)
 			if test.wantErrText != "" {
 				if err == nil || !strings.Contains(err.Error(), test.wantErrText) {
-					t.Fatalf("plan.NormalizeDescription() error = %v, want text %q", err, test.wantErrText)
+					t.Fatalf("draft.NormalizeDescription() error = %v, want text %q", err, test.wantErrText)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("plan.NormalizeDescription() unexpected error: %v", err)
+				t.Fatalf("draft.NormalizeDescription() unexpected error: %v", err)
 			}
 			if got != test.want {
-				t.Fatalf("plan.NormalizeDescription() = %q, want %q", got, test.want)
+				t.Fatalf("draft.NormalizeDescription() = %q, want %q", got, test.want)
 			}
 		})
 	}
 }
 
 func TestNormalizePlanDependencies(t *testing.T) {
-	got, err := plan.NormalizeDependencies([]string{"platform-refresh", "api-foundation#2"}, "checkout-v2")
+	got, err := draft.NormalizeDependencies([]string{"platform-refresh", "api-foundation#2"}, "checkout-v2")
 	if err != nil {
-		t.Fatalf("plan.NormalizeDependencies() unexpected error: %v", err)
+		t.Fatalf("draft.NormalizeDependencies() unexpected error: %v", err)
 	}
 	want := []string{"platform-refresh", "api-foundation#2"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("plan.NormalizeDependencies() = %#v, want %#v", got, want)
+		t.Fatalf("draft.NormalizeDependencies() = %#v, want %#v", got, want)
 	}
 
 	for _, test := range []struct {
@@ -67,9 +67,9 @@ func TestNormalizePlanDependencies(t *testing.T) {
 		{name: "invalid phase", dependencies: []string{"platform-refresh#phase"}, wantErrText: "non-negative phase number"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := plan.NormalizeDependencies(test.dependencies, "checkout-v2")
+			_, err := draft.NormalizeDependencies(test.dependencies, "checkout-v2")
 			if err == nil || !strings.Contains(err.Error(), test.wantErrText) {
-				t.Fatalf("plan.NormalizeDependencies() error = %v, want text %q", err, test.wantErrText)
+				t.Fatalf("draft.NormalizeDependencies() error = %v, want text %q", err, test.wantErrText)
 			}
 		})
 	}
@@ -97,8 +97,8 @@ func TestWritePlanStoresDescriptionAndRegisteredAt(t *testing.T) {
 		},
 	}
 
-	if err := writePlan(root, planDraft, "00-checkout-v2", doc.Korean); err != nil {
-		t.Fatalf("writePlan() unexpected error: %v", err)
+	if err := plan.Write(root, planDraft, "00-checkout-v2", doc.Korean); err != nil {
+		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(root, "PLAN.md"))
 	if err != nil {

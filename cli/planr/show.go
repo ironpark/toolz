@@ -15,17 +15,6 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-type phaseDetails struct {
-	plan, directory string
-	id              int
-	slug, title     string
-	status          string
-	plannedWork     string
-	doneWhen        string
-	dependencies    []string
-	file            string
-}
-
 func showCommand(_ context.Context, cmd *cli.Command) error {
 	if cmd.NArg() < 1 || cmd.NArg() > 2 {
 		return fmt.Errorf("show requires <plan-name> and optionally <phase-number>")
@@ -50,7 +39,7 @@ func showCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	planRoot, planDirectory, err := findPlanDirectory(planDirectories, planArg)
+	planRoot, planDirectory, err := plan.FindDirectory(planDirectories, planArg)
 	if err != nil {
 		return err
 	}
@@ -60,7 +49,7 @@ func showCommand(_ context.Context, cmd *cli.Command) error {
 	if cmd.Bool("all") {
 		return showAllPlan(planRoot, planDirectory, cmd.Bool("json"))
 	}
-	phases, err := readPlanPhases(planRoot)
+	phases, err := plan.ReadPhases(planRoot)
 	if err != nil {
 		return err
 	}
@@ -73,8 +62,8 @@ func showCommand(_ context.Context, cmd *cli.Command) error {
 		}
 	} else {
 		for _, phase := range phases {
-			if phase.status != "done" {
-				phaseID = phase.id
+			if phase.Status != "done" {
+				phaseID = phase.ID
 				break
 			}
 		}
@@ -83,10 +72,10 @@ func showCommand(_ context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	var stored storedPhase
+	var stored plan.StoredPhase
 	found := false
 	for _, phase := range phases {
-		if phase.id == phaseID {
+		if phase.ID == phaseID {
 			stored = phase
 			found = true
 			break
@@ -96,7 +85,7 @@ func showCommand(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("%s: phase %02d not found", planDirectory, phaseID)
 	}
 
-	details, err := readPhaseDetails(planRoot, planDirectory, stored)
+	details, err := plan.ReadPhaseDetails(planRoot, planDirectory, stored)
 	if err != nil {
 		return err
 	}
@@ -104,12 +93,12 @@ func showCommand(_ context.Context, cmd *cli.Command) error {
 		return writeJSON(makeShowJSON(details))
 	}
 
-	fmt.Printf("Phase %02d: %s\n", details.id, details.title)
-	fmt.Printf("status: %s\n", details.status)
-	printShowBody("planned_work", details.plannedWork)
-	printShowBody("done_when", details.doneWhen)
-	printShowList("depends_on", details.dependencies)
-	fmt.Printf("file: %s\n", details.file)
+	fmt.Printf("Phase %02d: %s\n", details.ID, details.Title)
+	fmt.Printf("status: %s\n", details.Status)
+	printShowBody("planned_work", details.PlannedWork)
+	printShowBody("done_when", details.DoneWhen)
+	printShowList("depends_on", details.Dependencies)
+	fmt.Printf("file: %s\n", details.File)
 	return nil
 }
 
@@ -124,7 +113,7 @@ func showPlanSection(planRoot, planDirectory, section string, jsonOutput bool) e
 		return err
 	}
 	if jsonOutput {
-		return writeJSON(showSectionJSONOutput{Plan: plan.Name(planDirectory), Directory: planDirectory, Section: section, Content: string(raw), File: absPath})
+		return writeJSON(showSectionJSONOutput{Plan: draft.Name(planDirectory), Directory: planDirectory, Section: section, Content: string(raw), File: absPath})
 	}
 	fmt.Print(string(raw))
 	return nil
@@ -134,7 +123,7 @@ func showAllPlan(planRoot, planDirectory string, jsonOutput bool) error {
 	if !jsonOutput {
 		return fmt.Errorf("show --all requires --json")
 	}
-	front, _, err := readPlanDocument(planRoot, "PLAN.md")
+	front, _, err := plan.ReadDocument(planRoot, "PLAN.md")
 	if err != nil {
 		return err
 	}
@@ -147,18 +136,18 @@ func showAllPlan(planRoot, planDirectory string, jsonOutput bool) error {
 		}
 		documents[relative] = string(raw)
 	}
-	phases, err := readPlanPhases(planRoot)
+	phases, err := plan.ReadPhases(planRoot)
 	if err != nil {
 		return err
 	}
 	phaseJSON := make([]showJSONOutput, 0, len(phases))
 	for _, phase := range phases {
-		details, detailsErr := readPhaseDetails(planRoot, planDirectory, phase)
+		details, detailsErr := plan.ReadPhaseDetails(planRoot, planDirectory, phase)
 		if detailsErr != nil {
 			return detailsErr
 		}
 		phaseJSON = append(phaseJSON, makeShowJSON(details))
-		path, pathErr := findPhaseFile(planRoot, phase.id)
+		path, pathErr := plan.FindPhaseFile(planRoot, phase.ID)
 		if pathErr != nil {
 			return pathErr
 		}
@@ -173,7 +162,7 @@ func showAllPlan(planRoot, planDirectory string, jsonOutput bool) error {
 		documents[filepath.ToSlash(relative)] = string(raw)
 	}
 	return writeJSON(showAllJSONOutput{
-		Plan:         plan.Name(planDirectory),
+		Plan:         draft.Name(planDirectory),
 		Directory:    planDirectory,
 		Status:       mdoc.FrontString(front, "plan_status"),
 		Description:  mdoc.FrontString(front, "description"),
@@ -184,46 +173,6 @@ func showAllPlan(planRoot, planDirectory string, jsonOutput bool) error {
 		Phases:       phaseJSON,
 		Documents:    documents,
 	})
-}
-
-func readPlanDocument(planRoot, name string) (map[string]any, string, error) {
-	raw, err := os.ReadFile(filepath.Join(planRoot, name))
-	if err != nil {
-		return nil, "", err
-	}
-	front, body, err := mdoc.Split(string(raw))
-	if err != nil {
-		return nil, "", fmt.Errorf("parse %s: %w", name, err)
-	}
-	return front, body, nil
-}
-
-func readPhaseDetails(planRoot, planDirectory string, stored storedPhase) (phaseDetails, error) {
-	phasePath, err := findPhaseFile(planRoot, stored.id)
-	if err != nil {
-		return phaseDetails{}, fmt.Errorf("%s: %w", planDirectory, err)
-	}
-	raw, err := os.ReadFile(phasePath)
-	if err != nil {
-		return phaseDetails{}, err
-	}
-	front, body, err := mdoc.Split(string(raw))
-	if err != nil {
-		return phaseDetails{}, fmt.Errorf("parse %s: %w", filepath.Base(phasePath), err)
-	}
-	plannedWork, doneWhen, err := draft.SplitPhaseDocumentSections(stored.title, body)
-	if err != nil {
-		return phaseDetails{}, fmt.Errorf("parse %s: %w", filepath.Base(phasePath), err)
-	}
-	absPath, err := filepath.Abs(phasePath)
-	if err != nil {
-		return phaseDetails{}, err
-	}
-	details := phaseDetails{plan: plan.Name(planDirectory), directory: planDirectory, id: stored.id, slug: stored.slug, title: stored.title, status: stored.status, plannedWork: plannedWork, doneWhen: doneWhen, dependencies: mdoc.Strings(front["depends_on"]), file: absPath}
-	if status, ok := front["status"].(string); ok && status != "" {
-		details.status = status
-	}
-	return details, nil
 }
 
 func printShowBody(label, body string) {

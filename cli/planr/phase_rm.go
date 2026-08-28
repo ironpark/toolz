@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
@@ -16,7 +17,7 @@ import (
 
 func phaseRemoveCommand(_ context.Context, cmd *cli.Command) error {
 	if cmd.NArg() != 2 {
-		return fmt.Errorf("phase rm requires <planName-name> <phase-number>")
+		return fmt.Errorf("phase rm requires <plan-name> <phase-number>")
 	}
 	phaseID, err := strconv.Atoi(cmd.Args().Get(1))
 	if err != nil || phaseID < 0 {
@@ -31,7 +32,7 @@ func phaseRemoveCommand(_ context.Context, cmd *cli.Command) error {
 		return err
 	}
 	planDirectories := settings.PlanDirs(repoRoot)
-	planRoot, planDirectory, err := findPlanDirectory(planDirectories, cmd.Args().First())
+	planRoot, planDirectory, err := plan.FindDirectory(planDirectories, cmd.Args().First())
 	if err != nil {
 		return err
 	}
@@ -51,14 +52,14 @@ func phaseRemoveCommand(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("parse %s/PLAN.md: %w", planDirectory, err)
 	}
 	if status, _ := planFront["plan_status"].(string); status == "done" {
-		return fmt.Errorf("planName %q is already done; phase rm is only allowed for open plans", planDirectory)
+		return fmt.Errorf("plan %q is already done; phase rm is only allowed for open plans", planDirectory)
 	}
 
-	phases, err := readPlanPhases(planRoot)
+	phases, err := plan.ReadPhases(planRoot)
 	if err != nil {
 		return err
 	}
-	phasePath, err := findPhaseFile(planRoot, phaseID)
+	phasePath, err := plan.FindPhaseFile(planRoot, phaseID)
 	if err != nil {
 		return fmt.Errorf("%s: %w", planDirectory, err)
 	}
@@ -71,22 +72,22 @@ func phaseRemoveCommand(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("update %s/PLAN.md phase checklist: %w", planDirectory, err)
 	}
 
-	remaining := make([]storedPhase, 0, len(phases)-1)
+	remaining := make([]plan.StoredPhase, 0, len(phases)-1)
 	for _, phase := range phases {
-		if phase.id != phaseID {
+		if phase.ID != phaseID {
 			remaining = append(remaining, phase)
 		}
 	}
 	completed := len(remaining) > 0
 	for _, phase := range remaining {
-		if phase.status != "done" {
+		if phase.Status != "done" {
 			completed = false
 			break
 		}
 	}
 	if completed {
 		planFront["plan_status"] = "done"
-		planFront["completed_at"] = completionTimestamp()
+		planFront["completed_at"] = plan.CompletionTimestamp()
 	} else {
 		planFront["plan_status"] = "in-progress"
 		delete(planFront, "completed_at")
@@ -109,15 +110,15 @@ func phaseRemoveCommand(_ context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-func phaseDependents(phases []storedPhase, planDirectory string, phaseID int) []storedPhase {
-	planName := plan.Name(planDirectory)
-	dependents := []storedPhase{}
+func phaseDependents(phases []plan.StoredPhase, planDirectory string, phaseID int) []plan.StoredPhase {
+	planName := draft.Name(planDirectory)
+	dependents := []plan.StoredPhase{}
 	for _, phase := range phases {
-		if phase.id == phaseID {
+		if phase.ID == phaseID {
 			continue
 		}
-		for _, raw := range phase.dependencies {
-			dependency, err := plan.ParseDependency(strings.TrimSpace(raw))
+		for _, raw := range phase.Dependencies {
+			dependency, err := draft.ParseDependency(strings.TrimSpace(raw))
 			if err == nil && dependency.Plan == planName && dependency.Phase != nil && *dependency.Phase == phaseID {
 				dependents = append(dependents, phase)
 				break
@@ -127,16 +128,16 @@ func phaseDependents(phases []storedPhase, planDirectory string, phaseID int) []
 	return dependents
 }
 
-func formatPhaseDependents(phases []storedPhase) string {
+func formatPhaseDependents(phases []plan.StoredPhase) string {
 	values := make([]string, len(phases))
 	for index, phase := range phases {
-		values[index] = fmt.Sprintf("phase %02d %q", phase.id, phase.title)
+		values[index] = fmt.Sprintf("phase %02d %q", phase.ID, phase.Title)
 	}
 	return strings.Join(values, ", ")
 }
 
 func removePhaseChecklist(body string, phaseID int) (string, error) {
-	return transformChecklistEntry(body, phaseID, func(string) (string, bool) {
+	return plan.TransformChecklistEntry(body, phaseID, func(string) (string, bool) {
 		return "", true
 	})
 }

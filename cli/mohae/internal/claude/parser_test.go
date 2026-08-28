@@ -78,21 +78,35 @@ func TestParseUserMessageOrigin(t *testing.T) {
 	t.Parallel()
 	for _, content := range []string{`"hi"`, `[{"type":"text","text":"hi"}]`} {
 		msg := mustParse(t, `{"type":"user","message":{"content":`+content+`},
-		  "origin":{"kind":"peer","from":"agent://a","name":"A","verifiedPeerPid":7}}`)
+		  "origin":{"kind":"peer","from":"agent://a","name":"A","verifiedPeerPid":7,"hop":2}}`)
 		o := msg.(*UserMessage).Origin
 		if o == nil || o.Kind != OriginPeer || o.From != "agent://a" {
 			t.Fatalf("origin = %+v", o)
 		}
-		if o.VerifiedPeerPID == nil || *o.VerifiedPeerPID != 7 {
+		if o.VerifiedPeerPID != 7 {
 			t.Fatalf("pid = %v", o.VerifiedPeerPID)
 		}
+		if o.Extra["hop"] != float64(2) {
+			t.Fatalf("extra = %v", o.Extra)
+		}
 	}
-	// A malformed origin is treated as absent.
-	for _, bad := range []string{`"nope"`, `{}`, `{"kind":3}`} {
+	// An origin that carries nothing is treated as absent.
+	for _, bad := range []string{`"nope"`, `{}`} {
 		msg := mustParse(t, `{"type":"user","message":{"content":"hi"},"origin":`+bad+`}`)
 		if o := msg.(*UserMessage).Origin; o != nil {
 			t.Fatalf("origin %s should be dropped, got %+v", bad, o)
 		}
+	}
+	// An unreadable kind falls back to unclassified, keeping the raw value and
+	// the rest of the origin.
+	msg := mustParse(t, `{"type":"user","message":{"content":"hi"},
+	  "origin":{"kind":3,"from":"agent://a"}}`)
+	o := msg.(*UserMessage).Origin
+	if o == nil || o.Kind != OriginUnclassified || o.From != "agent://a" {
+		t.Fatalf("origin = %+v", o)
+	}
+	if o.Extra["kind"] != float64(3) {
+		t.Fatalf("extra = %v", o.Extra)
 	}
 }
 

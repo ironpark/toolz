@@ -9,14 +9,15 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
 
 func TestDoctorCommandAcceptsAConsistentPlan(t *testing.T) {
 	repoRoot := doctorRepository(t)
 	planRoot := filepath.Join(repoRoot, "plan", "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
-		t.Fatalf("writePlan() unexpected error: %v", err)
+	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
+		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 	withWorkingDirectory(t, repoRoot)
 	if err := newDoctorTestCommand().Run(context.Background(), []string{"doctor"}); err != nil {
@@ -27,8 +28,8 @@ func TestDoctorCommandAcceptsAConsistentPlan(t *testing.T) {
 func TestDoctorDetectsAndFixesChecklistMismatch(t *testing.T) {
 	repoRoot := doctorRepository(t)
 	planRoot := filepath.Join(repoRoot, "plan", "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
-		t.Fatalf("writePlan() unexpected error: %v", err)
+	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
+		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 	planPath := filepath.Join(planRoot, "PLAN.md")
 	raw, err := os.ReadFile(planPath)
@@ -72,8 +73,8 @@ func TestDoctorDetectsBrokenDependencyAndFrontmatter(t *testing.T) {
 	planDraft := testDraft()
 	planDraft.DependsOn = []string{"missing-plan"}
 	planRoot := filepath.Join(repoRoot, "plan", "00-checkout-v2")
-	if err := writePlan(planRoot, planDraft, "00-checkout-v2", doc.English); err != nil {
-		t.Fatalf("writePlan() unexpected error: %v", err)
+	if err := plan.Write(planRoot, planDraft, "00-checkout-v2", doc.English); err != nil {
+		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 	phasePath := filepath.Join(planRoot, "phases", "00-api-contract.md")
 	if err := os.WriteFile(phasePath, []byte("---\nstatus: [broken\n"), 0644); err != nil {
@@ -83,7 +84,7 @@ func TestDoctorDetectsBrokenDependencyAndFrontmatter(t *testing.T) {
 	withWorkingDirectory(t, repoRoot)
 	err := newDoctorTestCommand().Run(context.Background(), []string{"doctor"})
 	if err == nil {
-		t.Fatal("doctor accepted broken dependency/mdoc.Split")
+		t.Fatal("doctor accepted broken dependency/frontmatter")
 	}
 	if !strings.Contains(err.Error(), "problem") {
 		t.Fatalf("doctor error = %v, want problem summary", err)

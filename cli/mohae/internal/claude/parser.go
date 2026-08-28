@@ -538,19 +538,16 @@ func serverToolResultBlock(b map[string]any, src json.RawMessage) (ContentBlock,
 // Small helpers
 // ---------------------------------------------------------------------------
 
-// parseOrigin returns data["origin"] when it is an object with a string kind,
-// passing through keys this SDK version does not model.
+// parseOrigin returns data["origin"] when it is a non-empty object, passing
+// keys this SDK version does not model through to Extra. A missing or
+// non-string kind falls back to OriginUnclassified rather than discarding the
+// rest of the origin.
 func parseOrigin(data map[string]any) *MessageOrigin {
 	raw, ok := data["origin"].(map[string]any)
-	if !ok {
-		return nil
-	}
-	kind, ok := raw["kind"].(string)
-	if !ok {
+	if !ok || len(raw) == 0 {
 		return nil
 	}
 	o := &MessageOrigin{
-		Kind:         kind,
 		Server:       str(raw["server"]),
 		From:         str(raw["from"]),
 		Name:         str(raw["name"]),
@@ -559,8 +556,19 @@ func parseOrigin(data map[string]any) *MessageOrigin {
 		Body:         str(raw["body"]),
 		Subkind:      str(raw["subkind"]),
 	}
-	if pid, ok := toInt(raw["verifiedPeerPid"]); ok {
-		o.VerifiedPeerPID = &pid
+	o.VerifiedPeerPID, _ = toInt(raw["verifiedPeerPid"])
+	for k, v := range raw {
+		if !originModeledKeys[k] {
+			o.putExtra(k, v)
+		}
+	}
+	if kind, ok := raw["kind"].(string); ok && kind != "" {
+		o.Kind = kind
+	} else {
+		o.Kind = OriginUnclassified
+		if v := raw["kind"]; v != nil {
+			o.putExtra("kind", v)
+		}
 	}
 	return o
 }

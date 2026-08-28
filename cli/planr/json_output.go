@@ -9,6 +9,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 )
 
@@ -189,51 +190,51 @@ func writeJSON(value any) error {
 	return nil
 }
 
-func makeStatusJSON(summaries []planSummary) statusJSONOutput {
+func makeStatusJSON(summaries []plan.Summary) statusJSONOutput {
 	plans := make([]statusPlanJSON, 0, len(summaries))
 	for _, summary := range summaries {
-		done, total, _ := summary.progress()
+		done, total, _ := summary.Progress()
 		remaining := make([]statusPhaseJSON, 0)
-		for _, phase := range summary.phases {
-			if phase.status == "done" {
+		for _, phase := range summary.Phases {
+			if phase.Status == "done" {
 				continue
 			}
 			remaining = append(remaining, statusPhaseJSON{
-				PhaseNumber: phase.id,
-				Slug:        phase.slug,
-				Title:       phase.title,
-				Status:      phase.status,
+				PhaseNumber: phase.ID,
+				Slug:        phase.Slug,
+				Title:       phase.Title,
+				Status:      phase.Status,
 			})
 		}
 		plans = append(plans, statusPlanJSON{
-			Name:        summary.name,
-			Directory:   filepath.ToSlash(summary.label),
-			Status:      summary.status,
+			Name:        summary.Name,
+			Directory:   filepath.ToSlash(summary.Label),
+			Status:      summary.Status,
 			DonePhases:  done,
 			TotalPhases: total,
 			Remaining:   remaining,
-			Wait:        append([]string{}, summary.wait...),
+			Wait:        append([]string{}, summary.Wait...),
 		})
 	}
 	return statusJSONOutput{Plans: plans}
 }
 
-func makeOverviewJSON(summaries []planSummary) overviewJSONOutput {
+func makeOverviewJSON(summaries []plan.Summary) overviewJSONOutput {
 	plans := make([]overviewPlanJSON, 0, len(summaries))
 	for _, summary := range summaries {
-		status := summary.status
+		status := summary.Status
 		if status == "" {
 			status = "unknown"
 		}
-		done, total, next := summary.progress()
+		done, total, next := summary.Progress()
 		plans = append(plans, overviewPlanJSON{
-			Name:        summary.name,
-			Directory:   filepath.ToSlash(summary.label),
+			Name:        summary.Name,
+			Directory:   filepath.ToSlash(summary.Label),
 			Status:      status,
 			DonePhases:  done,
 			TotalPhases: total,
 			NextPhase:   next,
-			Wait:        append([]string{}, summary.wait...),
+			Wait:        append([]string{}, summary.Wait...),
 		})
 	}
 	return overviewJSONOutput{Plans: plans}
@@ -255,18 +256,18 @@ func makeNotesJSON(notes []planNote) notesJSONOutput {
 	return notesJSONOutput{Notes: values}
 }
 
-func makeShowJSON(phase phaseDetails) showJSONOutput {
+func makeShowJSON(phase plan.Details) showJSONOutput {
 	return showJSONOutput{
-		Plan:        phase.plan,
-		Directory:   phase.directory,
-		PhaseNumber: phase.id,
-		Slug:        phase.slug,
-		Title:       phase.title,
-		Status:      phase.status,
-		PlannedWork: phase.plannedWork,
-		DoneWhen:    phase.doneWhen,
-		DependsOn:   append([]string{}, phase.dependencies...),
-		File:        phase.file,
+		Plan:        phase.Plan,
+		Directory:   phase.Directory,
+		PhaseNumber: phase.ID,
+		Slug:        phase.Slug,
+		Title:       phase.Title,
+		Status:      phase.Status,
+		PlannedWork: phase.PlannedWork,
+		DoneWhen:    phase.DoneWhen,
+		DependsOn:   append([]string{}, phase.Dependencies...),
+		File:        phase.File,
 	}
 }
 

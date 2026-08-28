@@ -1,5 +1,4 @@
-// Package plan holds the plan-domain primitives shared by the commands.
-package plan
+package draft
 
 import (
 	"fmt"

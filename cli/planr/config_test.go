@@ -14,6 +14,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 )
 
 func TestLoadConfigHooks(t *testing.T) {
@@ -158,8 +159,8 @@ func TestPlanDocumentsFollowConfiguredLanguage(t *testing.T) {
 			text := doc.StringsFor(language)
 			plansRoot := t.TempDir()
 			planRoot := filepath.Join(plansRoot, "00-checkout-v2")
-			if err := writePlan(planRoot, testDraft(), "00-checkout-v2", language); err != nil {
-				t.Fatalf("writePlan() unexpected error: %v", err)
+			if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", language); err != nil {
+				t.Fatalf("plan.Write() unexpected error: %v", err)
 			}
 			phase := readFileString(t, filepath.Join(planRoot, "phases", "00-api-contract.md"))
 			for _, want := range []string{"## " + text.PlannedWork, "## " + text.DoneWhen, "> NEXT: " + text.NoNext} {
@@ -213,12 +214,12 @@ func TestLoadConfigRejectsUnknownHookSetting(t *testing.T) {
 func TestIsIgnoredPath(t *testing.T) {
 	patterns := []string{"generated/**", "tmp", "*.generated.go"}
 	for _, path := range []string{"generated/build/app.go", "tmp/cache.bin", "main.generated.go"} {
-		if !isIgnoredPath(path, patterns) {
-			t.Errorf("isIgnoredPath(%q) = false, want true", path)
+		if !plan.IsIgnoredPath(path, patterns) {
+			t.Errorf("plan.IsIgnoredPath(%q) = false, want true", path)
 		}
 	}
-	if isIgnoredPath("cmd/main.go", patterns) {
-		t.Error("isIgnoredPath(cmd/main.go) = true, want false")
+	if plan.IsIgnoredPath("cmd/main.go", patterns) {
+		t.Error("plan.IsIgnoredPath(cmd/main.go) = true, want false")
 	}
 }
 
@@ -320,7 +321,7 @@ func TestNoHooksGlobalFlagSkipsBeforeAndAfterHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(root, "plan", "00-checkout-v2")
-	if err := writePlan(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	old, err := os.Getwd()

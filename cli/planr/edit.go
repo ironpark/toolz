@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
@@ -61,13 +62,13 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 		}
 		section = parsedSection
 	}
-	planRoot, planDirectory, err := findPlanDirectory(planDirectories, planArg)
+	planRoot, planDirectory, err := plan.FindDirectory(planDirectories, planArg)
 	if err != nil {
 		return err
 	}
 	var target string
 	if targetKind == "phase" {
-		target, err = findPhaseFile(planRoot, phaseID)
+		target, err = plan.FindPhaseFile(planRoot, phaseID)
 	} else {
 		target = filepath.Join(planRoot, sectionFile(section))
 		_, err = os.Stat(target)
@@ -83,7 +84,7 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	editSelector := plan.Name(planDirectory) + "#"
+	editSelector := draft.Name(planDirectory) + "#"
 	checkoutFront := map[string]any{}
 	var body string
 	if targetKind == "phase" {
@@ -97,7 +98,7 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 		checkoutFront["planr_slug"] = phaseSlugFromPath(target)
 		body = phaseBody
 	} else {
-		editSelector = plan.Name(planDirectory)
+		editSelector = draft.Name(planDirectory)
 		checkoutFront["planr_section"] = section
 		_, body, err = mdoc.Split(string(raw))
 		if err != nil {
@@ -145,7 +146,7 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 }
 
 func scratchFileName(planDirectory, targetKind string, phaseID int, section string) string {
-	name := plan.Name(planDirectory)
+	name := draft.Name(planDirectory)
 	if targetKind == "phase" {
 		return fmt.Sprintf("%s-phase-%02d.md", name, phaseID)
 	}
@@ -153,7 +154,7 @@ func scratchFileName(planDirectory, targetKind string, phaseID int, section stri
 }
 
 func phaseSlugFromPath(path string) string {
-	match := phaseFilePrefix.FindStringSubmatch(filepath.Base(path))
+	match := plan.PhaseFilePrefix.FindStringSubmatch(filepath.Base(path))
 	if len(match) == 3 {
 		return match[2]
 	}

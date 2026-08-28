@@ -20,11 +20,11 @@ func Split(input string) (map[string]any, string, error) {
 	}
 	end := strings.Index(input[4:], "\n---\n")
 	if end < 0 {
-		return nil, "", fmt.Errorf("unterminated document Split")
+		return nil, "", fmt.Errorf("unterminated document frontmatter")
 	}
 	values := map[string]any{}
 	if err := yaml.Unmarshal([]byte(input[4:end+4]), &values); err != nil {
-		return nil, "", fmt.Errorf("parse document Split: %w", err)
+		return nil, "", fmt.Errorf("parse document frontmatter: %w", err)
 	}
 	return values, input[end+9:], nil
 }
@@ -60,7 +60,7 @@ func Strings(value any) []string {
 func WriteFile(path string, front map[string]any, body string) error {
 	contents, err := Render(front, body)
 	if err != nil {
-		return fmt.Errorf("encode %s Split: %w", filepath.Base(path), err)
+		return fmt.Errorf("encode %s frontmatter: %w", filepath.Base(path), err)
 	}
 	return WriteAtomically(path, contents)
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
-	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 )
 
@@ -181,7 +180,7 @@ func joinOrNone(values []string) string {
 func Parse(raw []byte, fallback string) (Draft, error) {
 	front, body, err := mdoc.Split(string(raw))
 	if err != nil {
-		return Draft{}, validation.Wrap(err, "mdoc.Split", "mdoc.Split")
+		return Draft{}, validation.Wrap(err, "frontmatter", "frontmatter")
 	}
 	matches := topHeading.FindAllStringSubmatchIndex(body, -1)
 	if len(matches) != len(RequiredSections) {
@@ -223,19 +222,19 @@ func Parse(raw []byte, fallback string) (Draft, error) {
 	} else if value, ok := front["name"].(string); ok && value != "" {
 		name = value
 	}
-	if !plan.KebabPattern.MatchString(name) {
-		detail := fmt.Sprintf("plan name %q must be lowercase plan.KebabPattern-case", name)
-		return Draft{}, validation.NewFailure(validation.Record{Rule: "plan_name", Section: "mdoc.Split", Detail: detail}, detail)
+	if !KebabPattern.MatchString(name) {
+		detail := fmt.Sprintf("plan name %q must be lowercase kebab-case", name)
+		return Draft{}, validation.NewFailure(validation.Record{Rule: "plan_name", Section: "frontmatter", Detail: detail}, detail)
 	}
 	description, err := draftDescription(front)
 	if err != nil {
 		detail := fmt.Sprintf("invalid description for plan %q: %v", name, err)
-		return Draft{}, validation.NewFailure(validation.Record{Rule: "description", Section: "mdoc.Split", Detail: err.Error()}, detail)
+		return Draft{}, validation.NewFailure(validation.Record{Rule: "description", Section: "frontmatter", Detail: err.Error()}, detail)
 	}
-	dependsOn, err := plan.CanonicalDependencies(mdoc.Strings(front["depends_on"]))
+	dependsOn, err := CanonicalDependencies(mdoc.Strings(front["depends_on"]))
 	if err != nil {
 		detail := fmt.Sprintf("invalid plan dependencies: %v", err)
-		return Draft{}, validation.NewFailure(validation.Record{Rule: "plan_dependency", Section: "mdoc.Split", Detail: err.Error()}, detail)
+		return Draft{}, validation.NewFailure(validation.Record{Rule: "plan_dependency", Section: "frontmatter", Detail: err.Error()}, detail)
 	}
 	phases, err := parsePhases(sections["PHASES"])
 	if err != nil {
@@ -366,7 +365,7 @@ func draftDescription(front map[string]any) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("description must be a string of 200 characters or fewer")
 	}
-	return plan.NormalizeDescription(description, false)
+	return NormalizeDescription(description, false)
 }
 
 func parsePhases(section string) ([]Phase, error) {
@@ -399,7 +398,7 @@ func parsePhases(section string) ([]Phase, error) {
 			detail := fmt.Sprintf("phase %q has invalid number %d; phase numbers must be non-negative", title, meta.Phase)
 			return nil, phaseParseFailure(title, validation.IntPointer(meta.Phase), detail)
 		}
-		if !plan.KebabPattern.MatchString(meta.Slug) || (meta.Status != "planned" && meta.Status != "conditional") {
+		if !KebabPattern.MatchString(meta.Slug) || (meta.Status != "planned" && meta.Status != "conditional") {
 			return nil, phaseParseFailure(title, validation.IntPointer(meta.Phase), fmt.Sprintf("phase %q has invalid slug or status", title))
 		}
 		if meta.Status == "conditional" && (meta.EntryCondition == nil || strings.TrimSpace(*meta.EntryCondition) == "") {
@@ -492,10 +491,10 @@ func splitPhaseSectionsWithHeading(title, rest, headingPrefix string) (string, s
 }
 
 func ValidateDependencies(d *Draft) error {
-	dependencies, err := plan.NormalizeDependencies(d.DependsOn, d.Name)
+	dependencies, err := NormalizeDependencies(d.DependsOn, d.Name)
 	if err != nil {
 		message := fmt.Sprintf("invalid dependencies for plan %q: %v", d.Name, err)
-		return validation.NewFailure(validation.Record{Rule: "plan_dependency", Section: "mdoc.Split", Detail: err.Error()}, message)
+		return validation.NewFailure(validation.Record{Rule: "plan_dependency", Section: "frontmatter", Detail: err.Error()}, message)
 	}
 	d.DependsOn = dependencies
 	if err := ValidatePhaseDependencies(d.Phases); err != nil {
