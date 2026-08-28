@@ -1,4 +1,4 @@
-package cli
+package draft_test
 
 import (
 	"fmt"
