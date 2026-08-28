@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 )
 
 func TestNormalizeDescription(t *testing.T) {
@@ -27,31 +29,31 @@ func TestNormalizeDescription(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := normalizeDescription(test.value, test.required)
+			got, err := plan.NormalizeDescription(test.value, test.required)
 			if test.wantErrText != "" {
 				if err == nil || !strings.Contains(err.Error(), test.wantErrText) {
-					t.Fatalf("normalizeDescription() error = %v, want text %q", err, test.wantErrText)
+					t.Fatalf("plan.NormalizeDescription() error = %v, want text %q", err, test.wantErrText)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("normalizeDescription() unexpected error: %v", err)
+				t.Fatalf("plan.NormalizeDescription() unexpected error: %v", err)
 			}
 			if got != test.want {
-				t.Fatalf("normalizeDescription() = %q, want %q", got, test.want)
+				t.Fatalf("plan.NormalizeDescription() = %q, want %q", got, test.want)
 			}
 		})
 	}
 }
 
 func TestNormalizePlanDependencies(t *testing.T) {
-	got, err := normalizePlanDependencies([]string{"platform-refresh", "api-foundation#2"}, "checkout-v2")
+	got, err := plan.NormalizeDependencies([]string{"platform-refresh", "api-foundation#2"}, "checkout-v2")
 	if err != nil {
-		t.Fatalf("normalizePlanDependencies() unexpected error: %v", err)
+		t.Fatalf("plan.NormalizeDependencies() unexpected error: %v", err)
 	}
 	want := []string{"platform-refresh", "api-foundation#2"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("normalizePlanDependencies() = %#v, want %#v", got, want)
+		t.Fatalf("plan.NormalizeDependencies() = %#v, want %#v", got, want)
 	}
 
 	for _, test := range []struct {
@@ -65,9 +67,9 @@ func TestNormalizePlanDependencies(t *testing.T) {
 		{name: "invalid phase", dependencies: []string{"platform-refresh#phase"}, wantErrText: "non-negative phase number"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := normalizePlanDependencies(test.dependencies, "checkout-v2")
+			_, err := plan.NormalizeDependencies(test.dependencies, "checkout-v2")
 			if err == nil || !strings.Contains(err.Error(), test.wantErrText) {
-				t.Fatalf("normalizePlanDependencies() error = %v, want text %q", err, test.wantErrText)
+				t.Fatalf("plan.NormalizeDependencies() error = %v, want text %q", err, test.wantErrText)
 			}
 		})
 	}
@@ -75,7 +77,7 @@ func TestNormalizePlanDependencies(t *testing.T) {
 
 func TestWritePlanStoresDescriptionAndRegisteredAt(t *testing.T) {
 	root := t.TempDir()
-	draft := draft{
+	planDraft := draft.Draft{
 		Name:         "checkout-v2",
 		Description:  "checkout flow refresh",
 		DependsOn:    []string{"platform-refresh#2"},
@@ -86,16 +88,16 @@ func TestWritePlanStoresDescriptionAndRegisteredAt(t *testing.T) {
 		Ordering:     "API before UI.",
 		NextText:     "Implement the API contract.",
 		NextPhase:    0,
-		Phases: []draftPhase{
+		Phases: []draft.Phase{
 			{
 				Title:   "API Contract",
-				Meta:    phaseMeta{Phase: 0, Slug: "api-contract", Status: "planned"},
+				Meta:    draft.Meta{Phase: 0, Slug: "api-contract", Status: "planned"},
 				Planned: "Add the API contract.", Completion: "The contract test passes.",
 			},
 		},
 	}
 
-	if err := writePlan(root, draft, "00-checkout-v2", doc.Korean); err != nil {
+	if err := writePlan(root, planDraft, "00-checkout-v2", doc.Korean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(root, "PLAN.md"))
@@ -106,8 +108,8 @@ func TestWritePlanStoresDescriptionAndRegisteredAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mdoc.Split() unexpected error: %v", err)
 	}
-	if got, _ := front["description"].(string); got != draft.Description {
-		t.Fatalf("description = %q, want %q", got, draft.Description)
+	if got, _ := front["description"].(string); got != planDraft.Description {
+		t.Fatalf("description = %q, want %q", got, planDraft.Description)
 	}
 	if got, _ := front["registered_at"].(string); got == "" {
 		t.Fatal("registered_at is empty")

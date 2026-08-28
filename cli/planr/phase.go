@@ -15,6 +15,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
 
@@ -165,16 +166,16 @@ func ensureDependenciesMet(planDirectories []string, planRoot, planDirectory str
 
 	unmet := []string{}
 	for _, raw := range target.dependencies {
-		dependency, parseErr := parseDependency(raw)
+		dependency, parseErr := plan.ParseDependency(raw)
 		if parseErr != nil {
 			unmet = append(unmet, fmt.Sprintf("%s (unreadable dependency)", raw))
 			continue
 		}
-		if dependency.plan == planName(planDirectory) && dependency.phase != nil {
-			phase, found := local[*dependency.phase]
+		if dependency.Plan == plan.Name(planDirectory) && dependency.Phase != nil {
+			phase, found := local[*dependency.Phase]
 			switch {
 			case !found:
-				unmet = append(unmet, fmt.Sprintf("phase %02d (not found)", *dependency.phase))
+				unmet = append(unmet, fmt.Sprintf("phase %02d (not found)", *dependency.Phase))
 			case phase.status != "done":
 				unmet = append(unmet, fmt.Sprintf("phase %02d %q (%s)", phase.id, phase.title, phase.status))
 			}
@@ -208,13 +209,13 @@ func ensureDependenciesMet(planDirectories []string, planRoot, planDirectory str
 // satisfied, or returns an empty string when it is. A dependency naming a plan
 // that was never registered counts as unmet: drafts may reference plans that do
 // not exist yet, but work cannot proceed past one.
-func unmetPlanDependency(planDirectories []string, dependency planDependency) string {
-	label := dependencyLabel(dependency)
-	planRoot, _, err := findPlanDirectory(planDirectories, dependency.plan)
+func unmetPlanDependency(planDirectories []string, dependency plan.Dependency) string {
+	label := plan.DependencyLabel(dependency)
+	planRoot, _, err := findPlanDirectory(planDirectories, dependency.Plan)
 	if err != nil {
 		return fmt.Sprintf("%s (not registered)", label)
 	}
-	if dependency.phase == nil {
+	if dependency.Phase == nil {
 		done, err := planAlreadyDone(planRoot)
 		if err != nil {
 			return fmt.Sprintf("%s (unreadable)", label)
@@ -229,7 +230,7 @@ func unmetPlanDependency(planDirectories []string, dependency planDependency) st
 		return fmt.Sprintf("%s (unreadable)", label)
 	}
 	for _, phase := range phases {
-		if phase.id != *dependency.phase {
+		if phase.id != *dependency.Phase {
 			continue
 		}
 		if phase.status != "done" {
@@ -241,14 +242,14 @@ func unmetPlanDependency(planDirectories []string, dependency planDependency) st
 }
 
 // planLevelDependencies reads the depends_on list from a plan's PLAN.md.
-func planLevelDependencies(planRoot string) ([]planDependency, error) {
+func planLevelDependencies(planRoot string) ([]plan.Dependency, error) {
 	front, _, err := readPlanDocument(planRoot, "PLAN.md")
 	if err != nil {
 		return nil, err
 	}
-	dependencies := []planDependency{}
+	dependencies := []plan.Dependency{}
 	for _, raw := range mdoc.Strings(front["depends_on"]) {
-		dependency, err := parseDependency(raw)
+		dependency, err := plan.ParseDependency(raw)
 		if err != nil {
 			continue
 		}
@@ -567,7 +568,7 @@ func findPlanDirectory(planDirectories []string, planArg string) (string, string
 			if !entry.IsDir() {
 				continue
 			}
-			if entry.Name() == planArg || planName(entry.Name()) == planArg {
+			if entry.Name() == planArg || plan.Name(entry.Name()) == planArg {
 				matches = append(matches, match{root: filepath.Join(plans, entry.Name()), directory: entry.Name()})
 			}
 		}

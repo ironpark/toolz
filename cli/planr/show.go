@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
 
@@ -122,7 +124,7 @@ func showPlanSection(planRoot, planDirectory, section string, jsonOutput bool) e
 		return err
 	}
 	if jsonOutput {
-		return writeJSON(showSectionJSONOutput{Plan: planName(planDirectory), Directory: planDirectory, Section: section, Content: string(raw), File: absPath})
+		return writeJSON(showSectionJSONOutput{Plan: plan.Name(planDirectory), Directory: planDirectory, Section: section, Content: string(raw), File: absPath})
 	}
 	fmt.Print(string(raw))
 	return nil
@@ -171,7 +173,7 @@ func showAllPlan(planRoot, planDirectory string, jsonOutput bool) error {
 		documents[filepath.ToSlash(relative)] = string(raw)
 	}
 	return writeJSON(showAllJSONOutput{
-		Plan:         planName(planDirectory),
+		Plan:         plan.Name(planDirectory),
 		Directory:    planDirectory,
 		Status:       mdoc.FrontString(front, "plan_status"),
 		Description:  mdoc.FrontString(front, "description"),
@@ -209,7 +211,7 @@ func readPhaseDetails(planRoot, planDirectory string, stored storedPhase) (phase
 	if err != nil {
 		return phaseDetails{}, fmt.Errorf("parse %s: %w", filepath.Base(phasePath), err)
 	}
-	plannedWork, doneWhen, err := splitPhaseDocumentSections(stored.title, body)
+	plannedWork, doneWhen, err := draft.SplitPhaseDocumentSections(stored.title, body)
 	if err != nil {
 		return phaseDetails{}, fmt.Errorf("parse %s: %w", filepath.Base(phasePath), err)
 	}
@@ -217,7 +219,7 @@ func readPhaseDetails(planRoot, planDirectory string, stored storedPhase) (phase
 	if err != nil {
 		return phaseDetails{}, err
 	}
-	details := phaseDetails{plan: planName(planDirectory), directory: planDirectory, id: stored.id, slug: stored.slug, title: stored.title, status: stored.status, plannedWork: plannedWork, doneWhen: doneWhen, dependencies: mdoc.Strings(front["depends_on"]), file: absPath}
+	details := phaseDetails{plan: plan.Name(planDirectory), directory: planDirectory, id: stored.id, slug: stored.slug, title: stored.title, status: stored.status, plannedWork: plannedWork, doneWhen: doneWhen, dependencies: mdoc.Strings(front["depends_on"]), file: absPath}
 	if status, ok := front["status"].(string); ok && status != "" {
 		details.status = status
 	}

@@ -69,10 +69,10 @@ func TestDoctorDetectsAndFixesChecklistMismatch(t *testing.T) {
 
 func TestDoctorDetectsBrokenDependencyAndFrontmatter(t *testing.T) {
 	repoRoot := doctorRepository(t)
-	draft := testDraft()
-	draft.DependsOn = []string{"missing-plan"}
+	planDraft := testDraft()
+	planDraft.DependsOn = []string{"missing-plan"}
 	planRoot := filepath.Join(repoRoot, "plan", "00-checkout-v2")
-	if err := writePlan(planRoot, draft, "00-checkout-v2", doc.English); err != nil {
+	if err := writePlan(planRoot, planDraft, "00-checkout-v2", doc.English); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 	phasePath := filepath.Join(planRoot, "phases", "00-api-contract.md")

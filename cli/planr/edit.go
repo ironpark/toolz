@@ -10,6 +10,7 @@ import (
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
 
@@ -82,7 +83,7 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	editSelector := planName(planDirectory) + "#"
+	editSelector := plan.Name(planDirectory) + "#"
 	checkoutFront := map[string]any{}
 	var body string
 	if targetKind == "phase" {
@@ -96,7 +97,7 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 		checkoutFront["planr_slug"] = phaseSlugFromPath(target)
 		body = phaseBody
 	} else {
-		editSelector = planName(planDirectory)
+		editSelector = plan.Name(planDirectory)
 		checkoutFront["planr_section"] = section
 		_, body, err = mdoc.Split(string(raw))
 		if err != nil {
@@ -144,7 +145,7 @@ func editCommand(_ context.Context, cmd *cli.Command) error {
 }
 
 func scratchFileName(planDirectory, targetKind string, phaseID int, section string) string {
-	name := planName(planDirectory)
+	name := plan.Name(planDirectory)
 	if targetKind == "phase" {
 		return fmt.Sprintf("%s-phase-%02d.md", name, phaseID)
 	}

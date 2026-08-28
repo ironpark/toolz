@@ -1,4 +1,4 @@
-package main
+package draft
 
 import (
 	"fmt"
@@ -11,38 +11,38 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 )
 
 var topHeading = regexp.MustCompile(`(?m)^# (GOALS|SCOPE|CONTEXT|PHASES|VERIFICATION|ORDERING|NEXT)[ \t]*$`)
 var phaseHeading = regexp.MustCompile(`(?m)^## PHASE\s*(?:—|:|-)\s*(.+?)[ \t]*$`)
-var kebab = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
-var requiredSections = []string{"GOALS", "SCOPE", "CONTEXT", "PHASES", "VERIFICATION", "ORDERING", "NEXT"}
+var RequiredSections = []string{"GOALS", "SCOPE", "CONTEXT", "PHASES", "VERIFICATION", "ORDERING", "NEXT"}
 
-type phaseMeta struct {
+type Meta struct {
 	Phase     int    `yaml:"phase"`
 	Slug      string `yaml:"slug"`
 	PerfPhase bool   `yaml:"perf_phase"`
 	// References as written in the draft: phase numbers, phase slugs, or a mix.
 	// parsePhases resolves them into DependsOn once every phase in the plan is
 	// known, because a slug can only be resolved against its siblings.
-	DependsOnRefs  []phaseRef `yaml:"depends_on"`
-	DependsOn      []int      `yaml:"-"`
-	Status         string     `yaml:"status"`
-	EntryCondition *string    `yaml:"entry_condition"`
+	DependsOnRefs  []Ref   `yaml:"depends_on"`
+	DependsOn      []int   `yaml:"-"`
+	Status         string  `yaml:"status"`
+	EntryCondition *string `yaml:"entry_condition"`
 }
 
-// phaseRef is one entry of a phase's depends_on list, before resolution.
-type phaseRef struct {
-	number *int
-	slug   string
+// Ref is one entry of a phase's depends_on list, before resolution.
+type Ref struct {
+	Number *int
+	Slug   string
 }
 
-func (r *phaseRef) UnmarshalYAML(raw []byte) error {
+func (r *Ref) UnmarshalYAML(raw []byte) error {
 	var number int
 	if err := yaml.Unmarshal(raw, &number); err == nil {
-		r.number = &number
+		r.Number = &number
 		return nil
 	}
 	var slug string
@@ -52,27 +52,27 @@ func (r *phaseRef) UnmarshalYAML(raw []byte) error {
 			return fmt.Errorf("depends_on entry must not be empty")
 		}
 		if parsed, parseErr := strconv.Atoi(slug); parseErr == nil {
-			r.number = &parsed
+			r.Number = &parsed
 			return nil
 		}
-		r.slug = slug
+		r.Slug = slug
 		return nil
 	}
 	return fmt.Errorf("depends_on entry %s must be a phase number or a phase slug", strings.TrimSpace(string(raw)))
 }
 
-func (r phaseRef) String() string {
-	if r.number != nil {
-		return strconv.Itoa(*r.number)
+func (r Ref) String() string {
+	if r.Number != nil {
+		return strconv.Itoa(*r.Number)
 	}
-	return strconv.Quote(r.slug)
+	return strconv.Quote(r.Slug)
 }
 
-// resolvePhaseRefs turns every depends_on entry into a phase number. Slugs are
+// ResolveRefs turns every depends_on entry into a phase number. Slugs are
 // looked up among the plan's own phases; a slug that matches nothing is
 // reported with the slugs that were available, since a typo here is otherwise
 // indistinguishable from a missing phase.
-func resolvePhaseRefs(phases []draftPhase) error {
+func ResolveRefs(phases []Phase) error {
 	numbers := map[string]int{}
 	known := make([]string, 0, len(phases))
 	for _, phase := range phases {
@@ -84,18 +84,18 @@ func resolvePhaseRefs(phases []draftPhase) error {
 		phase := &phases[index]
 		phase.Meta.DependsOn = make([]int, 0, len(phase.Meta.DependsOnRefs))
 		for _, ref := range phase.Meta.DependsOnRefs {
-			if ref.number != nil {
-				if *ref.number < 0 {
-					detail := fmt.Sprintf("phase %q depends_on %d: phase numbers must be non-negative", phase.Title, *ref.number)
+			if ref.Number != nil {
+				if *ref.Number < 0 {
+					detail := fmt.Sprintf("phase %q depends_on %d: phase numbers must be non-negative", phase.Title, *ref.Number)
 					return validation.NewFailure(validation.Record{Rule: "dependency_reference", Section: "PHASES", Phase: validation.IntPointer(phase.Meta.Phase), Detail: detail}, detail)
 				}
-				phase.Meta.DependsOn = append(phase.Meta.DependsOn, *ref.number)
+				phase.Meta.DependsOn = append(phase.Meta.DependsOn, *ref.Number)
 				continue
 			}
-			number, ok := numbers[ref.slug]
+			number, ok := numbers[ref.Slug]
 			if !ok {
 				detail := fmt.Sprintf("phase %q depends_on %q, but no phase in this plan has that slug; available slugs: %s",
-					phase.Title, ref.slug, strings.Join(known, ", "))
+					phase.Title, ref.Slug, strings.Join(known, ", "))
 				return validation.NewFailure(validation.Record{Rule: "dependency_reference", Section: "PHASES", Phase: validation.IntPointer(phase.Meta.Phase), Detail: detail}, detail)
 			}
 			phase.Meta.DependsOn = append(phase.Meta.DependsOn, number)
@@ -104,31 +104,31 @@ func resolvePhaseRefs(phases []draftPhase) error {
 	return nil
 }
 
-type draftPhase struct {
+type Phase struct {
 	Title      string
-	Meta       phaseMeta
+	Meta       Meta
 	Planned    string
 	Completion string
 }
-type draft struct {
+type Draft struct {
 	Name, Goals, Scope, Context, Verification, Ordering, NextText string
 	Description                                                   string
 	DependsOn                                                     []string
-	Phases                                                        []draftPhase
+	Phases                                                        []Phase
 	NextPhase                                                     int
 }
 
-// describeSectionMismatch reports which top-level headings are missing,
+// DescribeSectionMismatch reports which top-level headings are missing,
 // unexpected, or duplicated. A draft is rejected on the heading count alone, so
 // without this the author only learns that the count was wrong.
-func describeSectionMismatch(found []string) string {
+func DescribeSectionMismatch(found []string) string {
 	counts := map[string]int{}
 	for _, name := range found {
 		counts[name]++
 	}
 	required := map[string]bool{}
 	missing := []string{}
-	for _, name := range requiredSections {
+	for _, name := range RequiredSections {
 		required[name] = true
 		if counts[name] == 0 {
 			missing = append(missing, name)
@@ -157,7 +157,7 @@ func describeSectionMismatch(found []string) string {
 	if len(parts) == 0 {
 		// The names all line up, so the count can only be off by repetition that
 		// the checks above already tolerate; report the count plainly.
-		return fmt.Sprintf("document has %d top-level sections, want %d", len(found), len(requiredSections))
+		return fmt.Sprintf("document has %d top-level sections, want %d", len(found), len(RequiredSections))
 	}
 	return strings.Join(parts, "; ")
 }
@@ -178,13 +178,13 @@ func joinOrNone(values []string) string {
 	return strings.Join(values, ", ")
 }
 
-func parseDraft(raw []byte, fallback string) (draft, error) {
+func Parse(raw []byte, fallback string) (Draft, error) {
 	front, body, err := mdoc.Split(string(raw))
 	if err != nil {
-		return draft{}, validation.Wrap(err, "mdoc.Split", "mdoc.Split")
+		return Draft{}, validation.Wrap(err, "mdoc.Split", "mdoc.Split")
 	}
 	matches := topHeading.FindAllStringSubmatchIndex(body, -1)
-	if len(matches) != len(requiredSections) {
+	if len(matches) != len(RequiredSections) {
 		// The caller may be an agent that never reads the document, so name the
 		// sections that are actually missing or extra instead of only restating
 		// what a correct draft looks like.
@@ -192,24 +192,24 @@ func parseDraft(raw []byte, fallback string) (draft, error) {
 		for _, m := range matches {
 			found = append(found, body[m[2]:m[3]])
 		}
-		detail := describeSectionMismatch(found)
-		return draft{}, validation.NewFailure(
+		detail := DescribeSectionMismatch(found)
+		return Draft{}, validation.NewFailure(
 			validation.Record{Rule: "sections", Section: "document", Detail: detail},
 			fmt.Sprintf("%s\nexpected sections: %s\nfound sections: %s",
 				detail,
-				strings.Join(requiredSections, ", "),
+				strings.Join(RequiredSections, ", "),
 				joinOrNone(found)),
 		)
 	}
-	if err := checkDraftPlaceholders(string(raw)); err != nil {
-		return draft{}, err
+	if err := CheckPlaceholders(string(raw)); err != nil {
+		return Draft{}, err
 	}
 	sections := map[string]string{}
 	for i, m := range matches {
 		name := body[m[2]:m[3]]
-		if name != requiredSections[i] {
-			detail := fmt.Sprintf("section %d must be # %s", i+1, requiredSections[i])
-			return draft{}, validation.NewFailure(validation.Record{Rule: "section_order", Section: requiredSections[i], Detail: detail}, detail)
+		if name != RequiredSections[i] {
+			detail := fmt.Sprintf("section %d must be # %s", i+1, RequiredSections[i])
+			return Draft{}, validation.NewFailure(validation.Record{Rule: "section_order", Section: RequiredSections[i], Detail: detail}, detail)
 		}
 		end := len(body)
 		if i+1 < len(matches) {
@@ -223,27 +223,27 @@ func parseDraft(raw []byte, fallback string) (draft, error) {
 	} else if value, ok := front["name"].(string); ok && value != "" {
 		name = value
 	}
-	if !kebab.MatchString(name) {
-		detail := fmt.Sprintf("plan name %q must be lowercase kebab-case", name)
-		return draft{}, validation.NewFailure(validation.Record{Rule: "plan_name", Section: "mdoc.Split", Detail: detail}, detail)
+	if !plan.KebabPattern.MatchString(name) {
+		detail := fmt.Sprintf("plan name %q must be lowercase plan.KebabPattern-case", name)
+		return Draft{}, validation.NewFailure(validation.Record{Rule: "plan_name", Section: "mdoc.Split", Detail: detail}, detail)
 	}
 	description, err := draftDescription(front)
 	if err != nil {
 		detail := fmt.Sprintf("invalid description for plan %q: %v", name, err)
-		return draft{}, validation.NewFailure(validation.Record{Rule: "description", Section: "mdoc.Split", Detail: err.Error()}, detail)
+		return Draft{}, validation.NewFailure(validation.Record{Rule: "description", Section: "mdoc.Split", Detail: err.Error()}, detail)
 	}
-	dependsOn, err := canonicalPlanDependencies(mdoc.Strings(front["depends_on"]))
+	dependsOn, err := plan.CanonicalDependencies(mdoc.Strings(front["depends_on"]))
 	if err != nil {
 		detail := fmt.Sprintf("invalid plan dependencies: %v", err)
-		return draft{}, validation.NewFailure(validation.Record{Rule: "plan_dependency", Section: "mdoc.Split", Detail: err.Error()}, detail)
+		return Draft{}, validation.NewFailure(validation.Record{Rule: "plan_dependency", Section: "mdoc.Split", Detail: err.Error()}, detail)
 	}
 	phases, err := parsePhases(sections["PHASES"])
 	if err != nil {
-		return draft{}, validation.Wrap(err, "phase_document", "PHASES")
+		return Draft{}, validation.Wrap(err, "phase_document", "PHASES")
 	}
 	next, nextText, err := parseNext(sections["NEXT"])
 	if err != nil {
-		return draft{}, validation.Wrap(err, "next_document", "NEXT")
+		return Draft{}, validation.Wrap(err, "next_document", "NEXT")
 	}
 	found := false
 	for _, p := range phases {
@@ -253,23 +253,23 @@ func parseDraft(raw []byte, fallback string) (draft, error) {
 	}
 	if !found {
 		detail := fmt.Sprintf("NEXT references undefined phase %d", next)
-		return draft{}, validation.NewFailure(validation.Record{Rule: "next_phase", Section: "NEXT", Phase: validation.IntPointer(next), Detail: detail}, detail)
+		return Draft{}, validation.NewFailure(validation.Record{Rule: "next_phase", Section: "NEXT", Phase: validation.IntPointer(next), Detail: detail}, detail)
 	}
-	return draft{Name: name, Goals: sections["GOALS"], Scope: sections["SCOPE"], Context: sections["CONTEXT"], Description: description, DependsOn: dependsOn, Phases: phases, Verification: sections["VERIFICATION"], Ordering: sections["ORDERING"], NextPhase: next, NextText: nextText}, nil
+	return Draft{Name: name, Goals: sections["GOALS"], Scope: sections["SCOPE"], Context: sections["CONTEXT"], Description: description, DependsOn: dependsOn, Phases: phases, Verification: sections["VERIFICATION"], Ordering: sections["ORDERING"], NextPhase: next, NextText: nextText}, nil
 }
 
-// draftPlaceholder marks the spots a freshly generated draft leaves for the
+// Placeholder marks the spots a freshly generated draft leaves for the
 // author to fill in. `planr new` emits a skeleton that is deliberately not yet
 // registrable; reporting every remaining marker at once keeps the author from
 // discovering the requirements one failed plan application at a time.
-const draftPlaceholder = "TODO(planr)"
+const Placeholder = "TODO(planr)"
 
-func checkDraftPlaceholders(raw string) error {
+func CheckPlaceholders(raw string) error {
 	lines := []string{}
 	// The template documents the marker inside an HTML comment, so comment
 	// bodies are not themselves placeholders.
 	for number, line := range strings.Split(blankHTMLComments(raw), "\n") {
-		if strings.Contains(line, draftPlaceholder) {
+		if strings.Contains(line, Placeholder) {
 			lines = append(lines, fmt.Sprintf("  line %d: %s", number+1, strings.TrimSpace(line)))
 		}
 	}
@@ -279,16 +279,16 @@ func checkDraftPlaceholders(raw string) error {
 	// Naming the mistake explicitly: the common failure is answering on the
 	// following line, which leaves the marker itself untouched.
 	message := fmt.Sprintf("draft still has %d unfilled %s placeholder(s):\n%s\noverwrite each of these lines with real content -- adding text below a line leaves its marker in place -- then run planr apply again",
-		len(lines), draftPlaceholder, strings.Join(lines, "\n"))
-	return validation.NewFailures(draftPlaceholderRecords(raw), message)
+		len(lines), Placeholder, strings.Join(lines, "\n"))
+	return validation.NewFailures(PlaceholderRecords(raw), message)
 }
 
-func draftPlaceholderRecords(raw string) []validation.Record {
+func PlaceholderRecords(raw string) []validation.Record {
 	records := []validation.Record{}
 	visible := blankHTMLComments(raw)
 	lines := strings.Split(visible, "\n")
 	for index, line := range lines {
-		if !strings.Contains(line, draftPlaceholder) {
+		if !strings.Contains(line, Placeholder) {
 			continue
 		}
 		section, phase := draftLocation(lines, index)
@@ -366,15 +366,15 @@ func draftDescription(front map[string]any) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("description must be a string of 200 characters or fewer")
 	}
-	return normalizeDescription(description, false)
+	return plan.NormalizeDescription(description, false)
 }
 
-func parsePhases(section string) ([]draftPhase, error) {
+func parsePhases(section string) ([]Phase, error) {
 	matches := phaseHeading.FindAllStringSubmatchIndex(section, -1)
 	if len(matches) == 0 {
 		return nil, validation.NewFailure(validation.Record{Rule: "phase_document", Section: "PHASES", Detail: "PHASES must contain at least one phase"}, "PHASES must contain at least one phase")
 	}
-	var result []draftPhase
+	var result []Phase
 	ids := map[int]bool{}
 	slugs := map[string]bool{}
 	for i, m := range matches {
@@ -391,7 +391,7 @@ func parsePhases(section string) ([]draftPhase, error) {
 		if close < 0 {
 			return nil, phaseParseFailure(title, nil, fmt.Sprintf("phase %q has unterminated yaml metadata", title))
 		}
-		var meta phaseMeta
+		var meta Meta
 		if err := yaml.Unmarshal([]byte(block[8:close+8]), &meta); err != nil {
 			return nil, phaseParseFailure(title, nil, fmt.Sprintf("parse phase %q: %v", title, err))
 		}
@@ -399,7 +399,7 @@ func parsePhases(section string) ([]draftPhase, error) {
 			detail := fmt.Sprintf("phase %q has invalid number %d; phase numbers must be non-negative", title, meta.Phase)
 			return nil, phaseParseFailure(title, validation.IntPointer(meta.Phase), detail)
 		}
-		if !kebab.MatchString(meta.Slug) || (meta.Status != "planned" && meta.Status != "conditional") {
+		if !plan.KebabPattern.MatchString(meta.Slug) || (meta.Status != "planned" && meta.Status != "conditional") {
 			return nil, phaseParseFailure(title, validation.IntPointer(meta.Phase), fmt.Sprintf("phase %q has invalid slug or status", title))
 		}
 		if meta.Status == "conditional" && (meta.EntryCondition == nil || strings.TrimSpace(*meta.EntryCondition) == "") {
@@ -421,10 +421,10 @@ func parsePhases(section string) ([]draftPhase, error) {
 		}
 		ids[meta.Phase] = true
 		slugs[meta.Slug] = true
-		result = append(result, draftPhase{title, meta, planned, completion})
+		result = append(result, Phase{title, meta, planned, completion})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Meta.Phase < result[j].Meta.Phase })
-	if err := resolvePhaseRefs(result); err != nil {
+	if err := ResolveRefs(result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -441,11 +441,11 @@ func splitPhaseSections(title, rest string) (string, string, error) {
 	return splitPhaseSectionsWithHeading(title, rest, "### ")
 }
 
-// splitPhaseDocumentSections reads the two prose sections from a registered
+// SplitPhaseDocumentSections reads the two prose sections from a registered
 // phase document. Registered documents use level-two headings and include a
 // title and NEXT marker before them; the heading names themselves still come
 // from the language table used by draft parsing.
-func splitPhaseDocumentSections(title, body string) (string, string, error) {
+func SplitPhaseDocumentSections(title, body string) (string, string, error) {
 	start := -1
 	for _, pair := range doc.PhaseSectionHeadings() {
 		candidate := phaseDocumentHeadingOffset(body, "## "+pair[0])
@@ -491,14 +491,14 @@ func splitPhaseSectionsWithHeading(title, rest, headingPrefix string) (string, s
 		title, strings.Join(expected, " | "))
 }
 
-func validateDraftDependencies(d *draft) error {
-	dependencies, err := normalizePlanDependencies(d.DependsOn, d.Name)
+func ValidateDependencies(d *Draft) error {
+	dependencies, err := plan.NormalizeDependencies(d.DependsOn, d.Name)
 	if err != nil {
 		message := fmt.Sprintf("invalid dependencies for plan %q: %v", d.Name, err)
 		return validation.NewFailure(validation.Record{Rule: "plan_dependency", Section: "mdoc.Split", Detail: err.Error()}, message)
 	}
 	d.DependsOn = dependencies
-	if err := validatePhaseDependencies(d.Phases); err != nil {
+	if err := ValidatePhaseDependencies(d.Phases); err != nil {
 		message := fmt.Sprintf("invalid phase dependencies in plan %q: %v", d.Name, err)
 		records := validation.Records(err)
 		if len(records) == 0 {
@@ -509,7 +509,7 @@ func validateDraftDependencies(d *draft) error {
 	return nil
 }
 
-func validatePhaseDependencies(phases []draftPhase) error {
+func ValidatePhaseDependencies(phases []Phase) error {
 	defined := map[int]bool{}
 	phaseTitles := map[int]string{}
 	for _, phase := range phases {
@@ -541,7 +541,7 @@ func validatePhaseDependencies(phases []draftPhase) error {
 	visit = func(id int) error {
 		state[id] = 1
 		stack = append(stack, id)
-		var phase draftPhase
+		var phase Phase
 		for _, candidate := range phases {
 			if candidate.Meta.Phase == id {
 				phase = candidate

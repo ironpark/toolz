@@ -12,6 +12,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
@@ -27,8 +28,8 @@ func applyTestSettings() config.Config {
 	}
 }
 
-func applyTestDraft(name string) draft {
-	return draft{
+func applyTestDraft(name string) draft.Draft {
+	return draft.Draft{
 		Name:         name,
 		Description:  "a test plan",
 		NextPhase:    0,
@@ -38,9 +39,9 @@ func applyTestDraft(name string) draft {
 		Context:      "The test context.",
 		Verification: "go test ./...",
 		Ordering:     "The first phase comes first.",
-		Phases: []draftPhase{
-			{Title: "Foundation", Meta: phaseMeta{Phase: 0, Slug: "foundation", Status: "planned"}, Planned: "Build the foundation.", Completion: "Foundation tests pass."},
-			{Title: "Follow-up", Meta: phaseMeta{Phase: 1, Slug: "follow-up", Status: "planned", DependsOn: []int{0}}, Planned: "Build the follow-up.", Completion: "Follow-up tests pass."},
+		Phases: []draft.Phase{
+			{Title: "Foundation", Meta: draft.Meta{Phase: 0, Slug: "foundation", Status: "planned"}, Planned: "Build the foundation.", Completion: "Foundation tests pass."},
+			{Title: "Follow-up", Meta: draft.Meta{Phase: 1, Slug: "follow-up", Status: "planned", DependsOn: []int{0}}, Planned: "Build the follow-up.", Completion: "Follow-up tests pass."},
 		},
 	}
 }
@@ -55,7 +56,7 @@ func filledPhaseDraft(t *testing.T, language string) phaseDraftInput {
 	raw = strings.Replace(raw, "depends_on: []", "depends_on: [1]", 1)
 	raw = strings.Replace(raw, "status: planned", "status: conditional", 1)
 	raw = strings.Replace(raw, "entry_condition: null", "entry_condition: only after the cache API is ready", 1)
-	raw = strings.ReplaceAll(raw, draftPlaceholder, "filled")
+	raw = strings.ReplaceAll(raw, draft.Placeholder, "filled")
 	parsed, err := parsePhaseDraft([]byte(raw))
 	if err != nil {
 		t.Fatalf("parsePhaseDraft() unexpected error: %v", err)
@@ -71,8 +72,8 @@ func TestApplyPhaseDraftAddsPhaseAndPreservesPhaseFlags(t *testing.T) {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 
-	draft := filledPhaseDraft(t, doc.English)
-	if _, err := applyPhaseDraft(draft, settings, root, false, false); err != nil {
+	planDraft := filledPhaseDraft(t, doc.English)
+	if _, err := applyPhaseDraft(planDraft, settings, root, false, false); err != nil {
 		t.Fatalf("applyPhaseDraft() unexpected error: %v", err)
 	}
 	phasePath := filepath.Join(planRoot, "phases", "02-cache-warmup.md")
@@ -139,15 +140,15 @@ func TestApplyPhaseDraftRefusesCompletedPlan(t *testing.T) {
 func TestApplyDryRunDoesNotCreatePlanFiles(t *testing.T) {
 	root := t.TempDir()
 	settings := applyTestSettings()
-	draft := applyTestDraft("dry-run-plan")
-	documents, err := renderPlanDocuments(draft, "00-dry-run-plan", settings.Language, "2026-08-27T00:00:00Z")
+	planDraft := applyTestDraft("dry-run-plan")
+	documents, err := renderPlanDocuments(planDraft, "00-dry-run-plan", settings.Language, "2026-08-27T00:00:00Z")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var raw strings.Builder
 	raw.WriteString("---\nplan_name: dry-run-plan\ndescription: a test plan\n---\n")
 	raw.WriteString("# GOALS\n\nShip the test plan.\n# SCOPE\n\nThe test scope.\n# CONTEXT\n\nThe test context.\n# PHASES\n\n## PHASE — Foundation\n\n```yaml\nphase: 0\nslug: foundation\nstatus: planned\n```\n\n### Planned Work\n\nBuild the foundation.\n\n### Done When\n\nFoundation tests pass.\n# VERIFICATION\n\ngo test ./...\n# ORDERING\n\nThe first phase comes first.\n# NEXT\n\n```yaml\nnext_phase: 0\n```\n\nImplement the first phase.\n")
-	parsed, err := parseDraft([]byte(raw.String()), "dry-run-plan.md")
+	parsed, err := draft.Parse([]byte(raw.String()), "dry-run-plan.md")
 	if err != nil {
 		t.Fatalf("parse draft: %v", err)
 	}
@@ -264,7 +265,7 @@ func TestRootCommandRemovedWriteAliasesAndAddsNewSurface(t *testing.T) {
 
 func TestStructuredValidationIncludesPlaceholderLocationAndCycle(t *testing.T) {
 	raw := renderPlaceholderDraftForTest(t)
-	if err := checkDraftPlaceholders(raw); err == nil {
+	if err := draft.CheckPlaceholders(raw); err == nil {
 		t.Fatal("placeholder draft unexpectedly passed")
 	} else {
 		records := validation.Records(err)
@@ -277,7 +278,7 @@ func TestStructuredValidationIncludesPlaceholderLocationAndCycle(t *testing.T) {
 		}
 	}
 
-	err := validatePhaseDependencies([]draftPhase{phaseForTest(1, 3), phaseForTest(3, 1)})
+	err := draft.ValidatePhaseDependencies([]draft.Phase{phaseForTest(1, 3), phaseForTest(3, 1)})
 	if err == nil {
 		t.Fatal("cycle unexpectedly passed")
 	}
@@ -320,7 +321,7 @@ func TestStdinOnlyLifecycleUsesNewEditAndApply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan = strings.ReplaceAll(plan, draftPlaceholder, "stdin lifecycle content")
+	plan = strings.ReplaceAll(plan, draft.Placeholder, "stdin lifecycle content")
 	if output, err := runRootWithStdin(t, plan, []string{"planr", "apply", "--stdin", "--no-hooks"}); err != nil {
 		t.Fatalf("apply plan over stdin: %v; output=%q", err, output)
 	}
@@ -329,7 +330,7 @@ func TestStdinOnlyLifecycleUsesNewEditAndApply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	phase = strings.ReplaceAll(phase, draftPlaceholder, "stdin phase content")
+	phase = strings.ReplaceAll(phase, draft.Placeholder, "stdin phase content")
 	if output, err := runRootWithStdin(t, phase, []string{"planr", "apply", "--stdin", "--no-hooks"}); err != nil {
 		t.Fatalf("apply phase over stdin: %v; output=%q", err, output)
 	}

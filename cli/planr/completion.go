@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
 
@@ -69,7 +70,7 @@ func planNameCompletionValues(planDirectories []string, prefix string) ([]string
 			if !entry.IsDir() {
 				continue
 			}
-			name := planName(entry.Name())
+			name := plan.Name(entry.Name())
 			if strings.HasPrefix(name, prefix) {
 				seen[name] = true
 			}

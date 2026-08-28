@@ -10,13 +10,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
 
@@ -36,8 +37,8 @@ func newCommand(_ context.Context, cmd *cli.Command) error {
 
 func newPlanCommand(cmd *cli.Command) error {
 	name := cmd.Args().First()
-	if !kebab.MatchString(name) {
-		return fmt.Errorf("plan name %q must be lowercase kebab-case", name)
+	if !plan.KebabPattern.MatchString(name) {
+		return fmt.Errorf("plan name %q must be lowercase plan.KebabPattern-case", name)
 	}
 	descriptionInput := cmd.String("description")
 	if cmd.NArg() == 2 {
@@ -46,7 +47,7 @@ func newPlanCommand(cmd *cli.Command) error {
 		}
 		descriptionInput = cmd.Args().Get(1)
 	}
-	description, err := requireDescription(descriptionInput)
+	description, err := plan.RequireDescription(descriptionInput)
 	if err != nil {
 		return err
 	}
@@ -65,7 +66,7 @@ func newPlanCommand(cmd *cli.Command) error {
 			return err
 		}
 	}
-	dependsOn, err := normalizePlanDependencies(cmd.StringSlice("depends-on"), name)
+	dependsOn, err := plan.NormalizeDependencies(cmd.StringSlice("depends-on"), name)
 	if err != nil {
 		return fmt.Errorf("invalid dependencies for plan %q: %w", name, err)
 	}
@@ -81,16 +82,16 @@ func newPlanCommand(cmd *cli.Command) error {
 	if err := runDocumentHooks(repoRoot, settings, "before", hooks.EventNew, name, -1, "draft", cmd.Bool("json")); err != nil {
 		return err
 	}
-	draft, err := doc.RenderNewDraft(settings.Language, name, dependsOn, description)
+	rendered, err := doc.RenderNewDraft(settings.Language, name, dependsOn, description)
 	if err != nil {
 		return err
 	}
 	if cmd.Bool("json") {
-		if err := writeJSON(makeTemplateJSON("plan", name, draft)); err != nil {
+		if err := writeJSON(makeTemplateJSON("plan", name, rendered)); err != nil {
 			return err
 		}
 	} else {
-		if err := os.WriteFile(absOutput, []byte(draft), 0644); err != nil {
+		if err := os.WriteFile(absOutput, []byte(rendered), 0644); err != nil {
 			return err
 		}
 		fmt.Printf("Created %s\n", absOutput)
@@ -99,83 +100,6 @@ func newPlanCommand(cmd *cli.Command) error {
 		return err
 	}
 	return nil
-}
-
-func requireDescription(value string) (string, error) {
-	return normalizeDescription(value, true)
-}
-
-func normalizeDescription(value string, required bool) (string, error) {
-	count := utf8.RuneCountInString(value)
-	if count > 200 {
-		return "", fmt.Errorf("description must be 200 characters or fewer (including spaces); got %d", count)
-	}
-	description := strings.TrimSpace(value)
-	if required && description == "" {
-		return "", fmt.Errorf("new requires --description (a short description up to 200 characters)")
-	}
-	return description, nil
-}
-
-func normalizePlanDependencies(values []string, plan string) ([]string, error) {
-	result, err := canonicalPlanDependencies(values)
-	if err != nil {
-		return nil, err
-	}
-	for _, dependency := range result {
-		parsed, _ := parseDependency(dependency)
-		if parsed.plan == plan {
-			return nil, fmt.Errorf("plan %q cannot depend on itself (dependency %q)", plan, dependency)
-		}
-	}
-	return result, nil
-}
-
-func canonicalPlanDependencies(values []string) ([]string, error) {
-	seen := map[string]bool{}
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return nil, fmt.Errorf("--depends-on must not be empty")
-		}
-		dependency, err := parseDependency(value)
-		if err != nil {
-			return nil, err
-		}
-		canonical := dependency.plan
-		if dependency.phase != nil {
-			canonical = fmt.Sprintf("%s#%d", canonical, *dependency.phase)
-		}
-		if !seen[canonical] {
-			seen[canonical] = true
-			result = append(result, canonical)
-		} else {
-			return nil, fmt.Errorf("duplicate plan dependency %q", canonical)
-		}
-	}
-	return result, nil
-}
-
-type planDependency struct {
-	plan  string
-	phase *int
-}
-
-func parseDependency(value string) (planDependency, error) {
-	plan, phaseText, hasPhase := strings.Cut(value, "#")
-	plan = planName(plan)
-	if !kebab.MatchString(plan) {
-		return planDependency{}, fmt.Errorf("dependency %q must use plan-name or plan-name#phase-number", value)
-	}
-	if !hasPhase {
-		return planDependency{plan: plan}, nil
-	}
-	phase, err := strconv.Atoi(phaseText)
-	if err != nil || phase < 0 {
-		return planDependency{}, fmt.Errorf("dependency %q must use a non-negative phase number", value)
-	}
-	return planDependency{plan: plan, phase: &phase}, nil
 }
 
 // planDirectoryPrefix matches a numbered plan directory name, capturing its
@@ -215,7 +139,7 @@ func nextPlanDirectory(planDirectories []string, name string) (string, error) {
 	return fmt.Sprintf("%02d-%s", maxIndex+1, name), nil
 }
 
-func writePlan(root string, d draft, planDirectory, language string) error {
+func writePlan(root string, d draft.Draft, planDirectory, language string) error {
 	documents, err := renderPlanDocuments(d, planDirectory, language, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		return err
@@ -234,7 +158,7 @@ func writePlan(root string, d draft, planDirectory, language string) error {
 // renderPlanDocuments produces the complete set of files written when a plan
 // is registered. Keeping this separate from writePlan lets apply --dry-run
 // return the exact resulting documents without touching the repository.
-func renderPlanDocuments(d draft, planDirectory, language, registeredAt string) (map[string]string, error) {
+func renderPlanDocuments(d draft.Draft, planDirectory, language, registeredAt string) (map[string]string, error) {
 	text := doc.StringsFor(language)
 	documents := map[string]string{
 		"GOALS.md":   "# GOALS\n\n" + d.Goals + "\n",
@@ -320,7 +244,7 @@ func transformChecklistEntry(body string, phaseID int, transform func(line strin
 	return strings.Join(result, ""), nil
 }
 
-func phaseFrontmatter(planDirectory string, meta phaseMeta) map[string]any {
+func phaseFrontmatter(planDirectory string, meta draft.Meta) map[string]any {
 	dependencies := make([]string, len(meta.DependsOn))
 	for index, dependency := range meta.DependsOn {
 		dependencies[index] = fmt.Sprintf("%s#%d", planDirectory, dependency)
@@ -348,18 +272,18 @@ func firstPhaseLine(value string) string {
 // `overview`; each command only differs in how it renders it.
 type planSummary struct {
 	name, label, status string
-	dependsOn           []planDependency
+	dependsOn           []plan.Dependency
 	phases              []storedPhase
 	wait                []string
 }
 
 func (p *planSummary) addDependency(raw string) {
-	dependency, err := parseDependency(raw)
+	dependency, err := plan.ParseDependency(raw)
 	if err != nil {
 		return
 	}
 	for _, existing := range p.dependsOn {
-		if existing.plan == dependency.plan && sameDependencyPhase(existing, dependency) {
+		if existing.Plan == dependency.Plan && plan.SameDependencyPhase(existing, dependency) {
 			return
 		}
 	}
@@ -380,13 +304,6 @@ func (p planSummary) progress() (done, total int, next string) {
 	return done, total, next
 }
 
-func sameDependencyPhase(left, right planDependency) bool {
-	if left.phase == nil || right.phase == nil {
-		return left.phase == nil && right.phase == nil
-	}
-	return *left.phase == *right.phase
-}
-
 // collectPlanSummaries reads every plan under planDirectories, optionally
 // keeping only the one matching filter (by directory or plan name).
 func collectPlanSummaries(planDirectories []string, filter string) ([]planSummary, bool, error) {
@@ -405,7 +322,7 @@ func collectPlanSummaries(planDirectories []string, filter string) ([]planSummar
 			if !entry.IsDir() {
 				continue
 			}
-			if filter != "" && entry.Name() != filter && planName(entry.Name()) != filter {
+			if filter != "" && entry.Name() != filter && plan.Name(entry.Name()) != filter {
 				continue
 			}
 			planRoot := filepath.Join(plans, entry.Name())
@@ -423,7 +340,7 @@ func collectPlanSummaries(planDirectories []string, filter string) ([]planSummar
 			}
 			status, _ := front["plan_status"].(string)
 			summary := planSummary{
-				name:   planName(entry.Name()),
+				name:   plan.Name(entry.Name()),
 				label:  filepath.Join(filepath.Base(plans), entry.Name()),
 				status: status,
 				phases: phases,
@@ -460,17 +377,17 @@ func annotatePlanWaits(summaries []planSummary) map[string]bool {
 			continue
 		}
 		for _, dependency := range summary.dependsOn {
-			required[dependency.plan] = true
-			if dependency.plan == summary.name {
+			required[dependency.Plan] = true
+			if dependency.Plan == summary.name {
 				continue
 			}
-			label := dependencyLabel(dependency)
-			target, found := byName[dependency.plan]
+			label := plan.DependencyLabel(dependency)
+			target, found := byName[dependency.Plan]
 			if !found {
 				summary.wait = append(summary.wait, label+" (not found)")
 				continue
 			}
-			if dependency.phase == nil {
+			if dependency.Phase == nil {
 				if target.status != "done" {
 					summary.wait = append(summary.wait, fmt.Sprintf("%s (%s)", label, target.status))
 				}
@@ -478,7 +395,7 @@ func annotatePlanWaits(summaries []planSummary) map[string]bool {
 			}
 			phaseFound := false
 			for _, phase := range target.phases {
-				if phase.id != *dependency.phase {
+				if phase.id != *dependency.Phase {
 					continue
 				}
 				phaseFound = true
@@ -612,23 +529,4 @@ func readPlanPhases(planRoot string) ([]storedPhase, error) {
 	}
 	sort.Slice(phases, func(i, j int) bool { return phases[i].id < phases[j].id })
 	return phases, nil
-}
-
-func planName(directory string) string {
-	parts := strings.SplitN(directory, "-", 2)
-	if len(parts) == 2 {
-		if len(parts[0]) >= 2 {
-			if _, err := strconv.Atoi(parts[0]); err == nil {
-				return parts[1]
-			}
-		}
-	}
-	return directory
-}
-
-func dependencyLabel(dependency planDependency) string {
-	if dependency.phase == nil {
-		return dependency.plan
-	}
-	return fmt.Sprintf("%s#%d", dependency.plan, *dependency.phase)
 }

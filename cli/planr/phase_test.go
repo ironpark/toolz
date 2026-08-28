@@ -9,12 +9,13 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 )
 
 func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
 	plansRoot := t.TempDir()
-	draft := draft{
+	planDraft := draft.Draft{
 		Name:         "checkout-v2",
 		Description:  "checkout flow refresh",
 		NextPhase:    0,
@@ -24,12 +25,12 @@ func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
 		Context:      "Existing checkout.",
 		Verification: "go test ./...",
 		Ordering:     "API before UI.",
-		Phases: []draftPhase{
-			{Title: "API Contract", Meta: phaseMeta{Phase: 0, Slug: "api-contract", Status: "planned"}, Planned: "Add the API.", Completion: "API tests pass."},
-			{Title: "Checkout UI", Meta: phaseMeta{Phase: 1, Slug: "checkout-ui", Status: "planned", DependsOn: []int{0}}, Planned: "Add the UI.", Completion: "UI tests pass."},
+		Phases: []draft.Phase{
+			{Title: "API Contract", Meta: draft.Meta{Phase: 0, Slug: "api-contract", Status: "planned"}, Planned: "Add the API.", Completion: "API tests pass."},
+			{Title: "Checkout UI", Meta: draft.Meta{Phase: 1, Slug: "checkout-ui", Status: "planned", DependsOn: []int{0}}, Planned: "Add the UI.", Completion: "UI tests pass."},
 		},
 	}
-	if err := writePlan(filepath.Join(plansRoot, "00-checkout-v2"), draft, "00-checkout-v2", doc.Korean); err != nil {
+	if err := writePlan(filepath.Join(plansRoot, "00-checkout-v2"), planDraft, "00-checkout-v2", doc.Korean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 
@@ -129,8 +130,8 @@ func TestEnsureDependenciesMetBlocksOnUnfinishedPlans(t *testing.T) {
 	}
 }
 
-func dependentTestDraft(dependsOn []string) draft {
-	return draft{
+func dependentTestDraft(dependsOn []string) draft.Draft {
+	return draft.Draft{
 		Name:         "checkout-v2",
 		Description:  "checkout flow refresh",
 		DependsOn:    dependsOn,
@@ -141,9 +142,9 @@ func dependentTestDraft(dependsOn []string) draft {
 		Context:      "Existing checkout.",
 		Verification: "go test ./...",
 		Ordering:     "API before UI.",
-		Phases: []draftPhase{
-			{Title: "API Contract", Meta: phaseMeta{Phase: 0, Slug: "api-contract", Status: "planned"}, Planned: "Add the API.", Completion: "API tests pass."},
-			{Title: "Checkout UI", Meta: phaseMeta{Phase: 1, Slug: "checkout-ui", Status: "planned", DependsOn: []int{0}}, Planned: "Add the UI.", Completion: "UI tests pass."},
+		Phases: []draft.Phase{
+			{Title: "API Contract", Meta: draft.Meta{Phase: 0, Slug: "api-contract", Status: "planned"}, Planned: "Add the API.", Completion: "API tests pass."},
+			{Title: "Checkout UI", Meta: draft.Meta{Phase: 1, Slug: "checkout-ui", Status: "planned", DependsOn: []int{0}}, Planned: "Add the UI.", Completion: "UI tests pass."},
 		},
 	}
 }

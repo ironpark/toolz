@@ -16,8 +16,10 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 	"github.com/urfave/cli/v3"
 )
@@ -49,7 +51,7 @@ var editEnvelopeKeys = []string{
 type phaseDraftInput struct {
 	Plan  string
 	Title string
-	draftPhase
+	draft.Phase
 }
 
 type applyOperation struct {
@@ -106,7 +108,7 @@ func newPhaseCommand(cmd *cli.Command, selector string) error {
 	}
 	output := cmd.String("output")
 	if output == "" {
-		output = planName(planDirectory) + "-" + slug + ".md"
+		output = plan.Name(planDirectory) + "-" + slug + ".md"
 	}
 	absOutput, err := filepath.Abs(output)
 	if err != nil {
@@ -119,7 +121,7 @@ func newPhaseCommand(cmd *cli.Command, selector string) error {
 			return err
 		}
 	}
-	draft, err := doc.RenderNewPhaseDraft(settings.Language, planName(planDirectory), strings.TrimSpace(title), slug)
+	rendered, err := doc.RenderNewPhaseDraft(settings.Language, plan.Name(planDirectory), strings.TrimSpace(title), slug)
 	if err != nil {
 		return err
 	}
@@ -127,11 +129,11 @@ func newPhaseCommand(cmd *cli.Command, selector string) error {
 		return err
 	}
 	if cmd.Bool("json") {
-		if err := writeJSON(makeTemplateJSON(applyKindPhase, planName(planDirectory)+"#"+strings.TrimSpace(title), draft)); err != nil {
+		if err := writeJSON(makeTemplateJSON(applyKindPhase, plan.Name(planDirectory)+"#"+strings.TrimSpace(title), rendered)); err != nil {
 			return err
 		}
 	} else {
-		if err := os.WriteFile(absOutput, []byte(draft), 0644); err != nil {
+		if err := os.WriteFile(absOutput, []byte(rendered), 0644); err != nil {
 			return err
 		}
 		fmt.Printf("Created %s\n", absOutput)
@@ -190,7 +192,7 @@ func applyCommand(_ context.Context, cmd *cli.Command) error {
 	var operation applyOperation
 	switch kind {
 	case applyKindPlan:
-		operation, err = applyPlanDraft(document.(draft), settings, repoRoot, cmd.Bool("dry-run"), cmd.Bool("json"))
+		operation, err = applyPlanDraft(document.(draft.Draft), settings, repoRoot, cmd.Bool("dry-run"), cmd.Bool("json"))
 	case applyKindPhase:
 		operation, err = applyPhaseDraft(document.(phaseDraftInput), settings, repoRoot, cmd.Bool("dry-run"), cmd.Bool("json"))
 	case applyKindEdit:
@@ -273,14 +275,14 @@ func detectApplyDocument(raw []byte, fallback string) (string, any, error) {
 		}
 		return applyKindPhase, phase, nil
 	}
-	draft, err := parseDraft(raw, fallback)
+	parsed, err := draft.Parse(raw, fallback)
 	if err != nil {
 		return "", nil, err
 	}
-	if err := validateDraftDependencies(&draft); err != nil {
+	if err := draft.ValidateDependencies(&parsed); err != nil {
 		return "", nil, err
 	}
-	return applyKindPlan, draft, nil
+	return applyKindPlan, parsed, nil
 }
 
 func parsePhaseDraft(raw []byte) (phaseDraftInput, error) {
@@ -288,14 +290,14 @@ func parsePhaseDraft(raw []byte) (phaseDraftInput, error) {
 	if err != nil {
 		return phaseDraftInput{}, validation.Wrap(err, "mdoc.Split", "mdoc.Split")
 	}
-	if err := checkDraftPlaceholders(string(raw)); err != nil {
+	if err := draft.CheckPlaceholders(string(raw)); err != nil {
 		return phaseDraftInput{}, err
 	}
-	plan, ok := front["planr_plan"].(string)
-	if !ok || strings.TrimSpace(plan) == "" {
-		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", "phase draft requires planr_plan")
+	planName, ok := front["planr_plan"].(string)
+	if !ok || strings.TrimSpace(planName) == "" {
+		return phaseDraftInput{}, phaseDraftValidationError("frontmatter", "phase draft requires planr_plan")
 	}
-	plan = strings.TrimSpace(plan)
+	planName = strings.TrimSpace(planName)
 	title, ok := front["phase_title"].(string)
 	if !ok || strings.TrimSpace(title) == "" {
 		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", "phase draft requires phase_title")
@@ -308,12 +310,12 @@ func parsePhaseDraft(raw []byte) (phaseDraftInput, error) {
 		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", "phase number is assigned by planr apply; remove phase from the draft")
 	}
 	slug, ok := front["slug"].(string)
-	if !ok || !kebab.MatchString(strings.TrimSpace(slug)) {
+	if !ok || !plan.KebabPattern.MatchString(strings.TrimSpace(slug)) {
 		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", fmt.Sprintf("phase slug %q must be lowercase kebab-case", slug))
 	}
 	slug = strings.TrimSpace(slug)
 
-	var meta phaseMeta
+	var meta draft.Meta
 	frontYAML, err := yaml.Marshal(front)
 	if err != nil {
 		return phaseDraftInput{}, phaseDraftValidationError("mdoc.Split", fmt.Sprintf("parse phase metadata: %v", err))
@@ -335,21 +337,21 @@ func parsePhaseDraft(raw []byte) (phaseDraftInput, error) {
 	if mdoc.Title(body) != title {
 		return phaseDraftInput{}, phaseDraftValidationError("phase", fmt.Sprintf("phase title %q in the body does not match phase_title %q", mdoc.Title(body), title))
 	}
-	planned, completion, err := splitPhaseDocumentSections(title, body)
+	planned, completion, err := draft.SplitPhaseDocumentSections(title, body)
 	if err != nil {
 		return phaseDraftInput{}, phaseDraftValidationError("phase", err.Error())
 	}
 	if planned == "" || completion == "" {
 		return phaseDraftInput{}, phaseDraftValidationError("phase", "phase work and completion must not be empty")
 	}
-	return phaseDraftInput{Plan: plan, Title: title, draftPhase: draftPhase{Title: title, Meta: meta, Planned: planned, Completion: completion}}, nil
+	return phaseDraftInput{Plan: planName, Title: title, Phase: draft.Phase{Title: title, Meta: meta, Planned: planned, Completion: completion}}, nil
 }
 
 func phaseDraftValidationError(section, detail string) error {
 	return validation.NewFailure(validation.Record{Rule: "phase_document", Section: section, Detail: detail}, detail)
 }
 
-func applyPlanDraft(d draft, settings config.Config, repoRoot string, dryRun, jsonOutput bool) (applyOperation, error) {
+func applyPlanDraft(d draft.Draft, settings config.Config, repoRoot string, dryRun, jsonOutput bool) (applyOperation, error) {
 	planDirectories := settings.PlanDirs(repoRoot)
 	if len(planDirectories) == 0 {
 		return applyOperation{}, fmt.Errorf("no plans directory is configured")
@@ -480,7 +482,7 @@ func applyPhaseDraft(d phaseDraftInput, settings config.Config, repoRoot string,
 	}
 	documents := map[string]string{phasePath: phaseContents, planPath: updatedPlanContents}
 	diffs := []applyDiffJSON{{Path: absolutePath(phasePath), After: phaseContents}, {Path: absolutePath(planPath), Before: string(planRaw), After: updatedPlanContents}}
-	op := makeOperation("add_phase", planName(planDirectory)+"#"+d.Title, dryRun, documents, diffs)
+	op := makeOperation("add_phase", plan.Name(planDirectory)+"#"+d.Title, dryRun, documents, diffs)
 	if dryRun {
 		return op, nil
 	}
@@ -506,7 +508,7 @@ func applyPhaseDraft(d phaseDraftInput, settings config.Config, repoRoot string,
 	return op, nil
 }
 
-func resolvePhaseDraftDependencies(refs []phaseRef, existing []storedPhase) ([]int, error) {
+func resolvePhaseDraftDependencies(refs []draft.Ref, existing []storedPhase) ([]int, error) {
 	bySlug := map[string]int{}
 	known := make([]string, 0, len(existing))
 	for _, phase := range existing {
@@ -518,13 +520,13 @@ func resolvePhaseDraftDependencies(refs []phaseRef, existing []storedPhase) ([]i
 	seen := map[int]bool{}
 	for _, ref := range refs {
 		id := -1
-		if ref.number != nil {
-			id = *ref.number
+		if ref.Number != nil {
+			id = *ref.Number
 		} else {
 			var found bool
-			id, found = bySlug[ref.slug]
+			id, found = bySlug[ref.Slug]
 			if !found {
-				detail := fmt.Sprintf("phase dependency %q is neither a phase number nor a slug of an existing phase; available slugs: %s", ref.slug, strings.Join(known, ", "))
+				detail := fmt.Sprintf("phase dependency %q is neither a phase number nor a slug of an existing phase; available slugs: %s", ref.Slug, strings.Join(known, ", "))
 				return nil, validation.NewFailure(validation.Record{Rule: "dependency_reference", Section: "mdoc.Split", Detail: detail}, detail)
 			}
 		}
@@ -574,25 +576,25 @@ func nextPhaseID(phases []storedPhase) int {
 
 // storedPhaseToDraft converts one stored phase into the draft shape used by
 // dependency validation, resolving its internal depends_on references.
-func storedPhaseToDraft(plan string, phase storedPhase) (draftPhase, error) {
-	meta := phaseMeta{Phase: phase.id, Slug: phase.slug, Status: phase.status}
+func storedPhaseToDraft(planName string, phase storedPhase) (draft.Phase, error) {
+	meta := draft.Meta{Phase: phase.id, Slug: phase.slug, Status: phase.status}
 	for _, raw := range phase.dependencies {
-		dependency, err := parseDependency(raw)
-		if err != nil || dependency.phase == nil || dependency.plan != plan {
-			return draftPhase{}, fmt.Errorf("phase %d has invalid internal dependency %q", phase.id, raw)
+		dependency, err := plan.ParseDependency(raw)
+		if err != nil || dependency.Phase == nil || dependency.Plan != planName {
+			return draft.Phase{}, fmt.Errorf("phase %d has invalid internal dependency %q", phase.id, raw)
 		}
-		meta.DependsOn = append(meta.DependsOn, *dependency.phase)
+		meta.DependsOn = append(meta.DependsOn, *dependency.Phase)
 	}
-	return draftPhase{Title: phase.title, Meta: meta}, nil
+	return draft.Phase{Title: phase.title, Meta: meta}, nil
 }
 
 // storedPhasesToDraft converts a plan's stored phases into draft phases so the
 // shared dependency-graph validation can run against them.
-func storedPhasesToDraft(planDirectory string, phases []storedPhase) ([]draftPhase, error) {
-	plan := planName(planDirectory)
-	all := make([]draftPhase, 0, len(phases)+1)
+func storedPhasesToDraft(planDirectory string, phases []storedPhase) ([]draft.Phase, error) {
+	planName := plan.Name(planDirectory)
+	all := make([]draft.Phase, 0, len(phases)+1)
 	for _, phase := range phases {
-		converted, err := storedPhaseToDraft(plan, phase)
+		converted, err := storedPhaseToDraft(planName, phase)
 		if err != nil {
 			return nil, err
 		}
@@ -601,13 +603,13 @@ func storedPhasesToDraft(planDirectory string, phases []storedPhase) ([]draftPha
 	return all, nil
 }
 
-func validateNewPhaseDependencies(planDirectory string, newPhase phaseMeta, title string, existing []storedPhase) error {
+func validateNewPhaseDependencies(planDirectory string, newPhase draft.Meta, title string, existing []storedPhase) error {
 	all, err := storedPhasesToDraft(planDirectory, existing)
 	if err != nil {
 		return err
 	}
-	all = append(all, draftPhase{Title: title, Meta: newPhase})
-	if err := validatePhaseDependencies(all); err != nil {
+	all = append(all, draft.Phase{Title: title, Meta: newPhase})
+	if err := draft.ValidatePhaseDependencies(all); err != nil {
 		message := fmt.Sprintf("invalid dependencies for new phase %d: %v", newPhase.Phase, err)
 		records := validation.Records(err)
 		if len(records) == 0 {
@@ -778,17 +780,17 @@ func parseEditSelector(selector string) (string, string, int, string, error) {
 	if strings.Count(selector, "#") != 1 {
 		return "", "", 0, "", fmt.Errorf("planr_edit must use <plan-name>#<phase-number>")
 	}
-	plan, suffix, _ := strings.Cut(selector, "#")
-	plan = strings.TrimSpace(plan)
+	planName, suffix, _ := strings.Cut(selector, "#")
+	planName = strings.TrimSpace(planName)
 	suffix = strings.TrimSpace(suffix)
-	if plan == "" || suffix == "" {
+	if planName == "" || suffix == "" {
 		return "", "", 0, "", fmt.Errorf("planr_edit has an empty plan or document selector")
 	}
 	phaseID, err := strconv.Atoi(suffix)
 	if err != nil || phaseID < 0 {
 		return "", "", 0, "", fmt.Errorf("edit phase number %q must be a non-negative integer", suffix)
 	}
-	return plan, "phase", phaseID, "", nil
+	return planName, "phase", phaseID, "", nil
 }
 
 func parseEditDocumentSelector(selector string, front map[string]any) (string, string, int, string, error) {
@@ -898,7 +900,7 @@ func applyPhaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte,
 		detail := "phase document must contain a Markdown title"
 		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_document", Section: "phase", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
-	planned, completion, err := splitPhaseDocumentSections(title, mdoc.Body(raw))
+	planned, completion, err := draft.SplitPhaseDocumentSections(title, mdoc.Body(raw))
 	if err != nil {
 		return applyOperation{}, validation.NewFailure(validation.Record{Rule: "phase_document", Section: "phase", Phase: validation.IntPointer(phaseID), Detail: err.Error()}, err.Error())
 	}
@@ -942,7 +944,7 @@ func applyPhaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte,
 		documents[planPath] = updatedPlan
 		diffs = append(diffs, applyDiffJSON{Path: absolutePath(planPath), Before: string(planRaw), After: updatedPlan})
 	}
-	op := makeOperation("edit_phase", planName(planDirectory)+"#"+strconv.Itoa(phaseID), dryRun, documents, diffs)
+	op := makeOperation("edit_phase", plan.Name(planDirectory)+"#"+strconv.Itoa(phaseID), dryRun, documents, diffs)
 	if dryRun || !op.changed {
 		return op, nil
 	}
@@ -990,9 +992,9 @@ func phaseSlugForID(phases []storedPhase, id int) string {
 	return ""
 }
 
-func editablePhaseMeta(front map[string]any, planDirectory string, phaseID int, phases []storedPhase) (phaseMeta, map[string]any, error) {
+func editablePhaseMeta(front map[string]any, planDirectory string, phaseID int, phases []storedPhase) (draft.Meta, map[string]any, error) {
 	slug := phaseSlugForID(phases, phaseID)
-	meta := phaseMeta{Phase: phaseID, Slug: slug}
+	meta := draft.Meta{Phase: phaseID, Slug: slug}
 	status, _ := front["status"].(string)
 	meta.Status = status
 	if perf, ok := front["perf_phase"].(bool); ok {
@@ -1004,13 +1006,13 @@ func editablePhaseMeta(front map[string]any, planDirectory string, phaseID int, 
 	}
 	dependencies, normalized, err := editablePhaseDependencies(front["depends_on"], planDirectory, phases)
 	if err != nil {
-		return phaseMeta{}, nil, err
+		return draft.Meta{}, nil, err
 	}
 	meta.DependsOn = dependencies
 	normalizedFront := mdoc.CopyFront(front)
 	normalizedFront["depends_on"] = normalized
 	if err := validateNewPhaseEditDependencies(planDirectory, meta, phases); err != nil {
-		return phaseMeta{}, nil, err
+		return draft.Meta{}, nil, err
 	}
 	return meta, normalizedFront, nil
 }
@@ -1029,33 +1031,33 @@ func editablePhaseDependencies(value any, planDirectory string, phases []storedP
 	default:
 		return nil, nil, fmt.Errorf("phase depends_on must be a list")
 	}
-	refs := make([]phaseRef, 0, len(values))
+	refs := make([]draft.Ref, 0, len(values))
 	for _, item := range values {
 		switch typed := item.(type) {
 		case int:
 			id := typed
-			refs = append(refs, phaseRef{number: &id})
+			refs = append(refs, draft.Ref{Number: &id})
 		case int64:
 			id := int(typed)
-			refs = append(refs, phaseRef{number: &id})
+			refs = append(refs, draft.Ref{Number: &id})
 		case float64:
 			if typed != float64(int(typed)) {
 				return nil, nil, fmt.Errorf("phase dependency %v must be a whole phase number", typed)
 			}
 			id := int(typed)
-			refs = append(refs, phaseRef{number: &id})
+			refs = append(refs, draft.Ref{Number: &id})
 		case string:
 			raw := strings.TrimSpace(typed)
-			if dependency, err := parseDependency(raw); err == nil && dependency.phase != nil {
-				if dependency.plan != planName(planDirectory) {
-					return nil, nil, fmt.Errorf("phase dependency %q must reference a phase in %s", raw, planName(planDirectory))
+			if dependency, err := plan.ParseDependency(raw); err == nil && dependency.Phase != nil {
+				if dependency.Plan != plan.Name(planDirectory) {
+					return nil, nil, fmt.Errorf("phase dependency %q must reference a phase in %s", raw, plan.Name(planDirectory))
 				}
-				refs = append(refs, phaseRef{number: dependency.phase})
+				refs = append(refs, draft.Ref{Number: dependency.Phase})
 			} else if parsed, parseErr := strconv.Atoi(raw); parseErr == nil {
 				id := parsed
-				refs = append(refs, phaseRef{number: &id})
+				refs = append(refs, draft.Ref{Number: &id})
 			} else {
-				refs = append(refs, phaseRef{slug: raw})
+				refs = append(refs, draft.Ref{Slug: raw})
 			}
 		default:
 			return nil, nil, fmt.Errorf("phase depends_on entries must be phase numbers or strings")
@@ -1082,21 +1084,21 @@ func replacePhaseChecklistEntry(body string, phaseID int, title, slug string, do
 	})
 }
 
-func validateNewPhaseEditDependencies(planDirectory string, edited phaseMeta, phases []storedPhase) error {
-	plan := planName(planDirectory)
-	all := make([]draftPhase, 0, len(phases))
+func validateNewPhaseEditDependencies(planDirectory string, edited draft.Meta, phases []storedPhase) error {
+	planName := plan.Name(planDirectory)
+	all := make([]draft.Phase, 0, len(phases))
 	for _, phase := range phases {
 		if phase.id == edited.Phase {
-			all = append(all, draftPhase{Title: phase.title, Meta: edited})
+			all = append(all, draft.Phase{Title: phase.title, Meta: edited})
 			continue
 		}
-		converted, err := storedPhaseToDraft(plan, phase)
+		converted, err := storedPhaseToDraft(planName, phase)
 		if err != nil {
 			return err
 		}
 		all = append(all, converted)
 	}
-	return validatePhaseDependencies(all)
+	return draft.ValidatePhaseDependencies(all)
 }
 
 func applySectionEdit(raw []byte, currentRaw []byte, target, planDirectory, section string, dryRun, jsonOutput bool) (applyOperation, error) {
@@ -1129,7 +1131,7 @@ func applySectionEdit(raw []byte, currentRaw []byte, target, planDirectory, sect
 	if err != nil {
 		return applyOperation{}, err
 	}
-	op := makeOperation("edit_"+section, planName(planDirectory), dryRun,
+	op := makeOperation("edit_"+section, plan.Name(planDirectory), dryRun,
 		map[string]string{target: updated}, []applyDiffJSON{{Path: absolutePath(target), Before: string(currentRaw), After: updated}})
 	if dryRun || !op.changed {
 		return op, nil

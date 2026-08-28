@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/urfave/cli/v3"
 )
 
@@ -17,13 +18,13 @@ func TestPhaseRemoveRefusesDependentsAndLeavesNumberGapWithForce(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(root, "plan", "00-checkout-v2")
-	draft := dependentTestDraft(nil)
-	draft.Phases = append(draft.Phases, draftPhase{
+	planDraft := dependentTestDraft(nil)
+	planDraft.Phases = append(planDraft.Phases, draft.Phase{
 		Title:   "Rollout",
-		Meta:    phaseMeta{Phase: 2, Slug: "rollout", Status: "planned", DependsOn: []int{1}},
+		Meta:    draft.Meta{Phase: 2, Slug: "rollout", Status: "planned", DependsOn: []int{1}},
 		Planned: "Roll out.", Completion: "Rollout is stable.",
 	})
-	if err := writePlan(planRoot, draft, "00-checkout-v2", doc.English); err != nil {
+	if err := writePlan(planRoot, planDraft, "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	old, err := os.Getwd()

@@ -128,17 +128,89 @@ const (
 
 // MessageOrigin describes the provenance of a user-role message and, on a
 // ResultMessage, of the message that triggered the turn. Only Kind is always
-// present; Extra carries any undocumented keys the CLI sent.
+// present; which of the remaining fields are set depends on Kind, and Extra
+// carries any keys this SDK version does not model.
 type MessageOrigin struct {
-	Kind            MessageOriginKind `json:"kind"`
-	Server          string            `json:"server,omitempty"`
-	From            string            `json:"from,omitempty"`
-	Name            string            `json:"name,omitempty"`
-	FromSession     string            `json:"fromSession,omitempty"`
-	SenderTaskID    string            `json:"senderTaskId,omitempty"`
-	Body            string            `json:"body,omitempty"`
-	VerifiedPeerPID *int              `json:"verifiedPeerPid,omitempty"`
-	Subkind         string            `json:"subkind,omitempty"`
+	// Kind classifies the sender. It falls back to OriginUnclassified when the
+	// CLI sends a kind this SDK cannot read as a string.
+	Kind MessageOriginKind `json:"kind"`
+	// Server names the MCP server that delivered the message ("channel").
+	Server string `json:"server,omitempty"`
+	// From is the sender's address, such as "agent://name" ("channel", "peer").
+	From string `json:"from,omitempty"`
+	// Name is the sender's display name, when it has one.
+	Name string `json:"name,omitempty"`
+	// FromSession is the sender's session ID ("peer", "coordinator").
+	FromSession string `json:"fromSession,omitempty"`
+	// SenderTaskID is the task that sent the message ("peer",
+	// "task-notification").
+	SenderTaskID string `json:"senderTaskId,omitempty"`
+	// Body is the original message text, when the delivered content wraps it
+	// ("channel", "peer").
+	Body string `json:"body,omitempty"`
+	// VerifiedPeerPID is the OS process ID of the peer, as verified by the CLI
+	// ("peer"). It is 0 when the CLI reported no verified PID.
+	VerifiedPeerPID int `json:"verifiedPeerPid,omitempty"`
+	// Subkind narrows Kind, for kinds that classify further.
+	Subkind string `json:"subkind,omitempty"`
+	// Extra holds origin keys this SDK version does not model, so a newer CLI
+	// loses nothing. It is merged back in on marshal; modeled fields win.
+	Extra map[string]any `json:"-"`
+}
+
+// originModeledKeys are the origin keys MessageOrigin has a field for.
+// Anything else goes to Extra.
+var originModeledKeys = map[string]bool{
+	"kind": true, "server": true, "from": true, "name": true,
+	"fromSession": true, "senderTaskId": true, "body": true,
+	"verifiedPeerPid": true, "subkind": true,
+}
+
+// MarshalJSON writes the modeled fields with any Extra keys merged alongside.
+func (o MessageOrigin) MarshalJSON() ([]byte, error) {
+	type alias MessageOrigin
+	b, err := json.Marshal(alias(o))
+	if err != nil || len(o.Extra) == 0 {
+		return b, err
+	}
+	var merged map[string]any
+	if err := json.Unmarshal(b, &merged); err != nil {
+		return nil, err
+	}
+	for k, v := range o.Extra {
+		if _, taken := merged[k]; !taken {
+			merged[k] = v
+		}
+	}
+	return json.Marshal(merged)
+}
+
+// UnmarshalJSON reads the modeled fields and collects the rest into Extra.
+func (o *MessageOrigin) UnmarshalJSON(b []byte) error {
+	type alias MessageOrigin
+	var a alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	*o = MessageOrigin(a)
+	for k, v := range raw {
+		if !originModeledKeys[k] {
+			o.putExtra(k, v)
+		}
+	}
+	return nil
+}
+
+// putExtra records an unmodeled origin key, allocating Extra on first use.
+func (o *MessageOrigin) putExtra(key string, value any) {
+	if o.Extra == nil {
+		o.Extra = make(map[string]any)
+	}
+	o.Extra[key] = value
 }
 
 // UserMessage is a user-role message. The CLI delivers its content either as a

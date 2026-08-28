@@ -10,12 +10,13 @@ import (
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/urfave/cli/v3"
 )
 
 func phaseRemoveCommand(_ context.Context, cmd *cli.Command) error {
 	if cmd.NArg() != 2 {
-		return fmt.Errorf("phase rm requires <plan-name> <phase-number>")
+		return fmt.Errorf("phase rm requires <planName-name> <phase-number>")
 	}
 	phaseID, err := strconv.Atoi(cmd.Args().Get(1))
 	if err != nil || phaseID < 0 {
@@ -50,7 +51,7 @@ func phaseRemoveCommand(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("parse %s/PLAN.md: %w", planDirectory, err)
 	}
 	if status, _ := planFront["plan_status"].(string); status == "done" {
-		return fmt.Errorf("plan %q is already done; phase rm is only allowed for open plans", planDirectory)
+		return fmt.Errorf("planName %q is already done; phase rm is only allowed for open plans", planDirectory)
 	}
 
 	phases, err := readPlanPhases(planRoot)
@@ -109,15 +110,15 @@ func phaseRemoveCommand(_ context.Context, cmd *cli.Command) error {
 }
 
 func phaseDependents(phases []storedPhase, planDirectory string, phaseID int) []storedPhase {
-	plan := planName(planDirectory)
+	planName := plan.Name(planDirectory)
 	dependents := []storedPhase{}
 	for _, phase := range phases {
 		if phase.id == phaseID {
 			continue
 		}
 		for _, raw := range phase.dependencies {
-			dependency, err := parseDependency(strings.TrimSpace(raw))
-			if err == nil && dependency.plan == plan && dependency.phase != nil && *dependency.phase == phaseID {
+			dependency, err := plan.ParseDependency(strings.TrimSpace(raw))
+			if err == nil && dependency.Plan == planName && dependency.Phase != nil && *dependency.Phase == phaseID {
 				dependents = append(dependents, phase)
 				break
 			}

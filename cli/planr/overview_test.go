@@ -6,14 +6,15 @@ import (
 	"testing"
 
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 )
 
 func TestCollectOverviewEntries(t *testing.T) {
 	root := t.TempDir()
 	plans := filepath.Join(root, "plans-active")
 	planRoot := filepath.Join(plans, "00-checkout-v2")
-	draft := overviewTestDraft("checkout-v2", nil)
-	if err := writePlan(planRoot, draft, "00-checkout-v2", doc.Korean); err != nil {
+	planDraft := overviewTestDraft("checkout-v2", nil)
+	if err := writePlan(planRoot, planDraft, "00-checkout-v2", doc.Korean); err != nil {
 		t.Fatalf("writePlan() unexpected error: %v", err)
 	}
 
@@ -57,12 +58,12 @@ func TestAnnotateOverviewWait(t *testing.T) {
 	}
 }
 
-func overviewTestDraft(name string, dependency *string) draft {
+func overviewTestDraft(name string, dependency *string) draft.Draft {
 	dependencies := []string{}
 	if dependency != nil {
 		dependencies = append(dependencies, *dependency)
 	}
-	return draft{
+	return draft.Draft{
 		Name:         name,
 		Description:  "overview test",
 		NextPhase:    0,
@@ -73,9 +74,9 @@ func overviewTestDraft(name string, dependency *string) draft {
 		Verification: "go test ./...",
 		Ordering:     "API first.",
 		DependsOn:    dependencies,
-		Phases: []draftPhase{{
+		Phases: []draft.Phase{{
 			Title:      "API Contract",
-			Meta:       phaseMeta{Phase: 0, Slug: "api-contract", Status: "planned"},
+			Meta:       draft.Meta{Phase: 0, Slug: "api-contract", Status: "planned"},
 			Planned:    "Implement the API.",
 			Completion: "API tests pass.",
 		}},

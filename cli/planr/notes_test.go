@@ -11,6 +11,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
@@ -43,8 +44,8 @@ func seedRepository(t *testing.T) string {
 	return root
 }
 
-func testDraft() draft {
-	return draft{
+func testDraft() draft.Draft {
+	return draft.Draft{
 		Name:         "checkout-v2",
 		Description:  "checkout flow refresh",
 		NextPhase:    0,
@@ -54,8 +55,8 @@ func testDraft() draft {
 		Context:      "Existing checkout.",
 		Verification: "go test ./...",
 		Ordering:     "API before UI.",
-		Phases: []draftPhase{
-			{Title: "API Contract", Meta: phaseMeta{Phase: 0, Slug: "api-contract", Status: "planned"}, Planned: "Add the API.", Completion: "API tests pass."},
+		Phases: []draft.Phase{
+			{Title: "API Contract", Meta: draft.Meta{Phase: 0, Slug: "api-contract", Status: "planned"}, Planned: "Add the API.", Completion: "API tests pass."},
 		},
 	}
 }

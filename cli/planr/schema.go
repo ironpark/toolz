@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/urfave/cli/v3"
 )
 
@@ -36,7 +37,7 @@ func schemaValue() schemaOutput {
 	return schemaOutput{
 		Name:                 "planr-plan-documents",
 		Version:              1,
-		RequiredPlanSections: append([]string{}, requiredSections...),
+		RequiredPlanSections: append([]string{}, draft.RequiredSections...),
 		PlanFrontmatter:      []string{"plan_name", "description", "depends_on"},
 		PhaseStatuses:        []string{"planned", "conditional", "in-progress", "done"},
 		NewPhaseStatuses:     []string{"planned", "conditional"},
