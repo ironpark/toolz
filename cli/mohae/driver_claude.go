@@ -19,10 +19,7 @@ type claudeDriver struct {
 
 func newClaudeDriver(ctx context.Context, options DriverOptions) (Driver, error) {
 	config := options.Config
-	servers, err := LoadMCPServers(config, config.Agent.Type)
-	if err != nil {
-		return nil, err
-	}
+	servers := options.MCPServers
 	sdkOptions := &claude.Options{
 		Model:  config.Agent.Model,
 		Effort: config.Agent.Effort,

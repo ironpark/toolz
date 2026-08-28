@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -43,7 +42,7 @@ func newCustomDriver(options DriverOptions) (Driver, error) {
 	}
 	return &customDriver{
 		command:   command,
-		env:       append(os.Environ(), driverEnv(options.Config, options.Workspace)...),
+		env:       append(driverEnvironment(), driverEnv(options.Config, options.Workspace)...),
 		workspace: options.Workspace.Root,
 		onText:    options.OnText,
 	}, nil

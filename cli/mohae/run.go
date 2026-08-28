@@ -6,8 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/urfave/cli/v3"
 )
@@ -62,7 +64,7 @@ func runAction(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 	output := cmd.String("output")
-	if !contains(KnownFormats, output) {
+	if !slices.Contains(KnownFormats, output) {
 		return fmt.Errorf("unknown output format %q", output)
 	}
 	concurrency := cmd.Int("concurrency")
@@ -128,13 +130,12 @@ func runTrials(ctx context.Context, configs []*Config, concurrency int, failFast
 	slots := make(chan struct{}, concurrency)
 	var wait sync.WaitGroup
 	var mutex sync.Mutex
-	stopped := false
+	// Its own flag rather than a field under mutex: the mutex guards the result
+	// slices, and the two are read at different times by different goroutines.
+	var stopped atomic.Bool
 
 	for index, config := range configs {
-		mutex.Lock()
-		alreadyStopped := stopped
-		mutex.Unlock()
-		if alreadyStopped {
+		if stopped.Load() {
 			break
 		}
 		slots <- struct{}{}
@@ -146,10 +147,7 @@ func runTrials(ctx context.Context, configs []*Config, concurrency int, failFast
 			// for a slot is exactly when an earlier trial fails, and a
 			// fail-fast run that started the next trial anyway would spend
 			// tokens on a verdict already decided.
-			mutex.Lock()
-			abandoned := stopped
-			mutex.Unlock()
-			if abandoned {
+			if stopped.Load() {
 				return
 			}
 			result := RunTrial(ctx, config, options)
@@ -158,7 +156,7 @@ func runTrials(ctx context.Context, configs []*Config, concurrency int, failFast
 			results[index] = result
 			ran[index] = true
 			if failFast && !result.Passed {
-				stopped = true
+				stopped.Store(true)
 				cancel()
 			}
 		}()

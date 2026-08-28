@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -23,29 +25,34 @@ type ReportOptions struct {
 	ShowDialogue bool
 }
 
-// reportExtensions are the file suffixes for the formats written to disk.
-// terminal is absent on purpose: it is a rendering for a screen, and writing it
-// to a file would produce something no other tool can read.
-var reportExtensions = map[string]string{
-	"json":     ".json",
-	"markdown": ".md",
-	"html":     ".html",
+// reportFormats is the one place a report format is defined: how it renders
+// and, if it can be written to disk, under what suffix. A format added here is
+// accepted by validation, rendered and written; there is no second table to
+// keep in step, so a format cannot pass `mohae run --output` and then fail only
+// after every trial has been paid for.
+//
+// terminal has no extension on purpose: it is a rendering for a screen, and
+// writing it to a file would produce something no other tool can read.
+var reportFormats = map[string]struct {
+	extension string
+	render    func([]TrialResult, ReportOptions) (string, error)
+}{
+	"terminal": {"", func(r []TrialResult, o ReportOptions) (string, error) { return renderTerminal(r, o), nil }},
+	"json":     {".json", func(r []TrialResult, _ ReportOptions) (string, error) { return renderJSON(r) }},
+	"markdown": {".md", func(r []TrialResult, o ReportOptions) (string, error) { return renderMarkdown(r, o), nil }},
+	"html":     {".html", func(r []TrialResult, o ReportOptions) (string, error) { return renderHTML(r, o), nil }},
 }
+
+// KnownFormats are the report renderings, in a stable order for error messages.
+var KnownFormats = slices.Sorted(maps.Keys(reportFormats))
 
 // RenderReport renders a run's results in one format.
 func RenderReport(format string, results []TrialResult, options ReportOptions) (string, error) {
-	switch format {
-	case "terminal":
-		return renderTerminal(results, options), nil
-	case "json":
-		return renderJSON(results)
-	case "markdown":
-		return renderMarkdown(results, options), nil
-	case "html":
-		return renderHTML(results, options), nil
-	default:
+	entry, ok := reportFormats[format]
+	if !ok {
 		return "", fmt.Errorf("unknown report format %q", format)
 	}
+	return entry.render(results, options)
 }
 
 // WriteReports writes every file-backed format into dir and returns the paths
@@ -58,9 +65,10 @@ func WriteReports(dir string, formats []string, results []TrialResult, options R
 	stamp := time.Now().Format("20060102-150405")
 	written := []string{}
 	seen := map[string]bool{}
+	created := false
 	for _, format := range formats {
-		extension, ok := reportExtensions[format]
-		if !ok || seen[format] {
+		entry, ok := reportFormats[format]
+		if !ok || entry.extension == "" || seen[format] {
 			continue
 		}
 		seen[format] = true
@@ -68,16 +76,34 @@ func WriteReports(dir string, formats []string, results []TrialResult, options R
 		if err != nil {
 			return written, err
 		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return written, err
+		if !created {
+			// Once per call rather than once per format: the directory is the
+			// same for all of them, and a run writes reports per trial.
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return written, err
+			}
+			created = true
 		}
-		path := filepath.Join(dir, "run-"+stamp+extension)
+		path := filepath.Join(dir, "run-"+stamp+entry.extension)
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			return written, err
 		}
 		written = append(written, path)
 	}
 	return written, nil
+}
+
+// summarize is a run's headline: how many trials passed and what they cost
+// together. Every format shows it, so it is derived in one place — a screen
+// report and the json file `compare` reads back must not be able to disagree.
+func summarize(results []TrialResult) (passed int, total TokenUsage) {
+	for _, result := range results {
+		if result.Passed {
+			passed++
+		}
+		total.Add(result.Usage)
+	}
+	return passed, total
 }
 
 // renderTerminal is the rendering a run prints as it finishes: the verdict
@@ -123,14 +149,7 @@ func renderTerminal(results []TrialResult, options ReportOptions) string {
 			fmt.Fprintf(out, "        workspace: %s\n", result.Workspace)
 		}
 	}
-	passed := 0
-	total := TokenUsage{}
-	for _, result := range results {
-		if result.Passed {
-			passed++
-		}
-		total.Add(result.Usage)
-	}
+	passed, total := summarize(results)
 	fmt.Fprintf(out, "\n%d/%d passed  %s\n", passed, len(results), usageText(total, options.DetailedTokens))
 	return out.String()
 }
@@ -156,12 +175,7 @@ func renderJSON(results []TrialResult) (string, error) {
 		Total:       len(results),
 		Trials:      results,
 	}
-	for _, result := range results {
-		if result.Passed {
-			document.Passed++
-		}
-		document.Usage.Add(result.Usage)
-	}
+	document.Passed, document.Usage = summarize(results)
 	// Indented: a report is read by people at least as often as by programs.
 	data, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {

@@ -249,12 +249,6 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
-// hasExecutable reports whether a program is on PATH.
-func hasExecutable(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
-}
-
 // sanitizeName keeps a config name usable as a directory prefix.
 func sanitizeName(name string) string {
 	mapped := strings.Map(func(r rune) rune {

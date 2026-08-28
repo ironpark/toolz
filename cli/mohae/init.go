@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -38,7 +40,7 @@ func newInitCommand() *cli.Command {
 
 func initAction(_ context.Context, cmd *cli.Command) error {
 	template := cmd.String("template")
-	if !contains(Templates, template) {
+	if !slices.Contains(Templates, template) {
 		return fmt.Errorf("unknown --template %q (one of: %s)", template, strings.Join(Templates, ", "))
 	}
 	target := cmd.Args().First()
@@ -98,7 +100,8 @@ func initAction(_ context.Context, cmd *cli.Command) error {
 			return err
 		}
 	}
-	for _, path := range sortedKeys(files) {
+	// Deterministic order so the created list reads the same on every run.
+	for _, path := range slices.Sorted(maps.Keys(files)) {
 		// Some templates write into subdirectories (the fixture workspace), so
 		// each file's own parent is created rather than only the project root.
 		if parent := filepath.Dir(path); parent != "" && parent != "." {
@@ -118,20 +121,6 @@ func initAction(_ context.Context, cmd *cli.Command) error {
 		fmt.Printf("created %s\n", path)
 	}
 	return nil
-}
-
-func sortedKeys(files map[string]string) []string {
-	keys := make([]string, 0, len(files))
-	for key := range files {
-		keys = append(keys, key)
-	}
-	// Deterministic order so the created list reads the same on every run.
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
-			keys[j], keys[j-1] = keys[j-1], keys[j]
-		}
-	}
-	return keys
 }
 
 func configTemplate(template string) string {

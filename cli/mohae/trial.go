@@ -70,15 +70,15 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 		result.Workspace = workspace.Root
 	}()
 
-	if len(config.MCP) > 0 {
-		specs, err := LoadMCPServers(config, config.Agent.Type)
-		if err != nil {
-			result.Error = err.Error()
-			return result
-		}
+	servers, err := LoadMCPServers(config, config.Agent.Type)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	if len(servers) > 0 {
 		// Probed before the agent starts, so a server that never came up is
 		// reported as a broken setup rather than read as a failed task.
-		result.MCP = ProbeMCPServers(ctx, specs)
+		result.MCP = ProbeMCPServers(ctx, servers)
 	}
 
 	out := options.Out
@@ -89,7 +89,7 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 	if options.ShowDialogue {
 		onText = func(text string) { fmt.Fprint(out, text) }
 	}
-	driver, err := NewDriver(ctx, DriverOptions{Config: config, Workspace: workspace, OnText: onText})
+	driver, err := NewDriver(ctx, DriverOptions{Config: config, Workspace: workspace, MCPServers: servers, OnText: onText})
 	if err != nil {
 		result.Error = err.Error()
 		result.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)

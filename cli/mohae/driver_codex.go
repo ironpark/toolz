@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/ironpark/toolz/cli/mohae/internal/codex"
@@ -22,10 +24,7 @@ type codexDriver struct {
 
 func newCodexDriver(ctx context.Context, options DriverOptions) (Driver, error) {
 	config := options.Config
-	servers, err := LoadMCPServers(config, config.Agent.Type)
-	if err != nil {
-		return nil, err
-	}
+	servers := options.MCPServers
 	client, err := codex.New(ctx, codex.Options{
 		Args: codexArgs(servers),
 		Dir:  options.Workspace.Root,
@@ -91,7 +90,7 @@ func codexArgs(specs []MCPServerSpec) []string {
 				arguments = append(arguments, "-c", key+".args="+tomlStringList(spec.Args))
 			}
 		}
-		for _, name := range sortedEnvKeys(spec.Env) {
+		for _, name := range slices.Sorted(maps.Keys(spec.Env)) {
 			arguments = append(arguments, "-c", key+".env."+name+"="+spec.Env[name])
 		}
 	}

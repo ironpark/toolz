@@ -56,10 +56,10 @@ func TestPromptConditionsGovernWhetherAPromptIsSent(t *testing.T) {
 		`read("out.txt") contains "built"`: true,
 		// An unreadable file reads as empty rather than erroring, so a
 		// condition does not have to guard for a file the agent never wrote.
-		`read("missing.txt") == ""`:      true,
-		`sh("exit 3") == 3`:              true,
-		`sh("true") == 0`:                true,
-		"timed_out": false,
+		`read("missing.txt") == ""`: true,
+		`sh("exit 3") == 3`:         true,
+		`sh("true") == 0`:           true,
+		"timed_out":                 false,
 	}
 	for source, want := range cases {
 		t.Run(source, func(t *testing.T) {

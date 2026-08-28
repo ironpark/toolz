@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"sync"
 
 	"github.com/urfave/cli/v3"
 )
@@ -15,7 +16,9 @@ import (
 // fall back to the module version the binary was built from.
 var version = ""
 
-func buildVersion() string {
+// buildVersion is resolved once: the build info is embedded and immutable, and
+// reports ask for the version once per trial and per MCP probe.
+var buildVersion = sync.OnceValue(func() string {
 	if version != "" {
 		return version
 	}
@@ -24,7 +27,7 @@ func buildVersion() string {
 		return "unknown"
 	}
 	return info.Main.Version
-}
+})
 
 func main() {
 	if err := newRootCommand().Run(context.Background(), os.Args); err != nil {

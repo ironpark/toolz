@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 )
 
 // Driver is one agent under test, already opened on a trial's workspace. The
@@ -59,6 +61,12 @@ func (u *TokenUsage) Add(other TokenUsage) {
 type DriverOptions struct {
 	Config    *Config
 	Workspace *Workspace
+	// MCPServers are the servers the trial resolved from the configuration,
+	// already filtered to this agent type. The runner loads them once — it
+	// probes them before the agent starts — and every driver translates the
+	// same list, so a driver cannot end up wired to a different set of tools
+	// than the one the report says was reachable.
+	MCPServers []MCPServerSpec
 	// OnText receives the agent's output as it arrives, for --show-dialogue.
 	// It may be nil, and drivers whose transport reports only finished turns
 	// call it once with the whole reply rather than not at all.
@@ -96,7 +104,9 @@ func driverEnv(config *Config, workspace *Workspace) []string {
 		env = append(env, "MOHAE_EFFORT="+config.Agent.Effort)
 	}
 	// Configured last so a config can override anything above deliberately.
-	for _, key := range sortedEnvKeys(config.Agent.Env) {
+	// Sorted so the environment is deterministic: two runs of the same
+	// configuration differ in the agent's behaviour and not in their inputs.
+	for _, key := range slices.Sorted(maps.Keys(config.Agent.Env)) {
 		env = append(env, key+"="+config.Agent.Env[key])
 	}
 	return env
@@ -106,18 +116,3 @@ func driverEnv(config *Config, workspace *Workspace) []string {
 // from. It is the parent's: an agent CLI needs its own credentials and PATH,
 // and stripping them would only mean measuring an agent that cannot log in.
 func driverEnvironment() []string { return os.Environ() }
-
-// sortedEnvKeys keeps the environment deterministic, so two runs of the same
-// configuration differ in the agent's behaviour and not in their inputs.
-func sortedEnvKeys(env map[string]string) []string {
-	keys := make([]string, 0, len(env))
-	for key := range env {
-		keys = append(keys, key)
-	}
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
-			keys[j], keys[j-1] = keys[j-1], keys[j]
-		}
-	}
-	return keys
-}

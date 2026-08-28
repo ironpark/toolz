@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -124,7 +127,7 @@ func (s MCPServerSpec) Transport(ctx context.Context) (mcp.Transport, error) {
 	}
 	command := exec.CommandContext(ctx, s.Command, s.Args...)
 	command.Env = os.Environ()
-	for _, key := range sortedEnvKeys(s.Env) {
+	for _, key := range slices.Sorted(maps.Keys(s.Env)) {
 		command.Env = append(command.Env, key+"="+s.Env[key])
 	}
 	return &mcp.CommandTransport{Command: command}, nil
@@ -146,10 +149,19 @@ type MCPProbe struct {
 // A failure is recorded rather than returned: the trial can still run, and
 // whether it should have is a judgement the report leaves to its reader.
 func ProbeMCPServers(ctx context.Context, specs []MCPServerSpec) []MCPProbe {
-	probes := make([]MCPProbe, 0, len(specs))
-	for _, spec := range specs {
-		probes = append(probes, spec.probe(ctx))
+	// Concurrently: each probe spawns its own subprocess or session, they share
+	// nothing, and probing sits inside the trial's timeout budget — serialising
+	// them would charge the run the sum of every server's start-up.
+	probes := make([]MCPProbe, len(specs))
+	var wait sync.WaitGroup
+	for index, spec := range specs {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			probes[index] = spec.probe(ctx)
+		}()
 	}
+	wait.Wait()
 	return probes
 }
 

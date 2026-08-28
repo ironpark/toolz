@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -39,8 +40,8 @@ type Config struct {
 	Skills  []SkillConfig     `yaml:"skills,omitempty"`
 	MCP     []MCPServerConfig `yaml:"mcp,omitempty"`
 	Verify  VerifyConfig      `yaml:"verify,omitempty"`
-	Limits  LimitsConfig `yaml:"limits,omitempty"`
-	Report  ReportConfig `yaml:"report,omitempty"`
+	Limits  LimitsConfig      `yaml:"limits,omitempty"`
+	Report  ReportConfig      `yaml:"report,omitempty"`
 
 	// Profiles are named subsets of this configuration; `--profile` overwrites
 	// the base with one or more of them before the trial runs.
@@ -51,11 +52,11 @@ type Config struct {
 // `command` is only read by the custom-cli driver, which is what lets a tool
 // mohae has never heard of be evaluated on the same terms as a built-in one.
 type AgentConfig struct {
-	Type      string            `yaml:"type"`
-	Model     string            `yaml:"model,omitempty"`
-	Effort    string            `yaml:"effort,omitempty"`
-	Command   []string          `yaml:"command,omitempty"`
-	Env       map[string]string `yaml:"env,omitempty"`
+	Type    string            `yaml:"type"`
+	Model   string            `yaml:"model,omitempty"`
+	Effort  string            `yaml:"effort,omitempty"`
+	Command []string          `yaml:"command,omitempty"`
+	Env     map[string]string `yaml:"env,omitempty"`
 }
 
 // WorkspaceConfig describes the repository the agent works in. It is copied to
@@ -81,7 +82,7 @@ type SkillConfig struct {
 
 // EnabledFor reports whether this skill applies to the given agent type.
 func (s SkillConfig) EnabledFor(agentType string) bool {
-	return len(s.Agents) == 0 || contains(s.Agents, agentType)
+	return len(s.Agents) == 0 || slices.Contains(s.Agents, agentType)
 }
 
 // MCPServerConfig connects one MCP server to the trial. Agents limits which
@@ -94,7 +95,7 @@ type MCPServerConfig struct {
 
 // EnabledFor reports whether this server applies to the given agent type.
 func (m MCPServerConfig) EnabledFor(agentType string) bool {
-	return len(m.Agents) == 0 || contains(m.Agents, agentType)
+	return len(m.Agents) == 0 || slices.Contains(m.Agents, agentType)
 }
 
 // VerifyConfig grades the finished workspace. Commands are shell commands run
@@ -120,9 +121,6 @@ type ReportConfig struct {
 // KnownAgentTypes are the drivers the runner can select. custom-cli covers any
 // agent with a non-interactive command line.
 var KnownAgentTypes = []string{"claude-code", "codex", "custom-cli"}
-
-// KnownFormats are the report renderings.
-var KnownFormats = []string{"terminal", "json", "markdown", "html"}
 
 // LoadConfig reads and validates one configuration file.
 func LoadConfig(path string) (*Config, error) {
@@ -171,7 +169,7 @@ func (c *Config) Validate() error {
 	if c.Agent.Type == "" {
 		return fmt.Errorf("agent.type is required (one of: %s)", strings.Join(KnownAgentTypes, ", "))
 	}
-	if !contains(KnownAgentTypes, c.Agent.Type) {
+	if !slices.Contains(KnownAgentTypes, c.Agent.Type) {
 		return fmt.Errorf("unknown agent.type %q (one of: %s)", c.Agent.Type, strings.Join(KnownAgentTypes, ", "))
 	}
 	if c.Agent.Type == "custom-cli" && len(c.Agent.Command) == 0 {
@@ -221,7 +219,7 @@ func (c *Config) Validate() error {
 		}
 	}
 	for _, format := range c.Report.Formats {
-		if !contains(KnownFormats, format) {
+		if !slices.Contains(KnownFormats, format) {
 			return fmt.Errorf("unknown report format %q (one of: %s)", format, strings.Join(KnownFormats, ", "))
 		}
 	}
@@ -283,18 +281,9 @@ type LabeledPath struct {
 // which would otherwise read as an item silently enabled for nobody.
 func validateAgents(field string, agents []string) error {
 	for _, agent := range agents {
-		if !contains(KnownAgentTypes, agent) {
+		if !slices.Contains(KnownAgentTypes, agent) {
 			return fmt.Errorf("%s.agents: unknown agent type %q (one of: %s)", field, agent, strings.Join(KnownAgentTypes, ", "))
 		}
 	}
 	return nil
-}
-
-func contains(values []string, value string) bool {
-	for _, item := range values {
-		if item == value {
-			return true
-		}
-	}
-	return false
 }

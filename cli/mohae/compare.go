@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/urfave/cli/v3"
 )
@@ -35,10 +36,10 @@ func newCompareCommand() *cli.Command {
 }
 
 func compareAction(_ context.Context, cmd *cli.Command) error {
-	if !contains(CompareFields, cmd.String("target")) {
+	if !slices.Contains(CompareFields, cmd.String("target")) {
 		return fmt.Errorf("unknown --target %q", cmd.String("target"))
 	}
-	if metric := cmd.String("metric"); metric != "" && !contains(CompareMetrics, metric) {
+	if metric := cmd.String("metric"); metric != "" && !slices.Contains(CompareMetrics, metric) {
 		return fmt.Errorf("unknown --metric %q", metric)
 	}
 	if cmd.Int("repeat") < 1 {

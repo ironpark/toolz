@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -176,7 +177,7 @@ func TestPrepareWorkspaceInstallsOnlyTheSkillsScopedToTheAgent(t *testing.T) {
 }
 
 func TestPrepareWorkspaceMakesTheBaselineCommit(t *testing.T) {
-	if !hasExecutable("git") {
+	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}
 	directory := t.TempDir()
