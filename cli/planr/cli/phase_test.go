@@ -12,6 +12,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 )
 
 func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
@@ -65,7 +66,7 @@ func TestUpdatePhaseStatusCompletesAndReopensPlan(t *testing.T) {
 func TestEnsureDependenciesMetBlocksOutOfOrderPhases(t *testing.T) {
 	plansRoot := t.TempDir()
 	planRoot := filepath.Join(plansRoot, "00-checkout-v2")
-	if err := plan.Write(planRoot, dependentTestDraft(nil), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, plantest.CheckoutDraft(plantest.DependingOn(nil), plantest.WithUIPhase()), "00-checkout-v2", doc.English); err != nil {
 		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 	directories := []string{plansRoot}
@@ -101,7 +102,7 @@ func TestEnsureDependenciesMetBlocksOutOfOrderPhases(t *testing.T) {
 func TestEnsureDependenciesMetBlocksOnUnfinishedPlans(t *testing.T) {
 	plansRoot := t.TempDir()
 	planRoot := filepath.Join(plansRoot, "01-checkout-v2")
-	if err := plan.Write(planRoot, dependentTestDraft([]string{"api-foundation"}), "01-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, plantest.CheckoutDraft(plantest.DependingOn([]string{"api-foundation"}), plantest.WithUIPhase()), "01-checkout-v2", doc.English); err != nil {
 		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 	directories := []string{plansRoot}
@@ -113,7 +114,7 @@ func TestEnsureDependenciesMetBlocksOnUnfinishedPlans(t *testing.T) {
 	}
 
 	apiRoot := filepath.Join(plansRoot, "00-api-foundation")
-	if err := plan.Write(apiRoot, dependentTestDraft(nil), "00-api-foundation", doc.English); err != nil {
+	if err := plan.Write(apiRoot, plantest.CheckoutDraft(plantest.DependingOn(nil), plantest.WithUIPhase()), "00-api-foundation", doc.English); err != nil {
 		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 	err = plan.EnsureDependenciesMet(directories, planRoot, "01-checkout-v2", 0, "in-progress")
@@ -128,25 +129,6 @@ func TestEnsureDependenciesMetBlocksOnUnfinishedPlans(t *testing.T) {
 	}
 	if err := plan.EnsureDependenciesMet(directories, planRoot, "01-checkout-v2", 0, "in-progress"); err != nil {
 		t.Fatalf("plan.EnsureDependenciesMet() blocked on a completed plan: %v", err)
-	}
-}
-
-func dependentTestDraft(dependsOn []string) draft.Draft {
-	return draft.Draft{
-		Name:         "checkout-v2",
-		Description:  "checkout flow refresh",
-		DependsOn:    dependsOn,
-		NextPhase:    0,
-		NextText:     "Implement the API contract.",
-		Goals:        "Ship checkout.",
-		Scope:        "Checkout only.",
-		Context:      "Existing checkout.",
-		Verification: "go test ./...",
-		Ordering:     "API before UI.",
-		Phases: []draft.Phase{
-			{Title: "API Contract", Meta: draft.Meta{Phase: 0, Slug: "api-contract", Status: "planned"}, Planned: "Add the API.", Completion: "API tests pass."},
-			{Title: "Checkout UI", Meta: draft.Meta{Phase: 1, Slug: "checkout-ui", Status: "planned", DependsOn: []int{0}}, Planned: "Add the UI.", Completion: "UI tests pass."},
-		},
 	}
 }
 

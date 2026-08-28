@@ -12,13 +12,13 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/ironpark/toolz/cli/planr/cli/phase"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
-	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/notes"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 )
 
 // seedRepository builds a repository with one commit so notes have a target.
@@ -47,27 +47,10 @@ func seedRepository(t *testing.T) string {
 	return root
 }
 
-func testDraft() draft.Draft {
-	return draft.Draft{
-		Name:         "checkout-v2",
-		Description:  "checkout flow refresh",
-		NextPhase:    0,
-		NextText:     "Implement the API contract.",
-		Goals:        "Ship checkout.",
-		Scope:        "Checkout only.",
-		Context:      "Existing checkout.",
-		Verification: "go test ./...",
-		Ordering:     "API before UI.",
-		Phases: []draft.Phase{
-			{Title: "API Contract", Meta: draft.Meta{Phase: 0, Slug: "api-contract", Status: "planned"}, Planned: "Add the API.", Completion: "API tests pass."},
-		},
-	}
-}
-
 func TestFrontmatterOmitsEmptyMetadata(t *testing.T) {
 	plansRoot := t.TempDir()
 	planRoot := filepath.Join(plansRoot, "00-checkout-v2")
-	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.Korean); err != nil {
+	if err := plan.Write(planRoot, plantest.CheckoutDraft(), "00-checkout-v2", doc.Korean); err != nil {
 		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 
@@ -102,7 +85,7 @@ func TestFrontmatterOmitsEmptyMetadata(t *testing.T) {
 func TestCompletionStampsFrontmatter(t *testing.T) {
 	plansRoot := t.TempDir()
 	planRoot := filepath.Join(plansRoot, "00-checkout-v2")
-	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.Korean); err != nil {
+	if err := plan.Write(planRoot, plantest.CheckoutDraft(), "00-checkout-v2", doc.Korean); err != nil {
 		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 
@@ -133,7 +116,7 @@ func TestPhaseStartRecordsNoteForCurrentHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(root, "plan", "00-checkout-v2")
-	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, plantest.CheckoutDraft(), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	old, err := os.Getwd()

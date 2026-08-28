@@ -11,13 +11,14 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/doctor"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 	ucli "github.com/urfave/cli/v3"
 )
 
 func TestDoctorCommandAcceptsAConsistentPlan(t *testing.T) {
 	repoRoot := doctorRepository(t)
 	planRoot := filepath.Join(repoRoot, "plan", "00-checkout-v2")
-	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, plantest.CheckoutDraft(), "00-checkout-v2", doc.English); err != nil {
 		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 	withWorkingDirectory(t, repoRoot)
@@ -29,7 +30,7 @@ func TestDoctorCommandAcceptsAConsistentPlan(t *testing.T) {
 func TestDoctorDetectsAndFixesChecklistMismatch(t *testing.T) {
 	repoRoot := doctorRepository(t)
 	planRoot := filepath.Join(repoRoot, "plan", "00-checkout-v2")
-	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, plantest.CheckoutDraft(), "00-checkout-v2", doc.English); err != nil {
 		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 	planPath := filepath.Join(planRoot, "PLAN.md")
@@ -71,7 +72,7 @@ func TestDoctorDetectsAndFixesChecklistMismatch(t *testing.T) {
 
 func TestDoctorDetectsBrokenDependencyAndFrontmatter(t *testing.T) {
 	repoRoot := doctorRepository(t)
-	planDraft := testDraft()
+	planDraft := plantest.CheckoutDraft()
 	planDraft.DependsOn = []string{"missing-plan"}
 	planRoot := filepath.Join(repoRoot, "plan", "00-checkout-v2")
 	if err := plan.Write(planRoot, planDraft, "00-checkout-v2", doc.English); err != nil {

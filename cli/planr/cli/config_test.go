@@ -15,6 +15,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 )
 
 func TestLoadConfigHooks(t *testing.T) {
@@ -159,7 +160,7 @@ func TestPlanDocumentsFollowConfiguredLanguage(t *testing.T) {
 			text := doc.StringsFor(language)
 			plansRoot := t.TempDir()
 			planRoot := filepath.Join(plansRoot, "00-checkout-v2")
-			if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", language); err != nil {
+			if err := plan.Write(planRoot, plantest.CheckoutDraft(), "00-checkout-v2", language); err != nil {
 				t.Fatalf("plan.Write() unexpected error: %v", err)
 			}
 			phase := readFileString(t, filepath.Join(planRoot, "phases", "00-api-contract.md"))
@@ -249,7 +250,7 @@ func TestNoHooksGlobalFlagSkipsBeforeAndAfterHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(root, "plan", "00-checkout-v2")
-	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, plantest.CheckoutDraft(), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	old, err := os.Getwd()

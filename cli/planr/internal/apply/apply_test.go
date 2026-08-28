@@ -13,6 +13,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 )
 
@@ -22,24 +23,6 @@ func applyTestSettings() config.Config {
 		Language:  doc.English,
 		Hooks:     hooks.Config{Timeout: hooks.DefaultTimeout},
 		SkipHooks: true,
-	}
-}
-
-func applyTestDraft(name string) draft.Draft {
-	return draft.Draft{
-		Name:         name,
-		Description:  "a test plan",
-		NextPhase:    0,
-		NextText:     "Implement the first phase.",
-		Goals:        "Ship the test plan.",
-		Scope:        "The test scope.",
-		Context:      "The test context.",
-		Verification: "go test ./...",
-		Ordering:     "The first phase comes first.",
-		Phases: []draft.Phase{
-			{Title: "Foundation", Meta: draft.Meta{Phase: 0, Slug: "foundation", Status: "planned"}, Planned: "Build the foundation.", Completion: "Foundation tests pass."},
-			{Title: "Follow-up", Meta: draft.Meta{Phase: 1, Slug: "follow-up", Status: "planned", DependsOn: []int{0}}, Planned: "Build the follow-up.", Completion: "Follow-up tests pass."},
-		},
 	}
 }
 
@@ -77,7 +60,7 @@ func TestApplyPhaseDraftAddsPhaseAndPreservesPhaseFlags(t *testing.T) {
 	root := t.TempDir()
 	settings := applyTestSettings()
 	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := plan.Write(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, plantest.ApplyDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
 
@@ -116,7 +99,7 @@ func TestApplyPhaseDraftRefusesCompletedPlan(t *testing.T) {
 	root := t.TempDir()
 	settings := applyTestSettings()
 	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := plan.Write(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, plantest.ApplyDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	planPath := filepath.Join(planRoot, "PLAN.md")
@@ -149,7 +132,7 @@ func TestApplyPhaseDraftRefusesCompletedPlan(t *testing.T) {
 func TestApplyDryRunDoesNotCreatePlanFiles(t *testing.T) {
 	root := t.TempDir()
 	settings := applyTestSettings()
-	planDraft := applyTestDraft("dry-run-plan")
+	planDraft := plantest.ApplyDraft("dry-run-plan")
 	documents, err := plan.RenderDocuments(planDraft, "00-dry-run-plan", settings.Language, "2026-08-27T00:00:00Z")
 	if err != nil {
 		t.Fatal(err)
@@ -176,7 +159,7 @@ func TestEditPhaseBaseHashAndStatusSafety(t *testing.T) {
 	root := t.TempDir()
 	settings := applyTestSettings()
 	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := plan.Write(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, plantest.ApplyDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	phasePath := filepath.Join(planRoot, "phases", "00-foundation.md")
@@ -220,7 +203,7 @@ func TestEditPlanSectionProtectsDerivedChecklist(t *testing.T) {
 	root := t.TempDir()
 	settings := applyTestSettings()
 	planRoot := filepath.Join(root, "plans", "00-checkout-v2")
-	if err := plan.Write(planRoot, applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, plantest.ApplyDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	checkout := editCheckout(t, root, planRoot, "00-checkout-v2", -1, "plan")

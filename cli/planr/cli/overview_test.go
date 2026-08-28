@@ -6,15 +6,15 @@ import (
 	"testing"
 
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
-	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 )
 
 func TestCollectOverviewEntries(t *testing.T) {
 	root := t.TempDir()
 	plans := filepath.Join(root, "plans-active")
 	planRoot := filepath.Join(plans, "00-checkout-v2")
-	planDraft := overviewTestDraft("checkout-v2", nil)
+	planDraft := plantest.OverviewDraft("checkout-v2", nil)
 	if err := plan.Write(planRoot, planDraft, "00-checkout-v2", doc.Korean); err != nil {
 		t.Fatalf("plan.Write() unexpected error: %v", err)
 	}
@@ -40,12 +40,12 @@ func TestAnnotateOverviewWait(t *testing.T) {
 	root := t.TempDir()
 	plans := filepath.Join(root, "plans-active")
 	apiRoot := filepath.Join(plans, "00-api-foundation")
-	if err := plan.Write(apiRoot, overviewTestDraft("api-foundation", nil), "00-api-foundation", doc.Korean); err != nil {
+	if err := plan.Write(apiRoot, plantest.OverviewDraft("api-foundation", nil), "00-api-foundation", doc.Korean); err != nil {
 		t.Fatalf("write API plan: %v", err)
 	}
 	consumerRoot := filepath.Join(plans, "01-checkout-v2")
 	dependency := "api-foundation#0"
-	if err := plan.Write(consumerRoot, overviewTestDraft("checkout-v2", &dependency), "01-checkout-v2", doc.Korean); err != nil {
+	if err := plan.Write(consumerRoot, plantest.OverviewDraft("checkout-v2", &dependency), "01-checkout-v2", doc.Korean); err != nil {
 		t.Fatalf("write consumer plan: %v", err)
 	}
 
@@ -56,30 +56,5 @@ func TestAnnotateOverviewWait(t *testing.T) {
 	plan.AnnotateWaits(entries)
 	if len(entries) != 2 || len(entries[1].Wait) != 1 || !strings.Contains(entries[1].Wait[0], "api-foundation#0") {
 		t.Fatalf("overview waits = %#v, want api-foundation#0", entries[1].Wait)
-	}
-}
-
-func overviewTestDraft(name string, dependency *string) draft.Draft {
-	dependencies := []string{}
-	if dependency != nil {
-		dependencies = append(dependencies, *dependency)
-	}
-	return draft.Draft{
-		Name:         name,
-		Description:  "overview test",
-		NextPhase:    0,
-		NextText:     "Implement the API.",
-		Goals:        "Ship the plan.",
-		Scope:        "Test scope.",
-		Context:      "Test context.",
-		Verification: "go test ./...",
-		Ordering:     "API first.",
-		DependsOn:    dependencies,
-		Phases: []draft.Phase{{
-			Title:      "API Contract",
-			Meta:       draft.Meta{Phase: 0, Slug: "api-contract", Status: "planned"},
-			Planned:    "Implement the API.",
-			Completion: "API tests pass.",
-		}},
 	}
 }

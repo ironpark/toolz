@@ -11,6 +11,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 )
 
 func TestPhaseRemoveRefusesDependentsAndLeavesNumberGapWithForce(t *testing.T) {
@@ -19,7 +20,7 @@ func TestPhaseRemoveRefusesDependentsAndLeavesNumberGapWithForce(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(root, "plan", "00-checkout-v2")
-	planDraft := dependentTestDraft(nil)
+	planDraft := plantest.CheckoutDraft(plantest.DependingOn(nil), plantest.WithUIPhase())
 	planDraft.Phases = append(planDraft.Phases, draft.Phase{
 		Title:   "Rollout",
 		Meta:    draft.Meta{Phase: 2, Slug: "rollout", Status: "planned", DependsOn: []int{1}},

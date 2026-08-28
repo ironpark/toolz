@@ -10,6 +10,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -27,7 +28,7 @@ func TestArchiveMovesCompletedPlanAndPreservesNumbering(t *testing.T) {
 		t.Fatal(err)
 	}
 	planRoot := filepath.Join(active, "00-checkout-v2")
-	if err := plan.Write(planRoot, testDraft(), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(planRoot, plantest.CheckoutDraft(), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := updatePhaseStatus([]string{active}, "checkout-v2", 0, "done"); err != nil {

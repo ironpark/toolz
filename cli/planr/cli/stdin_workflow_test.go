@@ -15,27 +15,10 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 	"github.com/ironpark/toolz/cli/planr/internal/schema"
 	ucli "github.com/urfave/cli/v3"
 )
-
-func applyTestDraft(name string) draft.Draft {
-	return draft.Draft{
-		Name:         name,
-		Description:  "a test plan",
-		NextPhase:    0,
-		NextText:     "Implement the first phase.",
-		Goals:        "Ship the test plan.",
-		Scope:        "The test scope.",
-		Context:      "The test context.",
-		Verification: "go test ./...",
-		Ordering:     "The first phase comes first.",
-		Phases: []draft.Phase{
-			{Title: "Foundation", Meta: draft.Meta{Phase: 0, Slug: "foundation", Status: "planned"}, Planned: "Build the foundation.", Completion: "Foundation tests pass."},
-			{Title: "Follow-up", Meta: draft.Meta{Phase: 1, Slug: "follow-up", Status: "planned", DependsOn: []int{0}}, Planned: "Build the follow-up.", Completion: "Follow-up tests pass."},
-		},
-	}
-}
 
 func TestRootCommandRemovedWriteAliasesAndAddsNewSurface(t *testing.T) {
 	root := newRootCommand()
@@ -147,7 +130,7 @@ func TestNewJSONProducesPlanAndPhaseTemplatesWithoutFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), []byte("plans_dir: plans\nlanguage: ko\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := plan.Write(filepath.Join(root, "plans", "00-checkout-v2"), applyTestDraft("checkout-v2"), "00-checkout-v2", doc.Korean); err != nil {
+	if err := plan.Write(filepath.Join(root, "plans", "00-checkout-v2"), plantest.ApplyDraft("checkout-v2"), "00-checkout-v2", doc.Korean); err != nil {
 		t.Fatal(err)
 	}
 	withWorkingDirectory(t, root)
@@ -195,7 +178,7 @@ func TestShowSectionsAllAndSchemaReturnMachineReadableDocuments(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), []byte("plans_dir: plans\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := plan.Write(filepath.Join(root, "plans", "00-checkout-v2"), applyTestDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
+	if err := plan.Write(filepath.Join(root, "plans", "00-checkout-v2"), plantest.ApplyDraft("checkout-v2"), "00-checkout-v2", doc.English); err != nil {
 		t.Fatal(err)
 	}
 	withWorkingDirectory(t, root)
