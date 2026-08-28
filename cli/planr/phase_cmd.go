@@ -49,11 +49,11 @@ func phaseCommand(cmd *cli.Command, status string) error {
 	if err != nil {
 		return err
 	}
-	planLock, err := acquirePlanLock(planRoot)
+	planLock, err := plan.AcquireLock(planRoot)
 	if err != nil {
 		return err
 	}
-	defer planLock.close()
+	defer planLock.Close()
 	event := plan.HookEvent(status)
 	willComplete := false
 	planWasDone := false

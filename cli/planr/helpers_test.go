@@ -10,10 +10,10 @@ func updatePhaseStatus(planDirectories []string, planArg string, phaseID int, st
 	if err != nil {
 		return "", false, err
 	}
-	planLock, err := acquirePlanLock(planRoot)
+	planLock, err := plan.AcquireLock(planRoot)
 	if err != nil {
 		return "", false, err
 	}
-	defer planLock.close()
+	defer planLock.Close()
 	return plan.UpdatePhaseStatusLocked(planRoot, planDirectory, phaseID, status)
 }

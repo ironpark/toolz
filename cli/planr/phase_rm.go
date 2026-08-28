@@ -36,11 +36,11 @@ func phaseRemoveCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	planLock, err := acquirePlanLock(planRoot)
+	planLock, err := plan.AcquireLock(planRoot)
 	if err != nil {
 		return err
 	}
-	defer planLock.close()
+	defer planLock.Close()
 
 	planPath := filepath.Join(planRoot, "PLAN.md")
 	planRaw, err := os.ReadFile(planPath)

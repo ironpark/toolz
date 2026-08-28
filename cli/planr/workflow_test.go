@@ -408,7 +408,7 @@ func TestNewJSONProducesPlanAndPhaseTemplatesWithoutFiles(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "checkout-v2-second-phase.md")); !os.IsNotExist(err) {
 		t.Fatalf("new phase --json wrote a draft file; stat error=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "plans", "00-checkout-v2", planLockFileName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "plans", "00-checkout-v2", plan.LockFileName)); !os.IsNotExist(err) {
 		t.Fatalf("new phase --json wrote a lock file; stat error=%v", err)
 	}
 }

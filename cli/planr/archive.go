@@ -46,11 +46,11 @@ func archiveCommand(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("plan %q is not done; only completed plans can be archived", sourceDirectory)
 	}
 
-	directoryLock, err := acquirePlansDirectoryLock(planDirectories[0])
+	directoryLock, err := plan.AcquireDirectoryLock(planDirectories[0])
 	if err != nil {
 		return err
 	}
-	defer directoryLock.close()
+	defer directoryLock.Close()
 	// Re-resolve after waiting for the directory lock. Another archive may have
 	// moved this plan while the initial validation was in progress.
 	sourceRoot, sourceDirectory, err = plan.FindDirectory(planDirectories, cmd.Args().First())
@@ -67,11 +67,11 @@ func archiveCommand(_ context.Context, cmd *cli.Command) error {
 	if !completed {
 		return fmt.Errorf("plan %q is not done; only completed plans can be archived", sourceDirectory)
 	}
-	planLock, err := acquirePlanLock(sourceRoot)
+	planLock, err := plan.AcquireLock(sourceRoot)
 	if err != nil {
 		return err
 	}
-	defer planLock.close()
+	defer planLock.Close()
 	completed, err = plan.AlreadyDone(sourceRoot)
 	if err != nil {
 		return fmt.Errorf("validate %s: %w", sourceDirectory, err)

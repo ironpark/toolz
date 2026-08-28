@@ -358,11 +358,11 @@ func applyPlanDraft(d draft.Draft, settings config.Config, repoRoot string, dryR
 		return applyOperation{}, fmt.Errorf("no plans directory is configured")
 	}
 	if !dryRun {
-		lock, err := acquirePlansDirectoryLock(planDirectories[0])
+		lock, err := plan.AcquireDirectoryLock(planDirectories[0])
 		if err != nil {
 			return applyOperation{}, err
 		}
-		defer lock.close()
+		defer lock.Close()
 	}
 	planDirectory, err := plan.NextDirectory(planDirectories, d.Name)
 	if err != nil {
@@ -424,11 +424,11 @@ func applyPhaseDraft(d phaseDraftInput, settings config.Config, repoRoot string,
 		return applyOperation{}, err
 	}
 	if !dryRun {
-		lock, err := acquirePlanLock(planRoot)
+		lock, err := plan.AcquireLock(planRoot)
 		if err != nil {
 			return applyOperation{}, err
 		}
-		defer lock.close()
+		defer lock.Close()
 	}
 
 	planPath := filepath.Join(planRoot, "PLAN.md")
@@ -731,11 +731,11 @@ func applyEditDocument(raw []byte, settings config.Config, repoRoot string, dryR
 		return applyOperation{}, err
 	}
 	if !dryRun {
-		lock, err := acquirePlanLock(planRoot)
+		lock, err := plan.AcquireLock(planRoot)
 		if err != nil {
 			return applyOperation{}, err
 		}
-		defer lock.close()
+		defer lock.Close()
 	}
 	var target string
 	if targetKind == "phase" {
