@@ -14,6 +14,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
 
 // planDirectoryPrefix matches a numbered plan directory name, capturing its
@@ -68,7 +69,7 @@ func (p Summary) Progress() (done, total int, next string) {
 func NextDirectory(planDirectories []string, name string) (string, error) {
 	maxIndex := -1
 	for _, directory := range planDirectories {
-		entries, err := os.ReadDir(directory)
+		entries, err := vfs.ReadDir(directory)
 		if os.IsNotExist(err) {
 			continue
 		}
@@ -103,11 +104,11 @@ func Write(root string, d draft.Draft, planDirectory, language string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(root, "phases"), 0755); err != nil {
+	if err := vfs.MkdirAll(filepath.Join(root, "phases"), 0755); err != nil {
 		return err
 	}
 	for relative, contents := range documents {
-		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(relative)), []byte(contents), 0644); err != nil {
+		if err := vfs.WriteFile(filepath.Join(root, filepath.FromSlash(relative)), []byte(contents), 0644); err != nil {
 			return err
 		}
 	}
@@ -297,7 +298,7 @@ func CollectSummaries(planDirectories []string, filter string) ([]Summary, bool,
 	summaries := []Summary{}
 	foundDirectory := false
 	for _, plans := range planDirectories {
-		entries, err := os.ReadDir(plans)
+		entries, err := vfs.ReadDir(plans)
 		if os.IsNotExist(err) {
 			continue
 		}
@@ -313,7 +314,7 @@ func CollectSummaries(planDirectories []string, filter string) ([]Summary, bool,
 				continue
 			}
 			planRoot := filepath.Join(plans, entry.Name())
-			raw, err := os.ReadFile(filepath.Join(planRoot, "PLAN.md"))
+			raw, err := vfs.ReadFile(filepath.Join(planRoot, "PLAN.md"))
 			if err != nil {
 				continue
 			}
@@ -400,7 +401,7 @@ func AnnotateWaits(summaries []Summary) map[string]bool {
 }
 
 func ReadPhases(planRoot string) ([]StoredPhase, error) {
-	entries, err := os.ReadDir(filepath.Join(planRoot, "phases"))
+	entries, err := vfs.ReadDir(filepath.Join(planRoot, "phases"))
 	if err != nil {
 		return nil, fmt.Errorf("read phases for %s: %w", filepath.Base(planRoot), err)
 	}
@@ -417,7 +418,7 @@ func ReadPhases(planRoot string) ([]StoredPhase, error) {
 		if err != nil {
 			continue
 		}
-		contents, err := os.ReadFile(filepath.Join(planRoot, "phases", entry.Name()))
+		contents, err := vfs.ReadFile(filepath.Join(planRoot, "phases", entry.Name()))
 		if err != nil {
 			return nil, err
 		}
@@ -444,7 +445,7 @@ type PhaseDetails struct {
 }
 
 func ReadDocument(planRoot, name string) (map[string]any, string, error) {
-	raw, err := os.ReadFile(filepath.Join(planRoot, name))
+	raw, err := vfs.ReadFile(filepath.Join(planRoot, name))
 	if err != nil {
 		return nil, "", err
 	}
@@ -460,7 +461,7 @@ func ReadPhaseDetails(planRoot, planDirectory string, stored StoredPhase) (Phase
 	if err != nil {
 		return PhaseDetails{}, fmt.Errorf("%s: %w", planDirectory, err)
 	}
-	raw, err := os.ReadFile(phasePath)
+	raw, err := vfs.ReadFile(phasePath)
 	if err != nil {
 		return PhaseDetails{}, err
 	}
@@ -537,7 +538,7 @@ type SectionDetails struct {
 // ReadSection reads the document a plan section lives in.
 func ReadSection(planRoot, planDirectory, section string) (SectionDetails, error) {
 	path := filepath.Join(planRoot, SectionFile(section))
-	raw, err := os.ReadFile(path)
+	raw, err := vfs.ReadFile(path)
 	if err != nil {
 		return SectionDetails{}, err
 	}
@@ -558,7 +559,7 @@ func ReadSection(planRoot, planDirectory, section string) (SectionDetails, error
 func ReadAll(planRoot, planDirectory string) (Details, error) {
 	documents := map[string]string{}
 	for _, relative := range sectionDocuments {
-		raw, readErr := os.ReadFile(filepath.Join(planRoot, relative))
+		raw, readErr := vfs.ReadFile(filepath.Join(planRoot, relative))
 		if readErr != nil {
 			return Details{}, readErr
 		}
@@ -581,7 +582,7 @@ func ReadAll(planRoot, planDirectory string) (Details, error) {
 		phases = append(phases, details)
 		// ReadPhaseDetails already resolved the phase file, so reuse its path
 		// rather than scanning the phases directory a second time.
-		raw, readErr := os.ReadFile(details.File)
+		raw, readErr := vfs.ReadFile(details.File)
 		if readErr != nil {
 			return Details{}, readErr
 		}
@@ -592,12 +593,12 @@ func ReadAll(planRoot, planDirectory string) (Details, error) {
 		documents[filepath.ToSlash(relative)] = string(raw)
 	}
 	return Details{
-		Plan:         draft.PlanName(planDirectory),
-		Directory:    planDirectory,
-		Status:       mdoc.FrontString(front, "plan_status"),
-		Description:  mdoc.FrontString(front, "description"),
-		DependsOn:    mdoc.Strings(front["depends_on"]),
-		Phases:       phases,
-		Documents:    documents,
+		Plan:        draft.PlanName(planDirectory),
+		Directory:   planDirectory,
+		Status:      mdoc.FrontString(front, "plan_status"),
+		Description: mdoc.FrontString(front, "description"),
+		DependsOn:   mdoc.Strings(front["depends_on"]),
+		Phases:      phases,
+		Documents:   documents,
 	}, nil
 }

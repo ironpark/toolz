@@ -10,6 +10,7 @@ import (
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -59,7 +60,7 @@ func planNameShellComplete(ctx context.Context, cmd *ucli.Command) {
 func planNameCompletionValues(planDirectories []string, prefix string) ([]string, error) {
 	seen := map[string]bool{}
 	for _, plans := range planDirectories {
-		entries, err := os.ReadDir(plans)
+		entries, err := vfs.ReadDir(plans)
 		if os.IsNotExist(err) {
 			continue
 		}

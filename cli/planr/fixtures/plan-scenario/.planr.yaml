@@ -1,6 +1,0 @@
-language: ko
-plans_dirs:
-  - plans-active
-  - plans-archive
-ignore:
-  - bin/**

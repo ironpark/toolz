@@ -15,6 +15,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/planlock"
 	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 	"github.com/ironpark/toolz/cli/planr/internal/schema"
 	ucli "github.com/urfave/cli/v3"
@@ -84,7 +85,7 @@ func TestStdinOnlyLifecycleUsesNewEditAndApply(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan = strings.ReplaceAll(plan, draft.Placeholder, "stdin lifecycle content")
-	if output, err := runRootWithStdin(t, plan, []string{"planr", "apply", "--stdin", "--no-hooks"}); err != nil {
+	if output, err := runRootWithStdin(t, plan, "apply", "--stdin", "--no-hooks"); err != nil {
 		t.Fatalf("apply plan over stdin: %v; output=%q", err, output)
 	}
 
@@ -93,7 +94,7 @@ func TestStdinOnlyLifecycleUsesNewEditAndApply(t *testing.T) {
 		t.Fatal(err)
 	}
 	phase = strings.ReplaceAll(phase, draft.Placeholder, "stdin phase content")
-	if output, err := runRootWithStdin(t, phase, []string{"planr", "apply", "--stdin", "--no-hooks"}); err != nil {
+	if output, err := runRootWithStdin(t, phase, "apply", "--stdin", "--no-hooks"); err != nil {
 		t.Fatalf("apply phase over stdin: %v; output=%q", err, output)
 	}
 
@@ -112,7 +113,7 @@ func TestStdinOnlyLifecycleUsesNewEditAndApply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output, err := runRootWithStdin(t, string(encoded), []string{"planr", "apply", "--stdin", "--json", "--no-hooks"}); err != nil {
+	if output, err := runRootWithStdin(t, string(encoded), "apply", "--stdin", "--json", "--no-hooks"); err != nil {
 		t.Fatalf("apply phase edit over stdin: %v; output=%q", err, output)
 	}
 
@@ -168,7 +169,7 @@ func TestNewJSONProducesPlanAndPhaseTemplatesWithoutFiles(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "checkout-v2-second-phase.md")); !os.IsNotExist(err) {
 		t.Fatalf("new phase --json wrote a draft file; stat error=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "plans", "00-checkout-v2", plan.LockFileName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "plans", "00-checkout-v2", planlock.FileName)); !os.IsNotExist(err) {
 		t.Fatalf("new phase --json wrote a lock file; stat error=%v", err)
 	}
 }
@@ -281,7 +282,7 @@ func captureOutput(t *testing.T, function func() error) (string, error) {
 	return string(output), callErr
 }
 
-func runRootWithStdin(t *testing.T, input string, args []string) (string, error) {
+func runRootWithStdin(t *testing.T, input string, args ...string) (string, error) {
 	t.Helper()
 	read, write, err := os.Pipe()
 	if err != nil {
@@ -302,7 +303,5 @@ func runRootWithStdin(t *testing.T, input string, args []string) (string, error)
 		os.Stdin = original
 		_ = read.Close()
 	}()
-	return captureOutput(t, func() error {
-		return newRootCommand().Run(context.Background(), args)
-	})
+	return runRoot(t, args...)
 }

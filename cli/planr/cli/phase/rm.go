@@ -12,6 +12,8 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/planlock"
+	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 	ucli "github.com/urfave/cli/v3"
 )
 
@@ -36,14 +38,14 @@ func removeCommand(_ context.Context, cmd *ucli.Command) error {
 	if err != nil {
 		return err
 	}
-	planLock, err := plan.AcquireLock(planRoot)
+	planLock, err := planlock.AcquirePlan(planRoot)
 	if err != nil {
 		return err
 	}
 	defer planLock.Close()
 
 	planPath := filepath.Join(planRoot, "PLAN.md")
-	planRaw, err := os.ReadFile(planPath)
+	planRaw, err := vfs.ReadFile(planPath)
 	if err != nil {
 		return err
 	}
@@ -96,7 +98,7 @@ func removeCommand(_ context.Context, cmd *ucli.Command) error {
 	if err := mdoc.WriteFile(planPath, planFront, updatedBody); err != nil {
 		return err
 	}
-	if err := os.Remove(phasePath); err != nil {
+	if err := vfs.Remove(phasePath); err != nil {
 		// Keep the documents consistent if the filesystem refuses the removal.
 		if restoreErr := mdoc.WriteAtomically(planPath, string(planRaw)); restoreErr != nil {
 			return fmt.Errorf("remove %s: %w; restore PLAN.md: %v", filepath.Base(phasePath), err, restoreErr)

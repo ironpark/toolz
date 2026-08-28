@@ -1,6 +1,21 @@
 package cli
 
-import "github.com/ironpark/toolz/cli/planr/internal/plan"
+import (
+	"context"
+	"testing"
+
+	"github.com/ironpark/toolz/cli/planr/internal/plan"
+	"github.com/ironpark/toolz/cli/planr/internal/planlock"
+)
+
+// runRoot runs one command through the real root command and returns what it
+// printed, which is how the command-level tests observe planr.
+func runRoot(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	return captureOutput(t, func() error {
+		return newRootCommand().Run(context.Background(), append([]string{"planr"}, args...))
+	})
+}
 
 // updatePhaseStatus is a test helper: it resolves a plan, takes its lock, and
 // updates one phase's status, matching what the phase command does without the
@@ -10,7 +25,7 @@ func updatePhaseStatus(planDirectories []string, planArg string, phaseID int, st
 	if err != nil {
 		return false, err
 	}
-	planLock, err := plan.AcquireLock(planRoot)
+	planLock, err := planlock.AcquirePlan(planRoot)
 	if err != nil {
 		return false, err
 	}
