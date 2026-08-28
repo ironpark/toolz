@@ -148,16 +148,18 @@ func goldenPhaseDetails() plan.PhaseDetails {
 
 func goldenDetails() plan.Details {
 	return plan.Details{
-		Plan:         "checkout-v2",
-		Directory:    "plan/00-checkout-v2",
-		Status:       "in-progress",
-		Description:  "checkout flow refresh",
-		DependsOn:    []string{"api-foundation"},
-		Goals:        "Ship checkout.",
-		Context:      "Existing checkout.",
-		PlanDocument: "---\nplan_name: checkout-v2\n---\n# plan\n",
-		Phases:       []plan.PhaseDetails{goldenPhaseDetails()},
-		Documents:    map[string]string{"GOALS.md": "Ship checkout.\n"},
+		Plan:        "checkout-v2",
+		Directory:   "plan/00-checkout-v2",
+		Status:      "in-progress",
+		Description: "checkout flow refresh",
+		DependsOn:   []string{"api-foundation"},
+		Phases:      []plan.PhaseDetails{goldenPhaseDetails()},
+		Documents: map[string]string{
+			"GOALS.md":                 "Ship checkout.\n",
+			"CONTEXT.md":               "Existing checkout.\n",
+			"PLAN.md":                  "---\nplan_name: checkout-v2\n---\n# plan\n",
+			"phases/01-checkout-ui.md": "# Checkout UI\n",
+		},
 	}
 }
 

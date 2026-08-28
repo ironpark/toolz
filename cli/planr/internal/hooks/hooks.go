@@ -107,11 +107,7 @@ func Validate(c Config) error {
 	return nil
 }
 
-func Run(repoRoot string, c Config, skip bool, when, event, planDirectory string, phaseID int, status string) error {
-	return RunTo(repoRoot, c, skip, when, event, planDirectory, phaseID, status, os.Stdout)
-}
-
-func RunTo(repoRoot string, c Config, skip bool, when, event, planDirectory string, phaseID int, status string, outputWriter io.Writer) error {
+func Run(repoRoot string, c Config, skip bool, when, event, planDirectory string, phaseID int, status string, outputWriter io.Writer) error {
 	if skip {
 		return nil
 	}
@@ -133,10 +129,6 @@ func (c Config) TimeoutDuration() time.Duration {
 		return DefaultTimeout
 	}
 	return c.Timeout
-}
-
-func runOne(repoRoot, command, label, event, planDirectory string, phaseID int, status string, timeout time.Duration) error {
-	return runOneTo(repoRoot, command, label, event, planDirectory, phaseID, status, timeout, os.Stdout)
 }
 
 func runOneTo(repoRoot, command, label, event, planDirectory string, phaseID int, status string, timeout time.Duration, outputWriter io.Writer) error {

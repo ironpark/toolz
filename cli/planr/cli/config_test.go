@@ -233,7 +233,7 @@ func TestRunConfiguredHooksCanBeSkippedForOneInvocation(t *testing.T) {
 		SkipHooks: true,
 		Hooks:     hooks.Config{After: []hooks.Rule{{On: []string{hooks.EventDone}, Run: "touch hook.out"}}},
 	}
-	if err := hooks.Run(root, settings.Hooks, settings.SkipHooks, "after", hooks.EventDone, "00-checkout-v2", 0, "done"); err != nil {
+	if err := hooks.Run(root, settings.Hooks, settings.SkipHooks, "after", hooks.EventDone, "00-checkout-v2", 0, "done", os.Stdout); err != nil {
 		t.Fatalf("hooks.Run() unexpected error: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "hook.out")); !os.IsNotExist(err) {

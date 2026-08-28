@@ -27,8 +27,8 @@ func TestValidateHooks(t *testing.T) {
 func runHookCapture(t *testing.T, event, command string, phaseID int, status string) string {
 	t.Helper()
 	root := t.TempDir()
-	if err := runOne(root, command, "after "+event+" hook #1", event, "00-checkout-v2", phaseID, status, DefaultTimeout); err != nil {
-		t.Fatalf("runOne() unexpected error: %v", err)
+	if err := runOneTo(root, command, "after "+event+" hook #1", event, "00-checkout-v2", phaseID, status, DefaultTimeout, os.Stdout); err != nil {
+		t.Fatalf("runOneTo() unexpected error: %v", err)
 	}
 	output, err := os.ReadFile(filepath.Join(root, "hook.out"))
 	if err != nil {
@@ -68,7 +68,7 @@ func TestRunConfiguredHooksPreservesRuleOrder(t *testing.T) {
 		{On: []string{EventAdd, EventDone}, Run: `printf 'one' >> hook.out`},
 		{On: []string{EventDone}, Run: `printf 'two' >> hook.out`},
 	}}
-	if err := Run(root, settings, false, "after", EventDone, "00-checkout-v2", -1, "done"); err != nil {
+	if err := Run(root, settings, false, "after", EventDone, "00-checkout-v2", -1, "done", os.Stdout); err != nil {
 		t.Fatalf("Run() unexpected error: %v", err)
 	}
 	output, err := os.ReadFile(filepath.Join(root, "hook.out"))
@@ -87,7 +87,7 @@ func TestRunConfiguredHooksUsesConfiguredTimeout(t *testing.T) {
 		After:   []Rule{{On: []string{EventDone}, Run: "sleep 1"}},
 	}
 	started := time.Now()
-	err := Run(root, settings, false, "after", EventDone, "00-checkout-v2", -1, "done")
+	err := Run(root, settings, false, "after", EventDone, "00-checkout-v2", -1, "done", os.Stdout)
 	if err == nil || !strings.Contains(err.Error(), "timed out after 20ms") {
 		t.Fatalf("Run() error = %v, want configured timeout", err)
 	}

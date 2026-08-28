@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/ironpark/toolz/cli/planr/internal/config"
-	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	ucli "github.com/urfave/cli/v3"
@@ -103,19 +101,14 @@ func showCommand(_ context.Context, cmd *ucli.Command) error {
 }
 
 func showPlanSection(planRoot, planDirectory, section string, jsonOutput bool) error {
-	path := filepath.Join(planRoot, plan.SectionFile(section))
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	absPath, err := filepath.Abs(path)
+	details, err := plan.ReadSection(planRoot, planDirectory, section)
 	if err != nil {
 		return err
 	}
 	if jsonOutput {
-		return jsonout.Write(jsonout.ShowSectionOutput{Plan: draft.PlanName(planDirectory), Directory: planDirectory, Section: section, Content: string(raw), File: absPath})
+		return jsonout.Write(jsonout.ShowSection(details))
 	}
-	fmt.Print(string(raw))
+	fmt.Print(details.Content)
 	return nil
 }
 

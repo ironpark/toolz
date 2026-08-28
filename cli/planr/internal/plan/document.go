@@ -180,11 +180,6 @@ func SectionFile(section string) string {
 	return "PLAN.md"
 }
 
-// ChecklistPlaceholder marks the derived phase checklist region in a PLAN.md
-// checkout. `edit --section plan` swaps the real checklist for it, and `apply`
-// refuses the document unless it comes back untouched.
-const ChecklistPlaceholder = "<!-- planr: phase checklist is derived; do not edit -->"
-
 func ChecklistEntry(id int, title, slug string, done bool) string {
 	checkmark := " "
 	if done {
@@ -521,23 +516,46 @@ type Details struct {
 	Status          string
 	Description     string
 	DependsOn       []string
-	Goals           string
-	Context         string
-	PlanDocument    string
 	Phases          []PhaseDetails
-	Documents       map[string]string
+	// Documents holds every document in the plan directory keyed by its
+	// plan-relative slash path, including the sectionDocuments below.
+	Documents map[string]string
 }
 
 // sectionDocuments are the plan-level documents always present in a plan
 // directory, in the order they are read.
 var sectionDocuments = []string{"GOALS.md", "CONTEXT.md", "PLAN.md"}
 
+// SectionDetails is one plan-level section document read off disk.
+type SectionDetails struct {
+	Plan, Directory string
+	Section         string
+	Content         string
+	File            string
+}
+
+// ReadSection reads the document a plan section lives in.
+func ReadSection(planRoot, planDirectory, section string) (SectionDetails, error) {
+	path := filepath.Join(planRoot, SectionFile(section))
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return SectionDetails{}, err
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return SectionDetails{}, err
+	}
+	return SectionDetails{
+		Plan:      draft.PlanName(planDirectory),
+		Directory: planDirectory,
+		Section:   section,
+		Content:   string(raw),
+		File:      absolute,
+	}, nil
+}
+
 // ReadAll assembles the complete plan aggregate from disk.
 func ReadAll(planRoot, planDirectory string) (Details, error) {
-	front, _, err := ReadDocument(planRoot, "PLAN.md")
-	if err != nil {
-		return Details{}, err
-	}
 	documents := map[string]string{}
 	for _, relative := range sectionDocuments {
 		raw, readErr := os.ReadFile(filepath.Join(planRoot, relative))
@@ -545,6 +563,10 @@ func ReadAll(planRoot, planDirectory string) (Details, error) {
 			return Details{}, readErr
 		}
 		documents[relative] = string(raw)
+	}
+	front, _, err := mdoc.Split(documents["PLAN.md"])
+	if err != nil {
+		return Details{}, err
 	}
 	stored, err := ReadPhases(planRoot)
 	if err != nil {
@@ -575,9 +597,6 @@ func ReadAll(planRoot, planDirectory string) (Details, error) {
 		Status:       mdoc.FrontString(front, "plan_status"),
 		Description:  mdoc.FrontString(front, "description"),
 		DependsOn:    mdoc.Strings(front["depends_on"]),
-		Goals:        documents["GOALS.md"],
-		Context:      documents["CONTEXT.md"],
-		PlanDocument: documents["PLAN.md"],
 		Phases:       phases,
 		Documents:    documents,
 	}, nil

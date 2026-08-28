@@ -131,11 +131,11 @@ func run(cmd *ucli.Command, status string) error {
 			}
 		}
 	}
-	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", event, planDirectory, phaseID, status); err != nil {
+	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", event, planDirectory, phaseID, status, os.Stdout); err != nil {
 		return err
 	}
 	if willComplete {
-		if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventPlanDone, planDirectory, -1, "done"); err != nil {
+		if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventPlanDone, planDirectory, -1, "done", os.Stdout); err != nil {
 			return err
 		}
 	}
@@ -163,11 +163,11 @@ func run(cmd *ucli.Command, status string) error {
 			}
 		}
 	}
-	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "after", event, planDirectory, phaseID, status); err != nil {
+	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "after", event, planDirectory, phaseID, status, os.Stdout); err != nil {
 		return err
 	}
 	if completed && status == "done" && !planWasDone {
-		if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventPlanDone, planDirectory, -1, "done"); err != nil {
+		if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventPlanDone, planDirectory, -1, "done", os.Stdout); err != nil {
 			return err
 		}
 	}

@@ -6,8 +6,8 @@
   "depends_on": [
     "api-foundation"
   ],
-  "goals": "Ship checkout.",
-  "context": "Existing checkout.",
+  "goals": "Ship checkout.\n",
+  "context": "Existing checkout.\n",
   "plan_document": "---\nplan_name: checkout-v2\n---\n# plan\n",
   "phases": [
     {
@@ -26,6 +26,9 @@
     }
   ],
   "documents": {
-    "GOALS.md": "Ship checkout.\n"
+    "CONTEXT.md": "Existing checkout.\n",
+    "GOALS.md": "Ship checkout.\n",
+    "PLAN.md": "---\nplan_name: checkout-v2\n---\n# plan\n",
+    "phases/01-checkout-ui.md": "# Checkout UI\n"
   }
 }
