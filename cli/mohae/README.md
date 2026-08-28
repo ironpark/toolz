@@ -259,8 +259,9 @@ go-sdk로 각 서버에 접속해 도구 목록을 확인하고 리포트에 남
 
 `custom-cli` 에이전트는 턴마다 새 프로세스로 실행됩니다. 명령 인자에 `{{prompt}}`가 있으면
 그 자리에 프롬프트가 들어가고, 없으면 표준 입력으로 전달됩니다. 표준 출력이 응답입니다.
-`MOHAE_WORKSPACE`, `MOHAE_TRIAL`, `MOHAE_MODEL`, `MOHAE_EFFORT`와 `agent.env`가 환경 변수로
-전달되므로, mohae가 그 CLI의 플래그를 몰라도 모델과 강도를 넘길 수 있습니다.
+`MOHAE_WORKSPACE`, `MOHAE_TRIAL`, `MOHAE_MODEL`, `MOHAE_EFFORT`와 `agent.env`는 에이전트
+종류와 상관없이 모든 드라이버가 동일하게 전달합니다. mohae가 그 CLI의 플래그를 몰라도 모델과
+강도를 넘길 수 있고, `init_script`나 verify 명령이 어느 에이전트에서든 같은 변수를 읽습니다.
 
 ### `mohae compare`
 

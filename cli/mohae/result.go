@@ -14,7 +14,12 @@ type TrialResult struct {
 	Description string `json:"description,omitempty"`
 	ConfigPath  string `json:"config_path"`
 	Agent       string `json:"agent"`
-	Model       string `json:"model,omitempty"`
+	// Model is what the configuration asked for. ModelUsed is what actually
+	// answered, which need not be the same: a fallback model is exactly the
+	// kind of thing a benchmark has to record, and recording it only on screen
+	// would leave every saved report and `compare` unable to see it.
+	Model     string `json:"model,omitempty"`
+	ModelUsed string `json:"model_used,omitempty"`
 
 	StartedAt time.Time `json:"started_at"`
 	// DurationSeconds covers the whole trial, setup and verification included:
@@ -89,6 +94,15 @@ func (r TrialResult) VerifyPassed() int {
 		}
 	}
 	return passed
+}
+
+// EffectiveModel is the model a report should name: what answered, falling back
+// to what was configured when the agent reported nothing.
+func (r TrialResult) EffectiveModel() string {
+	if r.ModelUsed != "" {
+		return r.ModelUsed
+	}
+	return r.Model
 }
 
 // Verdict is the one-word outcome a report leads with.

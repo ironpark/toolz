@@ -175,3 +175,55 @@ func TestNewDriverRejectsAnAgentTypeItCannotDrive(t *testing.T) {
 		t.Fatal("expected an unknown agent type to be refused")
 	}
 }
+
+// TestDriverEnvIsResolvedForEveryAgentType guards the contract that made
+// claude-code the odd one out once: the trial's variables are resolved in
+// NewDriver, so a driver cannot quietly open a session without them and leave
+// two agents reading a different environment for the same configuration.
+func TestDriverEnvIsResolvedForEveryAgentType(t *testing.T) {
+	directory := t.TempDir()
+	for _, agentType := range KnownAgentTypes {
+		config := fixtureConfig(t, directory)
+		config.Name = "env-trial"
+		config.Agent.Type = agentType
+		config.Agent.Model = "a-model"
+		config.Agent.Effort = "high"
+		config.Agent.Env = map[string]string{"EXTRA": "1"}
+		workspace := &Workspace{Root: filepath.Join(directory, agentType)}
+
+		env := driverEnv(config, workspace)
+		for key, want := range map[string]string{
+			"MOHAE_WORKSPACE": workspace.Root,
+			"MOHAE_TRIAL":     "env-trial",
+			"MOHAE_MODEL":     "a-model",
+			"MOHAE_EFFORT":    "high",
+			"EXTRA":           "1",
+		} {
+			if env[key] != want {
+				t.Errorf("%s: env[%s] = %q, want %q", agentType, key, env[key], want)
+			}
+		}
+	}
+}
+
+// TestDriverEnvLetsTheConfigurationWin keeps agent.env the last word: a
+// configuration that deliberately overrides a MOHAE_ variable must not have
+// mohae's own value put back on top of it.
+func TestDriverEnvLetsTheConfigurationWin(t *testing.T) {
+	config := fixtureConfig(t, t.TempDir())
+	config.Agent.Model = "configured"
+	config.Agent.Env = map[string]string{"MOHAE_MODEL": "overridden"}
+	options := DriverOptions{Env: driverEnv(config, &Workspace{Root: "/tmp/ws"})}
+	if got := options.Env["MOHAE_MODEL"]; got != "overridden" {
+		t.Fatalf("MOHAE_MODEL = %q, want %q", got, "overridden")
+	}
+	found := false
+	for _, entry := range options.environ() {
+		if entry == "MOHAE_MODEL=overridden" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("environ() did not carry the configured override")
+	}
+}

@@ -118,10 +118,6 @@ type ReportConfig struct {
 	Formats []string `yaml:"formats,omitempty"`
 }
 
-// KnownAgentTypes are the drivers the runner can select. custom-cli covers any
-// agent with a non-interactive command line.
-var KnownAgentTypes = []string{"claude-code", "codex", "custom-cli"}
-
 // LoadConfig reads and validates one configuration file.
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)

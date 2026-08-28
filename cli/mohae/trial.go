@@ -101,6 +101,12 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 	if err != nil {
 		result.Error = err.Error()
 	}
+	for _, turn := range result.Turns {
+		if turn.Model != "" {
+			result.ModelUsed = turn.Model
+			break
+		}
+	}
 	result.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 
 	// Verification runs even after a failed or timed-out conversation: the

@@ -42,7 +42,7 @@ func newCustomDriver(options DriverOptions) (Driver, error) {
 	}
 	return &customDriver{
 		command:   command,
-		env:       append(driverEnvironment(), driverEnv(options.Config, options.Workspace)...),
+		env:       options.environ(),
 		workspace: options.Workspace.Root,
 		onText:    options.OnText,
 	}, nil

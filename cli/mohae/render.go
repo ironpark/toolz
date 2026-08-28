@@ -113,7 +113,7 @@ func renderTerminal(results []TrialResult, options ReportOptions) string {
 	out := &strings.Builder{}
 	for _, result := range results {
 		fmt.Fprintf(out, "\n%-7s %s  agent=%s", strings.ToUpper(result.Verdict()), result.Name, result.Agent)
-		if model := resultModel(result); model != "" {
+		if model := result.EffectiveModel(); model != "" {
 			fmt.Fprintf(out, " model=%s", model)
 		}
 		fmt.Fprintf(out, "\n        turns=%d/%d  %s  %s\n", result.Sent(), len(result.Turns), usageText(result.Usage, options.DetailedTokens), durationText(result.DurationSeconds))
@@ -318,17 +318,6 @@ func usageText(usage TokenUsage, detailed bool) string {
 
 func durationText(seconds float64) string {
 	return time.Duration(seconds * float64(time.Second)).Round(100 * time.Millisecond).String()
-}
-
-// resultModel prefers what actually answered over what was configured: a
-// fallback model is exactly the kind of thing a benchmark has to notice.
-func resultModel(result TrialResult) string {
-	for _, turn := range result.Turns {
-		if turn.Model != "" {
-			return turn.Model
-		}
-	}
-	return result.Model
 }
 
 func firstLine(text string) string {

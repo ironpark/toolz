@@ -28,7 +28,7 @@ func newCodexDriver(ctx context.Context, options DriverOptions) (Driver, error) 
 	client, err := codex.New(ctx, codex.Options{
 		Args: codexArgs(servers),
 		Dir:  options.Workspace.Root,
-		Env:  append(driverEnvironment(), driverEnv(config, options.Workspace)...),
+		Env:  options.environ(),
 		// The subprocess's own logging is not part of the trial's transcript.
 		Stderr:     io.Discard,
 		ClientInfo: codex.ClientInfo{Name: "mohae", Version: buildVersion()},

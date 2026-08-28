@@ -23,15 +23,6 @@ type Workspace struct {
 	base string
 }
 
-// skillDirectories say where each agent looks for the skills installed into a
-// workspace. A skill dropped somewhere the agent never reads would be a trial
-// that silently measured the agent without it.
-var skillDirectories = map[string]string{
-	"claude-code": ".claude/skills",
-	"codex":       ".codex/skills",
-	"custom-cli":  ".agent/skills",
-}
-
 // PrepareWorkspace builds the directory a trial runs in: the source tree copied
 // somewhere disposable, the instructions and skills installed, the setup script
 // run, and — when asked — a git repository whose first commit is the prepared
@@ -93,16 +84,16 @@ func (w *Workspace) install(config *Config, agentType string) error {
 			return err
 		}
 	}
-	directory, known := skillDirectories[agentType]
+	agent, known := agentTypes[agentType]
 	for index, skill := range config.Skills {
 		if !skill.EnabledFor(agentType) {
 			continue
 		}
 		if !known {
-			return fmt.Errorf("skills[%d]: no skill directory is known for agent type %q", index, agentType)
+			return fmt.Errorf("skills[%d]: unknown agent type %q", index, agentType)
 		}
 		source := config.Resolve(skill.Path)
-		target := filepath.Join(w.Root, filepath.FromSlash(directory), filepath.Base(source))
+		target := filepath.Join(w.Root, filepath.FromSlash(agent.skillDir), filepath.Base(source))
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}

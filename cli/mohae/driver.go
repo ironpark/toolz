@@ -61,6 +61,12 @@ func (u *TokenUsage) Add(other TokenUsage) {
 type DriverOptions struct {
 	Config    *Config
 	Workspace *Workspace
+	// Env is what the trial adds to the agent's environment: what it selected,
+	// so an agent command can read its model and effort without mohae having to
+	// know that command's flags. NewDriver resolves it; a driver reads it and
+	// never rebuilds it, so every agent sees the same variables and the trials
+	// stay comparable.
+	Env map[string]string
 	// MCPServers are the servers the trial resolved from the configuration,
 	// already filtered to this agent type. The runner loads them once — it
 	// probes them before the agent starts — and every driver translates the
@@ -73,46 +79,70 @@ type DriverOptions struct {
 	OnText func(string)
 }
 
-// NewDriver opens the driver named by the configuration's agent type. It is the
-// only place agent types are mapped to implementations; Config.Validate has
-// already rejected any type not listed here.
-func NewDriver(ctx context.Context, options DriverOptions) (Driver, error) {
-	switch options.Config.Agent.Type {
-	case "custom-cli":
+// agentTypes is the one place an agent type is defined: how to open it and
+// where it reads the skills a workspace installs. Adding an agent is one entry
+// here — validation, driver selection and workspace preparation all read this
+// table, so a type cannot be accepted by the config and then found to have no
+// driver, or run a trial whose skills were installed where it never looks.
+var agentTypes = map[string]struct {
+	// skillDir is the path, relative to the workspace root, that this agent
+	// reads skills from. A skill dropped anywhere else would be a trial that
+	// silently measured the agent without it.
+	skillDir string
+	open     func(context.Context, DriverOptions) (Driver, error)
+}{
+	"claude-code": {".claude/skills", newClaudeDriver},
+	"codex":       {".codex/skills", newCodexDriver},
+	"custom-cli": {".agent/skills", func(_ context.Context, options DriverOptions) (Driver, error) {
 		return newCustomDriver(options)
-	case "claude-code":
-		return newClaudeDriver(ctx, options)
-	case "codex":
-		return newCodexDriver(ctx, options)
-	default:
-		return nil, fmt.Errorf("no driver for agent type %q", options.Config.Agent.Type)
-	}
+	}},
 }
 
-// driverEnv is the environment every driver adds to the agent's own: what the
-// trial selected, so an agent command can read its model and effort without
-// mohae having to know that command's flags.
-func driverEnv(config *Config, workspace *Workspace) []string {
-	env := []string{
-		"MOHAE_WORKSPACE=" + workspace.Root,
-		"MOHAE_TRIAL=" + config.Name,
+// KnownAgentTypes are the drivers the runner can select, in a stable order for
+// error messages. custom-cli covers any agent with a non-interactive command
+// line.
+var KnownAgentTypes = slices.Sorted(maps.Keys(agentTypes))
+
+// NewDriver opens the driver named by the configuration's agent type, with the
+// trial environment already resolved so no driver assembles it itself.
+func NewDriver(ctx context.Context, options DriverOptions) (Driver, error) {
+	agent, ok := agentTypes[options.Config.Agent.Type]
+	if !ok {
+		return nil, fmt.Errorf("no driver for agent type %q", options.Config.Agent.Type)
+	}
+	options.Env = driverEnv(options.Config, options.Workspace)
+	return agent.open(ctx, options)
+}
+
+// driverEnv resolves the trial's environment. See DriverOptions.Env.
+func driverEnv(config *Config, workspace *Workspace) map[string]string {
+	env := map[string]string{
+		"MOHAE_WORKSPACE": workspace.Root,
+		"MOHAE_TRIAL":     config.Name,
 	}
 	if config.Agent.Model != "" {
-		env = append(env, "MOHAE_MODEL="+config.Agent.Model)
+		env["MOHAE_MODEL"] = config.Agent.Model
 	}
 	if config.Agent.Effort != "" {
-		env = append(env, "MOHAE_EFFORT="+config.Agent.Effort)
+		env["MOHAE_EFFORT"] = config.Agent.Effort
 	}
-	// Configured last so a config can override anything above deliberately.
-	// Sorted so the environment is deterministic: two runs of the same
-	// configuration differ in the agent's behaviour and not in their inputs.
-	for _, key := range slices.Sorted(maps.Keys(config.Agent.Env)) {
-		env = append(env, key+"="+config.Agent.Env[key])
-	}
+	// Copied last so a config can override anything above deliberately.
+	maps.Copy(env, config.Agent.Env)
 	return env
 }
 
-// driverEnvironment is the process environment a driver's subprocess starts
-// from. It is the parent's: an agent CLI needs its own credentials and PATH,
-// and stripping them would only mean measuring an agent that cannot log in.
-func driverEnvironment() []string { return os.Environ() }
+// environ is the environment a driver's subprocess starts from: the parent's,
+// plus the trial's. The parent's is inherited because an agent CLI needs its
+// own credentials and PATH, and stripping them would only mean measuring an
+// agent that cannot log in.
+//
+// The trial's variables come last and in sorted order, so a configuration's
+// setting wins and two runs of it differ in the agent's behaviour rather than
+// in their inputs.
+func (o DriverOptions) environ() []string {
+	environ := os.Environ()
+	for _, key := range slices.Sorted(maps.Keys(o.Env)) {
+		environ = append(environ, key+"="+o.Env[key])
+	}
+	return environ
+}

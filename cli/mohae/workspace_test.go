@@ -165,7 +165,7 @@ func TestPrepareWorkspaceInstallsOnlyTheSkillsScopedToTheAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer workspace.Cleanup()
-	root := filepath.Join(workspace.Root, filepath.FromSlash(skillDirectories["custom-cli"]))
+	root := filepath.Join(workspace.Root, filepath.FromSlash(agentTypes["custom-cli"].skillDir))
 	if _, err := os.Stat(filepath.Join(root, "shared", "SKILL.md")); err != nil {
 		t.Errorf("the unscoped skill was not installed: %v", err)
 	}

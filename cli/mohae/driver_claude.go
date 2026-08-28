@@ -26,7 +26,7 @@ func newClaudeDriver(ctx context.Context, options DriverOptions) (Driver, error)
 		// The agent works in the trial's copy and nowhere else; nothing outside
 		// it is added, so a trial cannot read the machine it runs on.
 		Cwd:        options.Workspace.Root,
-		Env:        config.Agent.Env,
+		Env:        options.Env,
 		MCPServers: claudeMCPServers(servers),
 		// Only what the trial installed: a server the host happens to have
 		// configured would be a tool the configuration never granted, and two
