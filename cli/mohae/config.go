@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-yaml"
 )
@@ -111,6 +113,15 @@ type VerifyConfig struct {
 
 type LimitsConfig struct {
 	TimeoutSeconds int `yaml:"timeout_seconds,omitempty"`
+}
+
+// bound puts the configured limit on a context. An unset limit leaves the
+// context alone; the returned cancel is safe to defer either way.
+func (l LimitsConfig) bound(ctx context.Context) (context.Context, context.CancelFunc) {
+	if l.TimeoutSeconds > 0 {
+		return context.WithTimeout(ctx, time.Duration(l.TimeoutSeconds)*time.Second)
+	}
+	return ctx, func() {}
 }
 
 type ReportConfig struct {

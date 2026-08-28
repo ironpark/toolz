@@ -93,9 +93,7 @@ var agentTypes = map[string]struct {
 }{
 	"claude-code": {".claude/skills", newClaudeDriver},
 	"codex":       {".codex/skills", newCodexDriver},
-	"custom-cli": {".agent/skills", func(_ context.Context, options DriverOptions) (Driver, error) {
-		return newCustomDriver(options)
-	}},
+	"custom-cli":  {".agent/skills", newCustomDriver},
 }
 
 // KnownAgentTypes are the drivers the runner can select, in a stable order for

@@ -53,7 +53,7 @@ func PrepareWorkspace(ctx context.Context, config *Config, agentType string) (*W
 		return nil, err
 	}
 	if script := config.Workspace.InitScript; script != "" {
-		if err := workspace.runInitScript(ctx, config.Resolve(script)); err != nil {
+		if err := workspace.runInitScript(ctx, config, config.Resolve(script)); err != nil {
 			workspace.Cleanup()
 			return nil, err
 		}
@@ -107,10 +107,12 @@ func (w *Workspace) install(config *Config, agentType string) error {
 // runInitScript runs the setup script inside the copy. Its output is folded
 // into the error because a setup failure that only reported an exit status
 // would send the caller looking through a workspace that no longer exists.
-func (w *Workspace) runInitScript(ctx context.Context, script string) error {
+func (w *Workspace) runInitScript(ctx context.Context, config *Config, script string) error {
 	command := exec.CommandContext(ctx, "sh", "-c", shellQuote(script))
 	command.Dir = w.Root
-	command.Env = append(os.Environ(), "MOHAE_WORKSPACE="+w.Root)
+	// The same variables the agent and the verify commands get: setup, work
+	// and grading all read one environment.
+	command.Env = processEnv(driverEnv(config, w))
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("workspace.init_script failed: %w\n%s", err, strings.TrimSpace(string(output)))

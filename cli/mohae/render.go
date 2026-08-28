@@ -90,11 +90,8 @@ func WriteReports(dir string, name string, formats []string, results []TrialResu
 			}
 			created = true
 		}
-		path, err := uniquePath(dir, stem, entry.extension)
+		path, err := writeUnique(dir, stem, entry.extension, []byte(content))
 		if err != nil {
-			return written, err
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			return written, err
 		}
 		written = append(written, path)
@@ -115,22 +112,31 @@ func summarize(results []TrialResult) (passed int, total TokenUsage) {
 	return passed, total
 }
 
-// uniquePath is stem+extension in dir, with a counter appended if that name is
-// taken. The same trial run twice inside one second is rare but it does happen
-// — a re-run to check a flake is exactly when it would — and silently replacing
-// the earlier report would destroy the measurement being compared against.
-func uniquePath(dir, stem, extension string) (string, error) {
+// writeUnique writes content as stem+extension in dir, appending a counter if
+// that name is taken. The same trial run twice inside one second is rare but it
+// does happen — a re-run to check a flake is exactly when it would — and
+// silently replacing the earlier report would destroy the measurement being
+// compared against. O_EXCL makes the claim atomic, so two trials racing to the
+// same name cannot both think they created it.
+func writeUnique(dir, stem, extension string, content []byte) (string, error) {
 	for attempt := 0; ; attempt++ {
 		candidate := stem
 		if attempt > 0 {
 			candidate = fmt.Sprintf("%s-%d", stem, attempt+1)
 		}
 		path := filepath.Join(dir, candidate+extension)
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return path, nil
-		} else if err != nil {
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if os.IsExist(err) {
+			continue
+		}
+		if err != nil {
 			return "", err
 		}
+		if _, err := file.Write(content); err != nil {
+			file.Close()
+			return "", err
+		}
+		return path, file.Close()
 	}
 }
 

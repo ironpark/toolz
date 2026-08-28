@@ -49,11 +49,8 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 	// The trial-wide limit starts here, before the workspace is even copied: a
 	// setup script that never finishes costs the same wall time as an agent
 	// that never stops.
-	if config.Limits.TimeoutSeconds > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(config.Limits.TimeoutSeconds)*time.Second)
-		defer cancel()
-	}
+	ctx, cancel := config.Limits.bound(ctx)
+	defer cancel()
 
 	workspace, err := PrepareWorkspace(ctx, config, config.Agent.Type)
 	if err != nil {
@@ -63,10 +60,10 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 		return result
 	}
 	defer func() {
-		// A trial nothing graded is kept too: with no verify command there is
-		// no verdict, so the workspace is the only thing it produced, and
-		// deleting it would leave the run with nothing to show at all.
-		if result.Passed && len(result.Verify) > 0 && !options.KeepWorkspace {
+		// Asked of the verdict rather than re-derived here, so what counts as
+		// a disposable workspace and what reads as "pass" cannot drift apart.
+		// An ungraded trial is kept: the workspace is all it produced.
+		if result.Verdict() == "pass" && !options.KeepWorkspace {
 			workspace.Cleanup()
 			return
 		}
@@ -103,12 +100,6 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 	result.Turns, result.Usage, err = runConversation(ctx, config, workspace, driver, options, out, started)
 	if err != nil {
 		result.Error = err.Error()
-	}
-	for _, turn := range result.Turns {
-		if turn.Model != "" {
-			result.ModelUsed = turn.Model
-			break
-		}
 	}
 	result.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 
@@ -235,21 +226,18 @@ func runVerifyCommands(ctx context.Context, config *Config, workspace *Workspace
 	// deadline of the same length rather than none, so a grading command that
 	// hangs — one waiting on stdin, or on a network that never answers — ends
 	// the run instead of blocking it forever.
-	ctx = context.WithoutCancel(ctx)
-	if config.Limits.TimeoutSeconds > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(config.Limits.TimeoutSeconds)*time.Second)
-		defer cancel()
-	}
+	ctx, cancel := config.Limits.bound(context.WithoutCancel(ctx))
+	defer cancel()
+	// The same variables the agent had, resolved once: a grading command that
+	// reads $MOHAE_MODEL should not see something different from the trial it
+	// grades.
+	env := processEnv(driverEnv(config, workspace))
 	results := make([]VerifyResult, 0, len(config.Verify.Commands))
 	for _, text := range config.Verify.Commands {
 		started := time.Now()
 		command := exec.CommandContext(ctx, "sh", "-c", text)
 		command.Dir = workspace.Scratch
-		// The same variables the agent had: a grading command that reads
-		// $MOHAE_MODEL should not see something different from the trial it
-		// grades.
-		command.Env = processEnv(driverEnv(config, workspace))
+		command.Env = env
 		isolateProcess(command)
 		output := &bytes.Buffer{}
 		command.Stdout = output

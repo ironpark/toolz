@@ -14,12 +14,7 @@ type TrialResult struct {
 	Description string `json:"description,omitempty"`
 	ConfigPath  string `json:"config_path"`
 	Agent       string `json:"agent"`
-	// Model is what the configuration asked for. ModelUsed is what actually
-	// answered, which need not be the same: a fallback model is exactly the
-	// kind of thing a benchmark has to record, and recording it only on screen
-	// would leave every saved report and `compare` unable to see it.
-	Model     string `json:"model,omitempty"`
-	ModelUsed string `json:"model_used,omitempty"`
+	Model       string `json:"model,omitempty"`
 
 	StartedAt time.Time `json:"started_at"`
 	// DurationSeconds covers the whole trial, setup and verification included:
@@ -96,11 +91,16 @@ func (r TrialResult) VerifyPassed() int {
 	return passed
 }
 
-// EffectiveModel is the model a report should name: what answered, falling back
-// to what was configured when the agent reported nothing.
+// EffectiveModel is the model a report should name: what actually answered —
+// a fallback model is exactly the kind of thing a benchmark has to notice —
+// falling back to what was configured when the agent reported nothing. It is
+// derived from the turns rather than stored, so it reads the same from a fresh
+// run and from a report loaded back off disk.
 func (r TrialResult) EffectiveModel() string {
-	if r.ModelUsed != "" {
-		return r.ModelUsed
+	for _, turn := range r.Turns {
+		if turn.Model != "" {
+			return turn.Model
+		}
 	}
 	return r.Model
 }

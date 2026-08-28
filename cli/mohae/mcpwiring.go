@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 	"os/exec"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -126,10 +124,7 @@ func (s MCPServerSpec) Transport(ctx context.Context) (mcp.Transport, error) {
 		return &mcp.StreamableClientTransport{Endpoint: s.URL}, nil
 	}
 	command := exec.CommandContext(ctx, s.Command, s.Args...)
-	command.Env = os.Environ()
-	for _, key := range slices.Sorted(maps.Keys(s.Env)) {
-		command.Env = append(command.Env, key+"="+s.Env[key])
-	}
+	command.Env = processEnv(s.Env)
 	return &mcp.CommandTransport{Command: command}, nil
 }
 

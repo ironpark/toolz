@@ -33,7 +33,7 @@ type customDriver struct {
 	onText    func(string)
 }
 
-func newCustomDriver(options DriverOptions) (Driver, error) {
+func newCustomDriver(_ context.Context, options DriverOptions) (Driver, error) {
 	command := options.Config.Agent.Command
 	if len(command) == 0 {
 		// Validate rejects this, so reaching it means the config was built in
