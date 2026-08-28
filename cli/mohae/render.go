@@ -119,24 +119,39 @@ func summarize(results []TrialResult) (passed int, total TokenUsage) {
 // compared against. O_EXCL makes the claim atomic, so two trials racing to the
 // same name cannot both think they created it.
 func writeUnique(dir, stem, extension string, content []byte) (string, error) {
+	return claimUniqueName(dir, stem, extension, func(path string) error {
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil {
+			return err
+		}
+		if _, err := file.Write(content); err != nil {
+			file.Close()
+			return err
+		}
+		return file.Close()
+	})
+}
+
+// claimUniqueName finds a name built from stem in dir that create can claim,
+// appending a counter on collision, and returns the path it created. Both a
+// written report file and a created artifact directory need this same
+// "try, retry with -N on collision" claim, so it lives once here rather than
+// twice.
+func claimUniqueName(dir, stem, suffix string, create func(path string) error) (string, error) {
 	for attempt := 0; ; attempt++ {
 		candidate := stem
 		if attempt > 0 {
 			candidate = fmt.Sprintf("%s-%d", stem, attempt+1)
 		}
-		path := filepath.Join(dir, candidate+extension)
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		path := filepath.Join(dir, candidate+suffix)
+		err := create(path)
 		if os.IsExist(err) {
 			continue
 		}
 		if err != nil {
 			return "", err
 		}
-		if _, err := file.Write(content); err != nil {
-			file.Close()
-			return "", err
-		}
-		return path, file.Close()
+		return path, nil
 	}
 }
 
@@ -184,6 +199,17 @@ func renderTerminal(results []TrialResult, options ReportOptions) string {
 			fmt.Fprintf(out, "        verify failed (exit %d): %s\n", check.ExitCode, check.Command)
 			for _, line := range outputLines(check.Output, 5) {
 				fmt.Fprintf(out, "          %s\n", line)
+			}
+		}
+		if result.ArtifactDir != "" {
+			fmt.Fprintf(out, "        artifacts: %s\n", result.ArtifactDir)
+		}
+		if result.ArtifactError != "" {
+			fmt.Fprintf(out, "        artifact error: %s\n", firstLine(result.ArtifactError))
+		}
+		for _, artifact := range result.Artifacts {
+			if len(artifact.Paths) == 0 {
+				fmt.Fprintf(out, "        artifact matched nothing: %s\n", artifact.Pattern)
 			}
 		}
 		if result.Workspace != "" {
@@ -271,6 +297,17 @@ func renderMarkdown(results []TrialResult, options ReportOptions) string {
 				fmt.Fprintf(out, "\n```\n%s\n```\n\n", check.Output)
 			}
 		}
+		if result.ArtifactDir != "" {
+			fmt.Fprintf(out, "- artifacts: `%s`\n", result.ArtifactDir)
+		}
+		if result.ArtifactError != "" {
+			fmt.Fprintf(out, "- artifact error: `%s`\n", firstLine(result.ArtifactError))
+		}
+		for _, artifact := range result.Artifacts {
+			if len(artifact.Paths) == 0 {
+				fmt.Fprintf(out, "- artifact `%s`: matched nothing\n", artifact.Pattern)
+			}
+		}
 		if result.Workspace != "" {
 			fmt.Fprintf(out, "- workspace: `%s`\n", result.Workspace)
 		}
@@ -323,6 +360,17 @@ pre { background: #f6f6f6; padding: .6rem; overflow-x: auto; }
 		for _, check := range result.Verify {
 			fmt.Fprintf(out, "<li class=\"%s\">verify %s (exit %d): <code>%s</code></li>\n",
 				verdictWord(check.Passed), verdictWord(check.Passed), check.ExitCode, html.EscapeString(check.Command))
+		}
+		if result.ArtifactDir != "" {
+			fmt.Fprintf(out, "<li>artifacts: <code>%s</code></li>\n", html.EscapeString(result.ArtifactDir))
+		}
+		if result.ArtifactError != "" {
+			fmt.Fprintf(out, "<li>artifact error: %s</li>\n", html.EscapeString(firstLine(result.ArtifactError)))
+		}
+		for _, artifact := range result.Artifacts {
+			if len(artifact.Paths) == 0 {
+				fmt.Fprintf(out, "<li>artifact <code>%s</code>: matched nothing</li>\n", html.EscapeString(artifact.Pattern))
+			}
 		}
 		out.WriteString("</ul>\n")
 		if options.ShowDialogue {

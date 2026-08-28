@@ -50,6 +50,7 @@ agent:
 
 workspace:
   source: ./fixture # 격리 디렉터리로 복사할 원본
+  exclude: [FIXTURE.*, tmp/**] # 에이전트에게 보여 주지 않을 source 내부 glob
   init_script: ./init.sh
   agent_md: ./AGENTS.md # 워크스페이스에 AGENTS.md로 설치
   git: true
@@ -72,6 +73,10 @@ verify:
   commands: # 셸 명령을 순서대로 실행. 각각 종료 코드 0이면 합격, 출력 형식은 자유
     - ./verify.sh
     - test -f "$MOHAE_WORKSPACE/README.md"
+
+artifacts: # 검증 뒤 report.dir로 보존할 workspace 내부 경로 또는 glob
+  - plans-active/**
+  - .harness/planr-events.log
 
 limits:
   timeout_seconds: 300
@@ -242,10 +247,23 @@ mohae run -p 'file://PROMPT.md' -p '이제 테스트를 작성하세요'
 반복할 수 있어야 A/B 비교가 성립하기 때문입니다.
 
 한 trial은 항상 같은 순서로 진행됩니다. `workspace.source`를 임시 디렉터리로 복사하고,
-`AGENTS.md`와 해당 에이전트용 skill을 설치하고, `init_script`를 복사본 안에서 실행하고,
+`workspace.exclude`에 맞는 항목은 복사하지 않습니다. slash가 없는 패턴은 모든 깊이의
+파일명에 적용되고 `**`는 여러 디렉터리 깊이를 가로지릅니다. 예를 들어 `FIXTURE.*`는
+어느 디렉터리에 있든 같은 접두사의 파일을 제외하고, `generated/**`는 디렉터리 전체를
+제외합니다. 절대 경로나 `..`로 워크스페이스 밖을 가리키는 패턴은 설정을 읽을 때
+거부합니다.
+
+그 뒤 `AGENTS.md`와 해당 에이전트용 skill을 설치하고, `init_script`를 복사본 안에서 실행하고,
 `workspace.git`이 켜져 있으면 그 상태를 기준 커밋으로 남깁니다. 그다음 프롬프트를 순서대로
 보내고, 에이전트가 멈추면 워크스페이스 **바깥**에서 `verify.commands`를 실행합니다. 원본은
 읽기만 하므로 같은 설정을 두 번 돌리면 항상 같은 상태에서 시작합니다.
+
+`artifacts`는 검증이 끝난 워크스페이스에서 보존할 상대 경로나 glob입니다. 일치한 파일과
+디렉터리는 상대 경로를 유지한 채
+`report.dir/<trial 이름>-<시각>.artifacts/`로 복사되므로 통과한 trial의 임시
+워크스페이스가 삭제된 뒤에도 남습니다. 심볼릭 링크는 대상을 따라가지 않고 링크 자체를
+복사합니다. 일치 항목이 없는 패턴은 리포트에 기록되지만 trial을 실패시키지는 않습니다.
+반드시 생성되어야 하는 산출물은 `verify.commands`에서 `test -e` 등으로 검사하세요.
 
 통과한 trial의 워크스페이스는 삭제하고, 실패한 trial의 워크스페이스는 남긴 뒤 경로를
 리포트에 적습니다. 에이전트가 실제로 무엇을 했는지 확인할 방법이 그것뿐입니다.
