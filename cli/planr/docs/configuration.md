@@ -4,6 +4,22 @@
 
 ## 설정 파일
 
+`planr init`이 주석이 달린 `.planr.yaml`과 `plans_dirs` 디렉터리를 저장소 루트에
+만듭니다. 하위 디렉터리에서 실행해도 파일은 저장소 루트에 생성되며, 이미 설정이 있으면
+`--force` 없이는 덮어쓰지 않습니다.
+
+```sh
+planr init
+planr init --language ko --plans-dir plans-active --plans-dir plans-archive
+```
+
+모든 설정에 기본값이 있으므로 `.planr.yaml` 없이도 planr은 동작합니다. `init`은 기본값을
+파일로 꺼내 놓아 편집하기 쉽게 만드는 명령입니다.
+
+Git 저장소가 아직 없어도 `init`은 현재 디렉터리에 설정을 만들고, 저장소가 필요하다는
+경고를 표준 에러로 출력합니다. 프로젝트 설정을 `git init`보다 먼저 하는 경우가 많기
+때문입니다. 나머지 명령은 완료 기록을 git note로 남기므로 저장소가 생길 때까지 실패합니다.
+
 `.planr.yaml`은 현재 디렉터리에서 위로 탐색하되 Git worktree 루트를 넘어가지 않습니다.
 경로 설정은 저장소 루트를 기준으로 해석합니다.
 

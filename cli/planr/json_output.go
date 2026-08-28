@@ -146,6 +146,17 @@ type hookRuleJSON struct {
 	Run string   `json:"run"`
 }
 
+type initJSONOutput struct {
+	ConfigFile     string   `json:"config_file"`
+	RepositoryRoot string   `json:"repository_root"`
+	Language       string   `json:"language"`
+	PlansDirs      []string `json:"plans_dirs"`
+	// Created and Existed are separate so a caller can tell a fresh setup from
+	// a rerun without diffing the filesystem itself.
+	Created []string `json:"created"`
+	Existed []string `json:"existed"`
+}
+
 type doctorJSONOutput struct {
 	Issues []doctorIssueJSON `json:"issues"`
 }
@@ -291,6 +302,19 @@ func makeValidationJSON(records []validationRecord) []validationErrorJSON {
 		})
 	}
 	return result
+}
+
+func makeInitJSON(target, root, language string, plansDirs, created, existed []string) initJSONOutput {
+	return initJSONOutput{
+		ConfigFile:     target,
+		RepositoryRoot: root,
+		Language:       language,
+		PlansDirs:      append([]string{}, plansDirs...),
+		// Non-nil slices: `created` and `existed` encode as [] rather than
+		// null, so a consumer can iterate them without a nil check.
+		Created: append([]string{}, created...),
+		Existed: append([]string{}, existed...),
+	}
 }
 
 func makeConfigJSON(settings config, root string) configJSONOutput {

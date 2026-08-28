@@ -18,13 +18,17 @@ go install github.com/ironpark/toolz/cli/planr@latest
 
 > [!IMPORTANT]
 > plan 조회·변경 명령은 Git 저장소 안에서 실행해야 합니다. `config`, `doctor`,
-> `completion`, `schema`는 진단을 위해 저장소 밖에서도 실행할 수 있습니다.
+> `completion`, `schema`는 진단을 위해, `init`은 `git init` 이전에도 쓸 수 있도록
+> 저장소 밖에서도 실행할 수 있습니다. 저장소가 없으면 `init`은 설정을 만든 뒤 경고합니다.
 
 ## 빠른 시작
 
 Git 저장소 루트에서 다음 순서로 시작합니다.
 
 ```sh
+# 0. 저장소를 초기화합니다. (설정 없이도 기본값으로 동작하므로 생략할 수 있습니다.)
+planr init
+
 # 1. 규격에 맞는 초안을 생성합니다.
 planr new checkout-v2 --description "checkout flow refresh"
 
@@ -62,6 +66,7 @@ phase가 완료되면 `PLAN.md`의 plan 상태도 자동으로 `done`이 됩니�
 
 | 목적 | 명령 |
 | --- | --- |
+| 저장소 초기화 | `planr init` |
 | 새 plan 초안 생성 | `planr new <plan> --description "..."` |
 | 초안 검증·등록 | `planr apply <file>` |
 | 다음 phase 확인 | `planr show <plan>` |
@@ -79,7 +84,8 @@ plan 이름은 `checkout-v2`와 `00-checkout-v2` 형식을 모두 인식합니�
 ## 설정 예시
 
 저장소 루트의 `.planr.yaml`에서 문서 언어, 활성·보관 경로, 완료 검사 제외 경로와 훅을
-설정합니다. 설정이 없으면 영어 문서를 `plan/`에 저장합니다.
+설정합니다. 설정이 없으면 영어 문서를 `plan/`에 저장하므로, `.planr.yaml`은 기본값을
+바꾸고 싶을 때만 필요합니다. `planr init`이 주석이 달린 파일을 만들어 줍니다.
 
 ```yaml
 language: ko

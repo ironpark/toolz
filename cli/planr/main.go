@@ -53,10 +53,11 @@ func newRootCommand() *cli.Command {
 			if cmd.Args() != nil {
 				commandName = cmd.Args().First()
 			}
-			if commandName == "config" || commandName == "doctor" || commandName == "completion" || commandName == "schema" || isShellCompletionInvocation(os.Args) {
+			if commandName == "config" || commandName == "doctor" || commandName == "completion" || commandName == "schema" || commandName == "init" || isShellCompletionInvocation(os.Args) {
 				// `config` can inspect defaults without git, and `doctor` needs
 				// to turn a missing repository into a diagnostic rather than an
-				// early generic failure.
+				// early generic failure. `init` often runs before `git init`,
+				// so it writes the configuration and warns instead.
 				return ctx, nil
 			}
 			cwd, err := os.Getwd()
@@ -66,6 +67,17 @@ func newRootCommand() *cli.Command {
 			return ctx, ensureGitRepository(cwd)
 		},
 		Commands: []*cli.Command{
+			{
+				Name:  "init",
+				Usage: "create .planr.yaml and the plans directories for this repository",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "language", Usage: "plan document language (en, ko)"},
+					&cli.StringSliceFlag{Name: "plans-dir", Usage: "plans directory relative to the repository root (repeatable)"},
+					&cli.BoolFlag{Name: "force", Usage: "overwrite an existing .planr.yaml"},
+					&cli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"},
+				},
+				Action: initCommand,
+			},
 			{
 				Name:  "config",
 				Usage: "show the applied configuration",

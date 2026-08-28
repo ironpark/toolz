@@ -6,6 +6,7 @@
 
 | 명령 | 설명 |
 | --- | --- |
+| `planr init [--language <lang>] [--plans-dir <path>] [--force] [--json]` | `.planr.yaml`과 plans 디렉터리를 생성합니다 |
 | `planr new <plan-name>` | 새 plan 초안 파일을 생성합니다 |
 | `planr new <plan-name>#<phase-name>` | 열린 plan에 추가할 phase 초안을 생성합니다 |
 | `planr edit <plan-name>#<phase-number>` | 기존 phase를 편집할 수 있도록 checkout합니다 |
@@ -113,6 +114,8 @@ planr notes checkout-v2
 - `show`: `name`, `directory`, `phase_number`, `slug`, `title`, `status`, `planned_work`,
   `done_when`, `depends_on`, `file`
 - `notes.notes[]`: `completed_at`, `plan`, `event`, `phase`, `commit`, `short_commit`, `subject`
+- `init`: `config_file`, `repository_root`, `language`, `plans_dirs`, `created`, `existed`
+  (`created`와 `existed`가 나뉘어 있어 최초 초기화와 재실행을 구분할 수 있습니다)
 
 `planr apply --json`은 검증 실패도 `rule`, `section`, `phase`, `line`, `detail` 필드가 있는
 구조화된 오류로 반환합니다.
@@ -120,6 +123,10 @@ planr notes checkout-v2
 ## 설정 확인과 진단
 
 ```sh
+planr init
+planr init --language ko --plans-dir plans-active --plans-dir plans-archive
+planr init --force
+
 planr config
 planr config --json
 
@@ -127,6 +134,13 @@ planr doctor
 planr doctor --json
 planr doctor --fix
 ```
+
+`init`은 저장소 루트에 `.planr.yaml`과 `plans_dirs` 디렉터리를 만듭니다. 하위
+디렉터리에서 실행해도 파일은 저장소 루트에 생성되고, 기존 설정은 `--force` 없이 덮어쓰지
+않습니다. 이미 있는 plans 디렉터리는 그대로 두고 `exists`로 표시합니다. 모든 설정에
+기본값이 있으므로 `init` 없이도 planr은 동작합니다. Git 저장소 밖에서 실행하면 현재
+디렉터리에 설정을 만들고 경고를 출력합니다. 경고는 표준 에러로 나가므로 `--json` 출력은
+그대로 파싱할 수 있습니다.
 
 `config`는 선택된 설정 파일, 저장소 루트, 감지한 에이전트와 최종 설정값을 출력합니다.
 설정 파일이 없으면 기본값을 명시합니다.
