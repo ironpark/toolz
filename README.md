@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/toolz.svg" width="760" alt="toolz — small tools, kept useful">
+  <img src=".assets/toolz.svg" width="760" alt="toolz — small tools, kept useful">
 </p>
 
 <p align="center">
@@ -21,11 +21,11 @@
 > [!NOTE]
 > 도구와 스킬 이름 앞의 아이콘은 현재 개발 단계와 사용 준비 수준을 나타냅니다.
 >
-> - ![](assets/status/initial.svg) **초기** 아이디어를 구체화하고 구조를 잡는 단계입니다.
-> - ![](assets/status/development.svg) **개발** 핵심 기능을 구현중입니다. 일부 기능은 동작할 수도 있습니다.
-> - ![](assets/status/validation.svg) **검증** 기능과 품질을 확인하는 단계입니다.
-> - ![](assets/status/ready.svg) **사용** 사용 가능한 상태입니다.
-> - ![](assets/status/stable.svg) **안정** 기능과 인터페이스가 안정된 상태입니다.
+> - ![](.assets/status/initial.svg) **초기** 아이디어를 구체화하고 구조를 잡는 단계입니다.
+> - ![](.assets/status/development.svg) **개발** 핵심 기능을 구현중입니다. 일부 기능은 동작할 수도 있습니다.
+> - ![](.assets/status/validation.svg) **검증** 기능과 품질을 확인하는 단계입니다.
+> - ![](.assets/status/ready.svg) **사용** 사용 가능한 상태입니다.
+> - ![](.assets/status/stable.svg) **안정** 기능과 인터페이스가 안정된 상태입니다.
 
 ## 저장소 구조
 
@@ -38,20 +38,20 @@ toolz/
 ├── cli/       독립적으로 실행하는 CLI 프로젝트
 ├── skillz/    에이전트 플랫폼별 스킬 소스
 ├── scripts/   저장소 관리와 설치 스크립트
-└── assets/    README와 프로젝트 공용 이미지
+└── .assets/   README와 프로젝트 공용 이미지
 ```
 
 ## CLI
 
-- ![](assets/status/development.svg) **[`chatctl`](cli/chatctl/)** ChatGPT, Gemini, Claude 웹 세션에 저장된 대화 목록을 조회하고 관리합니다.
-- ![](assets/status/initial.svg) **[`mohae`](cli/mohae/)** CLI, MCP 서버, 에이전트 스킬을 재현 가능한 환경에서 실행하고 비교·평가합니다.
-- ![](assets/status/ready.svg) **[`planr`](cli/planr/)** Markdown 계획을 규격화해 저장하고 phase 단위로 진행 상태를 관리합니다.
-- ![](assets/status/validation.svg) **[`sanbo`](cli/sanbo/)** [`getpaseo/paseo-relay`](https://github.com/getpaseo/paseo-relay)의 공개 프로토콜·운영 설정과 호환되는 드롭인 교체를 목표로 합니다.
-- ![](assets/status/initial.svg) **[`skpt`](cli/skpt/)** 하나의 공통 정의를 Claude Code, Codex 등 플랫폼별 에이전트 스킬로 컴파일합니다.
+- ![](.assets/status/development.svg) **[`chatctl`](cli/chatctl/)** ChatGPT, Gemini, Claude 웹 세션에 저장된 대화 목록을 조회하고 관리합니다.
+- ![](.assets/status/initial.svg) **[`mohae`](cli/mohae/)** CLI, MCP 서버, 에이전트 스킬을 재현 가능한 환경에서 실행하고 비교·평가합니다.
+- ![](.assets/status/ready.svg) **[`planr`](cli/planr/)** Markdown 계획을 규격화해 저장하고 phase 단위로 진행 상태를 관리합니다.
+- ![](.assets/status/validation.svg) **[`sanbo`](cli/sanbo/)** [`getpaseo/paseo-relay`](https://github.com/getpaseo/paseo-relay)의 공개 프로토콜·운영 설정과 호환되는 드롭인 교체를 목표로 합니다.
+- ![](.assets/status/initial.svg) **[`skpt`](cli/skpt/)** 하나의 공통 정의를 Claude Code, Codex 등 플랫폼별 에이전트 스킬로 컴파일합니다.
 
 ## 에이전트 스킬
 
-- ![](assets/status/ready.svg) **commit** ([Codex](skillz/codex/commit/) · [Claude](skillz/claude/commit/)) — 변경 사항을 검토하고 의도한 변경만 스테이징해 정확한 Git 커밋을 만듭니다.
+- ![](.assets/status/ready.svg) **commit** ([Codex](skillz/codex/commit/) · [Claude](skillz/claude/commit/)) — 변경 사항을 검토하고 의도한 변경만 스테이징해 정확한 Git 커밋을 만듭니다.
 
 ### 스킬 설치와 제거
 
@@ -91,8 +91,8 @@ toolz/
 > [!TIP]
 > 이곳에서 시작해 독립 프로젝트로 성장한 도구는 별도 저장소에서 계속 개발합니다.
 
-- ![](assets/status/stable.svg) **[zapp](https://github.com/ironpark/zapp)** macOS 앱을 패키징하고 배포하는 CLI
-- ![](assets/status/validation.svg) **[macc](https://github.com/ironpark/macc)** macOS 시스템 설정을 제어하는 CLI
+- ![](.assets/status/stable.svg) **[zapp](https://github.com/ironpark/zapp)** macOS 앱을 패키징하고 배포하는 CLI
+- ![](.assets/status/validation.svg) **[macc](https://github.com/ironpark/macc)** macOS 시스템 설정을 제어하는 CLI
 
 ## 라이선스
 
