@@ -415,3 +415,15 @@ cd cli/mohae
 go test ./...
 go build -o mohae .
 ```
+
+소스는 의존 방향에 따라 나뉩니다.
+
+```text
+main.go → cmd/ → internal/config, runner, report, scaffold
+                    runner → agent, driver, process
+                    driver → claude, codex
+```
+
+`cmd/{command}.go`는 한 명령의 플래그와 액션을 함께 소유합니다. 설정 해석은
+`internal/config`, trial 실행과 워크스페이스는 `internal/runner`, 결과 출력은
+`internal/report`, `init` 템플릿은 `internal/scaffold`가 담당합니다.

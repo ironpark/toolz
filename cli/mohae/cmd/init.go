@@ -1,8 +1,13 @@
 package cmd
 
-import "github.com/urfave/cli/v3"
+import (
+	"context"
 
-func NewInit(action cli.ActionFunc) *cli.Command {
+	"github.com/ironpark/toolz/cli/mohae/internal/scaffold"
+	"github.com/urfave/cli/v3"
+)
+
+func NewInit() *cli.Command {
 	return &cli.Command{
 		Name:      "init",
 		Usage:     "write a configuration template, optionally with its scripts and AGENTS.md",
@@ -19,6 +24,19 @@ func NewInit(action cli.ActionFunc) *cli.Command {
 			&cli.BoolFlag{Name: "all", Usage: "write every file the chosen template's configuration references"},
 			&cli.BoolFlag{Name: "force", Aliases: []string{"f"}, Usage: "overwrite existing files"},
 		},
-		Action: action,
+		Action: initAction,
 	}
+}
+
+func initAction(_ context.Context, command *cli.Command) error {
+	if err := checkFlagValue("template", command.String("template"), scaffold.Templates); err != nil {
+		return err
+	}
+	return scaffold.Write(scaffold.Options{
+		Template: command.String("template"), Target: command.Args().First(),
+		WithScripts: command.Bool("with-scripts"), WithAgentMD: command.Bool("with-agent-md"),
+		WithPrompt: command.Bool("with-prompt"), WithFixture: command.Bool("with-fixture"),
+		WithMCP: command.Bool("with-mcp"), All: command.Bool("all"), Force: command.Bool("force"),
+		Out: command.Writer,
+	})
 }

@@ -3,9 +3,8 @@ package driver
 import (
 	"context"
 	"fmt"
-	"maps"
-	"slices"
 
+	"github.com/ironpark/toolz/cli/mohae/internal/agent"
 	"github.com/ironpark/toolz/cli/mohae/internal/process"
 )
 
@@ -98,41 +97,20 @@ type MCPServerSpec struct {
 	Headers map[string]string
 }
 
-// agentTypes is the one place an agent type is defined: how to open it and
-// where it reads the skills a workspace installs. Adding an agent is one entry
-// here — validation, driver selection and workspace preparation all read this
-// table, so a type cannot be accepted by the config and then found to have no
-// driver, or run a trial whose skills were installed where it never looks.
-var agentTypes = map[string]struct {
-	// skillDir is the path, relative to the workspace root, that this agent
-	// reads skills from. A skill dropped anywhere else would be a trial that
-	// silently measured the agent without it.
-	skillDir string
-	open     func(context.Context, Options) (Driver, error)
-}{
-	"claude-code": {".claude/skills", newClaudeDriver},
-	"codex":       {".codex/skills", newCodexDriver},
-	"custom-cli":  {".agent/skills", newCustomDriver},
+// agentTypes binds each shared agent kind to its concrete session opener.
+var agentTypes = map[string]func(context.Context, Options) (Driver, error){
+	agent.ClaudeCode: newClaudeDriver,
+	agent.Codex:      newCodexDriver,
+	agent.CustomCLI:  newCustomDriver,
 }
-
-// KnownAgentTypes are the drivers the runner can select, in a stable order for
-// error messages. custom-cli covers any agent with a non-interactive command
-// line.
-var KnownAgentTypes = slices.Sorted(maps.Keys(agentTypes))
 
 // New opens the selected driver.
 func New(ctx context.Context, options Options) (Driver, error) {
-	agent, ok := agentTypes[options.Type]
+	open, ok := agentTypes[options.Type]
 	if !ok {
 		return nil, fmt.Errorf("no driver for agent type %q", options.Type)
 	}
-	return agent.open(ctx, options)
-}
-
-// SkillDir returns the workspace-relative skill directory for an agent type.
-func SkillDir(agentType string) (string, bool) {
-	agent, ok := agentTypes[agentType]
-	return agent.skillDir, ok
+	return open(ctx, options)
 }
 
 // environ is the environment a driver's subprocess starts from.

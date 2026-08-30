@@ -7,7 +7,7 @@ import (
 	"runtime/debug"
 	"sync"
 
-	"github.com/ironpark/toolz/cli/mohae/internal/app"
+	"github.com/ironpark/toolz/cli/mohae/cmd"
 )
 
 // version is overridable at link time (-ldflags "-X main.version=v1.2.3") for
@@ -29,7 +29,7 @@ var buildVersion = sync.OnceValue(func() string {
 })
 
 func main() {
-	if err := app.NewCommand(buildVersion()).Run(context.Background(), os.Args); err != nil {
+	if err := cmd.New(cmd.Options{Version: buildVersion()}).Run(context.Background(), os.Args); err != nil {
 		fmt.Fprintf(os.Stderr, "mohae: %v\n", err)
 		os.Exit(1)
 	}

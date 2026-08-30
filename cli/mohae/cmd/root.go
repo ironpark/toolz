@@ -1,24 +1,17 @@
-// Package cmd defines mohae's command tree and flags. Runtime behavior is
-// injected as action functions so this package stays independent of the
-// runner's configuration and trial types.
+// Package cmd defines mohae's command tree and application entry points.
 package cmd
 
-import "github.com/urfave/cli/v3"
+import (
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
 
-type Actions struct {
-	Run     cli.ActionFunc
-	Compare cli.ActionFunc
-	Web     cli.ActionFunc
-	Init    cli.ActionFunc
-	Verify  cli.ActionFunc
-	Report  cli.ActionFunc
-}
+	"github.com/urfave/cli/v3"
+)
 
 type Options struct {
-	Version               string
-	DefaultReportDir      string
-	DefaultTimeoutSeconds int
-	Actions               Actions
+	Version string
 }
 
 func New(options Options) *cli.Command {
@@ -28,12 +21,25 @@ func New(options Options) *cli.Command {
 		Version:               options.Version,
 		EnableShellCompletion: true,
 		Commands: []*cli.Command{
-			NewRun(options.Actions.Run, options.DefaultReportDir, options.DefaultTimeoutSeconds),
-			NewCompare(options.Actions.Compare, options.DefaultReportDir),
-			NewWeb(options.Actions.Web, options.DefaultReportDir),
-			NewInit(options.Actions.Init),
-			NewVerify(options.Actions.Verify),
-			NewReport(options.Actions.Report),
+			NewRun(options.Version),
+			NewCompare(),
+			NewWeb(),
+			NewInit(),
+			NewVerify(),
+			NewReport(),
 		},
 	}
+}
+
+var errNotImplemented = errors.New("not implemented yet")
+
+func notImplemented(what string) error {
+	return fmt.Errorf("%s: %w", what, errNotImplemented)
+}
+
+func checkFlagValue(flag, value string, allowed []string) error {
+	if slices.Contains(allowed, value) {
+		return nil
+	}
+	return fmt.Errorf("unknown --%s %q (one of: %s)", flag, value, strings.Join(allowed, ", "))
 }

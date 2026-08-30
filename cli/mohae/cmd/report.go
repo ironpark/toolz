@@ -1,8 +1,14 @@
 package cmd
 
-import "github.com/urfave/cli/v3"
+import (
+	"context"
+	"fmt"
 
-func NewReport(action cli.ActionFunc) *cli.Command {
+	"github.com/ironpark/toolz/cli/mohae/internal/report"
+	"github.com/urfave/cli/v3"
+)
+
+func NewReport() *cli.Command {
 	return &cli.Command{
 		Name:      "report",
 		Usage:     "re-render or aggregate reports from earlier runs",
@@ -13,6 +19,16 @@ func NewReport(action cli.ActionFunc) *cli.Command {
 			&cli.BoolFlag{Name: "filter-failed", Usage: "keep only the failed cases"},
 			&cli.BoolFlag{Name: "aggregate", Usage: "total the tokens, cost and success rate across every report found"},
 		},
-		Action: action,
+		Action: reportAction,
 	}
+}
+
+func reportAction(_ context.Context, cmd *cli.Command) error {
+	if err := checkFlagValue("output", cmd.String("output"), report.KnownFormats); err != nil {
+		return err
+	}
+	if cmd.NArg() > 1 {
+		return fmt.Errorf("report accepts at most one path")
+	}
+	return notImplemented("report")
 }
