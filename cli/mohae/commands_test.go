@@ -199,7 +199,7 @@ func TestRunOverridesReachEveryConfig(t *testing.T) {
 	configs := []*Config{config}
 	// The action is replaced so the flags are parsed without a trial actually
 	// running: what is under test here is that an override reaches every config.
-	command := flagsOnly(newRunCommand())
+	command := flagsOnly(runCommandDefinition())
 	if err := command.Run(context.Background(), []string{"run", "--agent", "claude-code", "--prompt", "inline", "--timeout", "42"}); err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestRunOverridesReachEveryConfig(t *testing.T) {
 
 func TestRunPromptMixesInlineAndFileTurnsInOrder(t *testing.T) {
 	directory := chdir(t)
-	command := flagsOnly(newRunCommand())
+	command := flagsOnly(runCommandDefinition())
 	arguments := []string{"run", "--prompt", "file://PROMPT.md", "--prompt", "inline", "--prompt", "file://" + filepath.Join(directory, "SECOND.md")}
 	if err := command.Run(context.Background(), arguments); err != nil {
 		t.Fatal(err)
@@ -243,7 +243,7 @@ func TestRunPromptMixesInlineAndFileTurnsInOrder(t *testing.T) {
 }
 
 func TestRunRejectsAnEmptyPromptFileURL(t *testing.T) {
-	command := flagsOnly(newRunCommand())
+	command := flagsOnly(runCommandDefinition())
 	if err := command.Run(context.Background(), []string{"run", "--prompt", "file://"}); err != nil {
 		t.Fatal(err)
 	}

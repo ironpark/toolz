@@ -4,8 +4,7 @@
 - cli/mohae/run.go — the run action, concurrency, fail-fast, exit status.
 - cli/mohae/workspace.go — isolated workspace copy, init script, AGENTS.md,
   skills, optional git.
-- cli/mohae/driver.go, driver_custom.go, driver_claude.go, driver_codex.go —
-  the agent drivers behind one interface.
+- cli/mohae/internal/driver/ — the agent drivers behind one interface.
 - cli/mohae/mcpwiring.go — MCP configuration files parsed once and handed to
   each driver in the form it wants.
 - cli/mohae/trial.go — the turn loop and the verification stage.

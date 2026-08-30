@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/ironpark/toolz/cli/mohae/internal/driver"
 )
 
 // Workspace is one trial's isolated copy of the configured source tree.
@@ -86,7 +88,7 @@ func (w *Workspace) install(config *Config, agentType string) error {
 			return err
 		}
 	}
-	agent, known := agentTypes[agentType]
+	skillDir, known := driver.SkillDir(agentType)
 	for index, skill := range config.Skills {
 		if !skill.EnabledFor(agentType) {
 			continue
@@ -95,7 +97,7 @@ func (w *Workspace) install(config *Config, agentType string) error {
 			return fmt.Errorf("skills[%d]: unknown agent type %q", index, agentType)
 		}
 		source := config.Resolve(skill.Path)
-		target := filepath.Join(w.Root, filepath.FromSlash(agent.skillDir), filepath.Base(source))
+		target := filepath.Join(w.Root, filepath.FromSlash(skillDir), filepath.Base(source))
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
@@ -114,7 +116,7 @@ func (w *Workspace) runInitScript(ctx context.Context, config *Config, script st
 	command.Dir = w.Root
 	// The same variables the agent and the verify commands get: setup, work
 	// and grading all read one environment.
-	command.Env = processEnv(driverEnv(config, w))
+	command.Env = processEnv(trialEnv(config, w))
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("workspace.init_script failed: %w\n%s", err, strings.TrimSpace(string(output)))

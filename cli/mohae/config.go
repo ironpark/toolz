@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+	"github.com/ironpark/toolz/cli/mohae/internal/driver"
 )
 
 // DefaultConfigName is the file `run` and `verify` fall back to when no path is
@@ -228,10 +229,10 @@ func (c *Config) applyDefaults() {
 // so a config can be written before the scripts it points at.
 func (c *Config) Validate() error {
 	if c.Agent.Type == "" {
-		return fmt.Errorf("agent.type is required (one of: %s)", strings.Join(KnownAgentTypes, ", "))
+		return fmt.Errorf("agent.type is required (one of: %s)", strings.Join(driver.KnownAgentTypes, ", "))
 	}
-	if !slices.Contains(KnownAgentTypes, c.Agent.Type) {
-		return fmt.Errorf("unknown agent.type %q (one of: %s)", c.Agent.Type, strings.Join(KnownAgentTypes, ", "))
+	if !slices.Contains(driver.KnownAgentTypes, c.Agent.Type) {
+		return fmt.Errorf("unknown agent.type %q (one of: %s)", c.Agent.Type, strings.Join(driver.KnownAgentTypes, ", "))
 	}
 	if c.Agent.Type == "custom-cli" && len(c.Agent.Command) == 0 {
 		return fmt.Errorf("agent.command is required when agent.type is custom-cli")
@@ -360,8 +361,8 @@ type LabeledPath struct {
 // which would otherwise read as an item silently enabled for nobody.
 func validateAgents(field string, agents []string) error {
 	for _, agent := range agents {
-		if !slices.Contains(KnownAgentTypes, agent) {
-			return fmt.Errorf("%s.agents: unknown agent type %q (one of: %s)", field, agent, strings.Join(KnownAgentTypes, ", "))
+		if !slices.Contains(driver.KnownAgentTypes, agent) {
+			return fmt.Errorf("%s.agents: unknown agent type %q (one of: %s)", field, agent, strings.Join(driver.KnownAgentTypes, ", "))
 		}
 	}
 	return nil

@@ -1,4 +1,4 @@
-package main
+package driver
 
 import (
 	"context"
@@ -28,16 +28,15 @@ type codexDriver struct {
 	spent codex.TokenUsage
 }
 
-func newCodexDriver(ctx context.Context, options DriverOptions) (Driver, error) {
-	config := options.Config
+func newCodexDriver(ctx context.Context, options Options) (Driver, error) {
 	servers := options.MCPServers
 	client, err := codex.New(ctx, codex.Options{
 		Args: codexArgs(servers),
-		Dir:  options.Workspace.Root,
+		Dir:  options.Workspace,
 		Env:  options.environ(),
 		// The subprocess's own logging is not part of the trial's transcript.
 		Stderr:     io.Discard,
-		ClientInfo: codex.ClientInfo{Name: "mohae", Version: buildVersion()},
+		ClientInfo: codex.ClientInfo{Name: "mohae", Version: options.Version},
 		// A benchmark has nobody to ask. Approving is the only answer that
 		// measures the agent rather than measuring how long it waits, and the
 		// workspace is a disposable copy, so there is nothing to protect.
@@ -54,13 +53,13 @@ func newCodexDriver(ctx context.Context, options DriverOptions) (Driver, error) 
 		return nil, fmt.Errorf("codex: %w", err)
 	}
 	thread, err := client.StartThread(ctx, codex.StartThreadParams{
-		Model: config.Agent.Model,
-		Cwd:   options.Workspace.Root,
+		Model: options.Model,
+		Cwd:   options.Workspace,
 		// The trial's workspace is the only thing the agent may write to, and
 		// it is a copy, so full access inside it costs nothing. Every turn
 		// repeats this: the thread's policy is not what a turn runs under.
 		ApprovalPolicy: codex.ApprovalNever,
-		SandboxPolicy:  codex.SandboxWorkspaceWrite([]string{options.Workspace.Root}, true, nil),
+		SandboxPolicy:  codex.SandboxWorkspaceWrite([]string{options.Workspace}, true, nil),
 		ServiceName:    "mohae",
 	})
 	if err != nil {
@@ -70,9 +69,9 @@ func newCodexDriver(ctx context.Context, options DriverOptions) (Driver, error) 
 	return &codexDriver{
 		client: client,
 		thread: thread,
-		model:  config.Agent.Model,
-		effort: config.Agent.Effort,
-		cwd:    options.Workspace.Root,
+		model:  options.Model,
+		effort: options.Effort,
+		cwd:    options.Workspace,
 		onText: options.OnText,
 	}, nil
 }

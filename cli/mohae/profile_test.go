@@ -116,7 +116,7 @@ func TestRunAppliesProfilesBeforeFlagOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := flagsOnly(newRunCommand())
+	command := flagsOnly(runCommandDefinition())
 	arguments := []string{"run", "--profile", "claude", "--timeout", "42"}
 	if err := command.Run(t.Context(), arguments); err != nil {
 		t.Fatal(err)

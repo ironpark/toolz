@@ -1,4 +1,4 @@
-package main
+package driver
 
 import (
 	"context"
@@ -60,15 +60,17 @@ func (u *TokenUsage) Add(other TokenUsage) {
 	u.CostUSD += other.CostUSD
 }
 
-// DriverOptions is everything a driver needs to open a session.
-type DriverOptions struct {
-	Config    *Config
-	Workspace *Workspace
-	// Env is what the trial adds to the agent's environment: what it selected,
-	// so an agent command can read its model and effort without mohae having to
-	// know that command's flags. NewDriver resolves it; a driver reads it and
-	// never rebuilds it, so every agent sees the same variables and the trials
-	// stay comparable.
+// Options is everything a driver needs to open a session. It deliberately
+// contains values rather than the runner's Config or Workspace types, keeping
+// this internal package independent from package main.
+type Options struct {
+	Type      string
+	Model     string
+	Effort    string
+	Command   []string
+	Workspace string
+	Version   string
+	// Env is the complete trial overlay, including MOHAE_* and agent.env.
 	Env map[string]string
 	// MCPServers are the servers the trial resolved from the configuration,
 	// already filtered to this agent type. The runner loads them once — it
@@ -82,6 +84,19 @@ type DriverOptions struct {
 	OnText func(string)
 }
 
+// MCPServerSpec is the driver-facing representation of one configured MCP
+// server. The runner owns loading and probing; drivers only translate this
+// value into the selected agent CLI's configuration.
+type MCPServerSpec struct {
+	Name    string
+	Command string
+	Args    []string
+	Env     map[string]string
+	Type    string
+	URL     string
+	Headers map[string]string
+}
+
 // agentTypes is the one place an agent type is defined: how to open it and
 // where it reads the skills a workspace installs. Adding an agent is one entry
 // here — validation, driver selection and workspace preparation all read this
@@ -92,7 +107,7 @@ var agentTypes = map[string]struct {
 	// reads skills from. A skill dropped anywhere else would be a trial that
 	// silently measured the agent without it.
 	skillDir string
-	open     func(context.Context, DriverOptions) (Driver, error)
+	open     func(context.Context, Options) (Driver, error)
 }{
 	"claude-code": {".claude/skills", newClaudeDriver},
 	"codex":       {".codex/skills", newCodexDriver},
@@ -104,36 +119,23 @@ var agentTypes = map[string]struct {
 // line.
 var KnownAgentTypes = slices.Sorted(maps.Keys(agentTypes))
 
-// NewDriver opens the driver named by the configuration's agent type, with the
-// trial environment already resolved so no driver assembles it itself.
-func NewDriver(ctx context.Context, options DriverOptions) (Driver, error) {
-	agent, ok := agentTypes[options.Config.Agent.Type]
+// New opens the selected driver.
+func New(ctx context.Context, options Options) (Driver, error) {
+	agent, ok := agentTypes[options.Type]
 	if !ok {
-		return nil, fmt.Errorf("no driver for agent type %q", options.Config.Agent.Type)
+		return nil, fmt.Errorf("no driver for agent type %q", options.Type)
 	}
-	options.Env = driverEnv(options.Config, options.Workspace)
 	return agent.open(ctx, options)
 }
 
-// driverEnv resolves the trial's environment. See DriverOptions.Env.
-func driverEnv(config *Config, workspace *Workspace) map[string]string {
-	env := map[string]string{
-		"MOHAE_WORKSPACE": workspace.Root,
-		"MOHAE_TRIAL":     config.Name,
-	}
-	if config.Agent.Model != "" {
-		env["MOHAE_MODEL"] = config.Agent.Model
-	}
-	if config.Agent.Effort != "" {
-		env["MOHAE_EFFORT"] = config.Agent.Effort
-	}
-	// Copied last so a config can override anything above deliberately.
-	maps.Copy(env, config.Agent.Env)
-	return env
+// SkillDir returns the workspace-relative skill directory for an agent type.
+func SkillDir(agentType string) (string, bool) {
+	agent, ok := agentTypes[agentType]
+	return agent.skillDir, ok
 }
 
 // environ is the environment a driver's subprocess starts from.
-func (o DriverOptions) environ() []string { return processEnv(o.Env) }
+func (o Options) environ() []string { return processEnv(o.Env) }
 
 // processEnv puts extra on top of this process's environment. The parent's is
 // inherited because an agent CLI needs its own credentials and PATH, and

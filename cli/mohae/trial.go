@@ -10,6 +10,9 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	agentdriver "github.com/ironpark/toolz/cli/mohae/internal/driver"
+	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
 )
 
 // TrialOptions are the run-time choices a trial takes from the command line
@@ -89,7 +92,7 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 	if options.ShowDialogue {
 		onText = func(text string) { fmt.Fprint(out, text) }
 	}
-	driver, err := NewDriver(ctx, DriverOptions{Config: config, Workspace: workspace, MCPServers: servers, OnText: onText})
+	driver, err := agentdriver.New(ctx, newDriverOptions(config, workspace, servers, onText))
 	if err != nil {
 		result.Error = err.Error()
 		result.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
@@ -128,7 +131,7 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 // prompts it comes after were never sent, or when its own condition is false;
 // both are recorded, because a conversation that silently shrank would make two
 // different runs look identical.
-func runConversation(ctx context.Context, config *Config, workspace *Workspace, driver Driver, options TrialOptions, out io.Writer, started time.Time) ([]TurnResult, TokenUsage, error) {
+func runConversation(ctx context.Context, config *Config, workspace *Workspace, driver agentdriver.Driver, options TrialOptions, out io.Writer, started time.Time) ([]TurnResult, TokenUsage, error) {
 	turns := make([]TurnResult, 0, len(config.Prompts))
 	usage := TokenUsage{}
 	sent := map[string]bool{}
@@ -247,14 +250,14 @@ func runVerifyCommands(ctx context.Context, config *Config, workspace *Workspace
 	// The same variables the agent had, resolved once: a grading command that
 	// reads $MOHAE_MODEL should not see something different from the trial it
 	// grades.
-	env := processEnv(driverEnv(config, workspace))
+	env := processEnv(trialEnv(config, workspace))
 	results := make([]VerifyResult, 0, len(config.Verify.Commands))
 	for _, text := range config.Verify.Commands {
 		started := time.Now()
 		command := exec.CommandContext(ctx, "sh", "-c", text)
 		command.Dir = workspace.Scratch
 		command.Env = env
-		isolateProcess(command)
+		processutil.Isolate(command)
 		output := &bytes.Buffer{}
 		command.Stdout = output
 		command.Stderr = output

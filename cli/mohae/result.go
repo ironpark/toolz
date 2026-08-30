@@ -1,6 +1,14 @@
 package main
 
-import "time"
+import (
+	"time"
+
+	"github.com/ironpark/toolz/cli/mohae/internal/driver"
+)
+
+// TokenUsage is kept as the runner's report vocabulary while its implementation
+// lives with the driver response that produces it.
+type TokenUsage = driver.TokenUsage
 
 // TrialResult is everything one trial produced. It is the only thing the
 // reports render and the only thing `compare` will have to read, so it carries

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	agentdriver "github.com/ironpark/toolz/cli/mohae/internal/driver"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -32,6 +33,17 @@ type MCPServerSpec struct {
 	// Headers are sent with every HTTP request, which is how a hosted server is
 	// authenticated.
 	Headers map[string]string `json:"headers,omitempty"`
+}
+
+func driverMCPServers(specs []MCPServerSpec) []agentdriver.MCPServerSpec {
+	converted := make([]agentdriver.MCPServerSpec, len(specs))
+	for index, spec := range specs {
+		converted[index] = agentdriver.MCPServerSpec{
+			Name: spec.Name, Command: spec.Command, Args: spec.Args, Env: spec.Env,
+			Type: spec.Type, URL: spec.URL, Headers: spec.Headers,
+		}
+	}
+	return converted
 }
 
 // mcpConfigFile is the format the agent CLIs already read. mohae reads the same

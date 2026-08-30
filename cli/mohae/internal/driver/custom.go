@@ -1,4 +1,4 @@
-package main
+package driver
 
 import (
 	"bufio"
@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
 )
 
 // PromptPlaceholder is substituted into agent.command when it appears there.
@@ -33,8 +35,8 @@ type customDriver struct {
 	onText    func(string)
 }
 
-func newCustomDriver(_ context.Context, options DriverOptions) (Driver, error) {
-	command := options.Config.Agent.Command
+func newCustomDriver(_ context.Context, options Options) (Driver, error) {
+	command := options.Command
 	if len(command) == 0 {
 		// Validate rejects this, so reaching it means the config was built in
 		// code rather than loaded; failing here beats exec'ing an empty string.
@@ -43,7 +45,7 @@ func newCustomDriver(_ context.Context, options DriverOptions) (Driver, error) {
 	return &customDriver{
 		command:   command,
 		env:       options.environ(),
-		workspace: options.Workspace.Root,
+		workspace: options.Workspace,
 		onText:    options.OnText,
 	}, nil
 }
@@ -62,7 +64,7 @@ func (d *customDriver) Send(ctx context.Context, prompt string) (Response, error
 	command := exec.CommandContext(ctx, arguments[0], arguments[1:]...)
 	command.Dir = d.workspace
 	command.Env = d.env
-	isolateProcess(command)
+	processutil.Isolate(command)
 	// A backstop for a child that outlives the kill and holds stdout open: the
 	// turn's timeout has already expired by then, so waiting further would only
 	// stall the run.

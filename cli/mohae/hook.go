@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
 )
 
 // runAfterHooks finalizes the workspace after the agent session and before it
@@ -23,7 +25,7 @@ func runAfterHooks(ctx context.Context, config *Config, workspace *Workspace, op
 	results := make([]HookResult, 0, len(config.Hooks.After))
 	for _, hook := range config.Hooks.After {
 		directory, location := hook.directory(workspace)
-		env := processEnv(driverEnv(config, workspace))
+		env := processEnv(trialEnv(config, workspace))
 		// Cmd.Dir changes the process directory but an explicitly supplied
 		// environment otherwise retains the parent's PWD.
 		env = append(env, "PWD="+directory)
@@ -31,7 +33,7 @@ func runAfterHooks(ctx context.Context, config *Config, workspace *Workspace, op
 		command := exec.CommandContext(ctx, "sh", "-c", hook.Run)
 		command.Dir = directory
 		command.Env = env
-		isolateProcess(command)
+		processutil.Isolate(command)
 		output := &bytes.Buffer{}
 		command.Stdout = output
 		command.Stderr = output

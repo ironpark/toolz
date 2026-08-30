@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	agentdriver "github.com/ironpark/toolz/cli/mohae/internal/driver"
 )
 
 // stubAgent writes an executable standing in for an agent CLI. Every driver
@@ -20,7 +22,7 @@ func stubAgent(t *testing.T, script string) string {
 }
 
 // openCustomDriver prepares a workspace and opens the custom-cli driver on it.
-func openCustomDriver(t *testing.T, command []string, onText func(string)) (Driver, *Workspace) {
+func openCustomDriver(t *testing.T, command []string, onText func(string)) (agentdriver.Driver, *Workspace) {
 	t.Helper()
 	directory := t.TempDir()
 	config := fixtureConfig(t, directory)
@@ -30,7 +32,7 @@ func openCustomDriver(t *testing.T, command []string, onText func(string)) (Driv
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { workspace.Cleanup() })
-	driver, err := NewDriver(context.Background(), DriverOptions{Config: config, Workspace: workspace, OnText: onText})
+	driver, err := agentdriver.New(context.Background(), newDriverOptions(config, workspace, nil, onText))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +57,7 @@ func TestCustomDriverSubstitutesThePromptPlaceholder(t *testing.T) {
 	// An agent CLI that takes its prompt as an argument must not also be handed
 	// it on stdin, or it would receive the turn twice.
 	agent := stubAgent(t, "echo \"argument: $1\"\necho \"stdin: [$(cat)]\"\n")
-	driver, _ := openCustomDriver(t, []string{agent, PromptPlaceholder}, nil)
+	driver, _ := openCustomDriver(t, []string{agent, agentdriver.PromptPlaceholder}, nil)
 
 	response, err := driver.Send(context.Background(), "build it")
 	if err != nil {
@@ -82,7 +84,7 @@ func TestCustomDriverRunsInTheWorkspaceWithTheTrialEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer workspace.Cleanup()
-	driver, err := NewDriver(context.Background(), DriverOptions{Config: config, Workspace: workspace})
+	driver, err := agentdriver.New(context.Background(), newDriverOptions(config, workspace, nil, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,18 +173,18 @@ func TestNewDriverRejectsAnAgentTypeItCannotDrive(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer workspace.Cleanup()
-	if _, err := NewDriver(context.Background(), DriverOptions{Config: config, Workspace: workspace}); err == nil {
+	if _, err := agentdriver.New(context.Background(), newDriverOptions(config, workspace, nil, nil)); err == nil {
 		t.Fatal("expected an unknown agent type to be refused")
 	}
 }
 
 // TestDriverEnvIsResolvedForEveryAgentType guards the contract that made
 // claude-code the odd one out once: the trial's variables are resolved in
-// NewDriver, so a driver cannot quietly open a session without them and leave
-// two agents reading a different environment for the same configuration.
+// newDriverOptions, so a driver cannot quietly open a session without them and
+// leave two agents reading a different environment for the same configuration.
 func TestDriverEnvIsResolvedForEveryAgentType(t *testing.T) {
 	directory := t.TempDir()
-	for _, agentType := range KnownAgentTypes {
+	for _, agentType := range agentdriver.KnownAgentTypes {
 		config := fixtureConfig(t, directory)
 		config.Name = "env-trial"
 		config.Agent.Type = agentType
@@ -191,7 +193,7 @@ func TestDriverEnvIsResolvedForEveryAgentType(t *testing.T) {
 		config.Agent.Env = map[string]string{"EXTRA": "1"}
 		workspace := &Workspace{Root: filepath.Join(directory, agentType)}
 
-		env := driverEnv(config, workspace)
+		env := trialEnv(config, workspace)
 		for key, want := range map[string]string{
 			"MOHAE_WORKSPACE": workspace.Root,
 			"MOHAE_TRIAL":     "env-trial",
@@ -213,12 +215,12 @@ func TestDriverEnvLetsTheConfigurationWin(t *testing.T) {
 	config := fixtureConfig(t, t.TempDir())
 	config.Agent.Model = "configured"
 	config.Agent.Env = map[string]string{"MOHAE_MODEL": "overridden"}
-	options := DriverOptions{Env: driverEnv(config, &Workspace{Root: "/tmp/ws"})}
-	if got := options.Env["MOHAE_MODEL"]; got != "overridden" {
+	env := trialEnv(config, &Workspace{Root: "/tmp/ws"})
+	if got := env["MOHAE_MODEL"]; got != "overridden" {
 		t.Fatalf("MOHAE_MODEL = %q, want %q", got, "overridden")
 	}
 	found := false
-	for _, entry := range options.environ() {
+	for _, entry := range processEnv(env) {
 		if entry == "MOHAE_MODEL=overridden" {
 			found = true
 		}

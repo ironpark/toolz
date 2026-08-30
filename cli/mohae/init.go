@@ -16,28 +16,6 @@ import (
 // every one of them ends in a workspace, a prompt and a verification script.
 var Templates = []string{"basic", "mcp-server", "cli-skill", "multi-agent"}
 
-func newInitCommand() *cli.Command {
-	return &cli.Command{
-		Name:      "init",
-		Usage:     "write a configuration template, optionally with its scripts and AGENTS.md",
-		ArgsUsage: "[PATH]",
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "template", Aliases: []string{"t"}, Value: "basic", Usage: "preset: basic, mcp-server, cli-skill, multi-agent"},
-			&cli.BoolFlag{Name: "with-scripts", Usage: "also write init.sh and verify.sh"},
-			&cli.BoolFlag{Name: "with-agent-md", Usage: "also write an AGENTS.md template"},
-			&cli.BoolFlag{Name: "with-prompt", Usage: "also write the PROMPT.md the config sends as its first turn"},
-			&cli.BoolFlag{Name: "with-fixture", Usage: "also write the fixture workspace the trial is run against"},
-			&cli.BoolFlag{Name: "with-mcp", Usage: "also write the MCP server configuration (mcp-server template)"},
-			// The config a template writes references files init can also write.
-			// Without --all, `mohae init && mohae verify` fails on paths mohae
-			// itself named, so one flag asks for a project that verifies clean.
-			&cli.BoolFlag{Name: "all", Usage: "write every file the chosen template's configuration references"},
-			&cli.BoolFlag{Name: "force", Aliases: []string{"f"}, Usage: "overwrite existing files"},
-		},
-		Action: initAction,
-	}
-}
-
 func initAction(_ context.Context, cmd *cli.Command) error {
 	template := cmd.String("template")
 	if !slices.Contains(Templates, template) {

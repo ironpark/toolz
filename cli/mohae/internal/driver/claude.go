@@ -1,4 +1,4 @@
-package main
+package driver
 
 import (
 	"context"
@@ -17,12 +17,11 @@ type claudeDriver struct {
 	onText func(string)
 }
 
-func newClaudeDriver(ctx context.Context, options DriverOptions) (Driver, error) {
-	config := options.Config
+func newClaudeDriver(ctx context.Context, options Options) (Driver, error) {
 	servers := options.MCPServers
 	sdkOptions := &claude.Options{
-		Model:  config.Agent.Model,
-		Effort: config.Agent.Effort,
+		Model:  options.Model,
+		Effort: options.Effort,
 		// The agent starts in the trial's copy, and nothing outside it is added
 		// to the session.
 		//
@@ -34,7 +33,7 @@ func newClaudeDriver(ctx context.Context, options DriverOptions) (Driver, error)
 		// codex driver constrains writes with SandboxWorkspaceWrite; this one
 		// has no equivalent yet, so the two agents are not measured under the
 		// same rules.
-		Cwd:        options.Workspace.Root,
+		Cwd:        options.Workspace,
 		Env:        options.Env,
 		MCPServers: claudeMCPServers(servers),
 		// Only what the trial installed: a server the host happens to have

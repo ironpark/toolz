@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	command "github.com/ironpark/toolz/cli/mohae/cmd"
 	"github.com/urfave/cli/v3"
 )
 
@@ -18,6 +19,10 @@ import (
 func flagsOnly(command *cli.Command) *cli.Command {
 	command.Action = func(context.Context, *cli.Command) error { return nil }
 	return command
+}
+
+func runCommandDefinition() *cli.Command {
+	return command.NewRun(runAction, DefaultReportDir, DefaultTimeoutSeconds)
 }
 
 // runnableProject writes a configuration whose agent is a shell stub, in the

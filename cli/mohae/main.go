@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"sync"
 
+	command "github.com/ironpark/toolz/cli/mohae/cmd"
 	"github.com/urfave/cli/v3"
 )
 
@@ -37,20 +38,15 @@ func main() {
 }
 
 func newRootCommand() *cli.Command {
-	return &cli.Command{
-		Name:                  "mohae",
-		Usage:                 "automated evaluation and benchmark CLI for AI agents, MCP servers, and CLI skills",
+	return command.New(command.Options{
 		Version:               buildVersion(),
-		EnableShellCompletion: true,
-		Commands: []*cli.Command{
-			newRunCommand(),
-			newCompareCommand(),
-			newWebCommand(),
-			newInitCommand(),
-			newVerifyCommand(),
-			newReportCommand(),
+		DefaultReportDir:      DefaultReportDir,
+		DefaultTimeoutSeconds: DefaultTimeoutSeconds,
+		Actions: command.Actions{
+			Run: runAction, Compare: compareAction, Web: webAction,
+			Init: initAction, Verify: verifyAction, Report: reportAction,
 		},
-	}
+	})
 }
 
 // errNotImplemented marks a command whose flags and configuration handling are

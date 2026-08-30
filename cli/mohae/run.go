@@ -17,44 +17,6 @@ import (
 
 const DefaultTimeoutSeconds = 300
 
-func newRunCommand() *cli.Command {
-	return &cli.Command{
-		Name:      "run",
-		Usage:     "run the trials described by one or more configuration files and report on them",
-		ArgsUsage: "[CONFIG_PATH...]",
-		Flags: []cli.Flag{
-			// Overrides. Each one shadows a configuration field for this
-			// invocation only, which is what makes a config reusable across
-			// variants instead of edited between runs.
-			// Profiles apply first, then the field flags below, so a flag can
-			// still fine-tune whatever a profile selected.
-			&cli.StringSliceFlag{Name: "profile", Usage: "apply a named profile from the config; repeatable, later ones win"},
-			&cli.StringFlag{Name: "agent", Aliases: []string{"a"}, Usage: "override the agent type (claude-code, codex, custom-cli)"},
-			// Repeatable: the configured conversation is replaced wholesale,
-			// in the order the flags were given. Replacing rather than
-			// appending keeps `--prompt` meaning the same thing whatever the
-			// config happened to contain.
-			&cli.StringSliceFlag{Name: "prompt", Aliases: []string{"p"}, Usage: "replace the conversation with these prompts, one turn each; a file://PATH value reads the turn from a file (repeatable)"},
-			&cli.StringSliceFlag{Name: "prompt-when", Usage: "expr condition gating the prompt at the same position; use '' to leave one unconditional (repeatable)"},
-			&cli.StringFlag{Name: "agent-md", Usage: "override the AGENTS.md installed in the workspace"},
-			&cli.StringFlag{Name: "init-script", Usage: "override the workspace setup script"},
-			&cli.StringSliceFlag{Name: "verify-command", Usage: "replace the commands that grade the finished workspace (repeatable)"},
-			&cli.StringFlag{Name: "mcp-config", Aliases: []string{"m"}, Usage: "override the MCP server configuration"},
-
-			&cli.StringFlag{Name: "output", Aliases: []string{"o"}, Value: "terminal", Usage: "report format: terminal, json, markdown, html"},
-			&cli.StringFlag{Name: "report-dir", Value: DefaultReportDir, Usage: "directory to write reports into"},
-			&cli.BoolFlag{Name: "show-dialogue", Usage: "stream the conversation to the terminal while it runs"},
-			&cli.BoolFlag{Name: "detailed-tokens", Usage: "break tokens down by input, output, cache read and cache write"},
-			&cli.BoolFlag{Name: "web", Usage: "serve the dashboard alongside the run"},
-
-			&cli.IntFlag{Name: "timeout", Aliases: []string{"t"}, Value: DefaultTimeoutSeconds, Usage: "seconds allowed for one trial"},
-			&cli.BoolFlag{Name: "fail-fast", Usage: "stop at the first failed verification or command error"},
-			&cli.IntFlag{Name: "concurrency", Aliases: []string{"c"}, Value: 1, Usage: "trials to run at the same time"},
-		},
-		Action: runAction,
-	}
-}
-
 func runAction(ctx context.Context, cmd *cli.Command) error {
 	configs, err := loadConfigs(cmd.Args().Slice())
 	if err != nil {

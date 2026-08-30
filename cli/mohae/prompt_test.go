@@ -187,7 +187,7 @@ func TestRunReplacesTheWholeConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := flagsOnly(newRunCommand())
+	command := flagsOnly(runCommandDefinition())
 	arguments := []string{
 		"run",
 		"--prompt", "first",
