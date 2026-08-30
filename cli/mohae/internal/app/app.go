@@ -5,6 +5,8 @@ package app
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	command "github.com/ironpark/toolz/cli/mohae/cmd"
 	"github.com/urfave/cli/v3"
@@ -30,4 +32,14 @@ var errNotImplemented = errors.New("not implemented yet")
 
 func notImplemented(what string) error {
 	return fmt.Errorf("%s: %w", what, errNotImplemented)
+}
+
+// checkFlagValue rejects a flag value outside its allowed set, naming the
+// alternatives. One helper so every flag with a fixed set of values is
+// refused the same way rather than in as many phrasings as there are flags.
+func checkFlagValue(flag, value string, allowed []string) error {
+	if slices.Contains(allowed, value) {
+		return nil
+	}
+	return fmt.Errorf("unknown --%s %q (one of: %s)", flag, value, strings.Join(allowed, ", "))
 }

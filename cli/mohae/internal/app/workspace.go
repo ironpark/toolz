@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/ironpark/toolz/cli/mohae/internal/driver"
+
+	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
 )
 
 // Workspace is one trial's isolated copy of the configured source tree.
@@ -116,7 +118,7 @@ func (w *Workspace) runInitScript(ctx context.Context, config *Config, script st
 	command.Dir = w.Root
 	// The same variables the agent and the verify commands get: setup, work
 	// and grading all read one environment.
-	command.Env = processEnv(trialEnv(config, w))
+	command.Env = processutil.Env(trialEnv(config, w))
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("workspace.init_script failed: %w\n%s", err, strings.TrimSpace(string(output)))

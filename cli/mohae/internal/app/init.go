@@ -30,18 +30,18 @@ var supportTemplates = map[string]string{
 
 func initAction(_ context.Context, cmd *cli.Command) error {
 	template := cmd.String("template")
-	if !slices.Contains(Templates, template) {
-		return fmt.Errorf("unknown --template %q (one of: %s)", template, strings.Join(Templates, ", "))
+	if err := checkFlagValue("template", template, Templates); err != nil {
+		return err
 	}
 	target := cmd.Args().First()
 	if target == "" {
 		target = DefaultConfigName
 	}
-	directory := "."
-	if info, err := os.Stat(target); err == nil && info.IsDir() {
-		directory = target
-		target = filepath.Join(target, DefaultConfigName)
-	} else if filepath.Ext(target) == "" {
+	// A target that is an existing directory, or that has no extension and so
+	// names one, holds the configuration rather than being it.
+	var directory string
+	info, err := os.Stat(target)
+	if (err == nil && info.IsDir()) || filepath.Ext(target) == "" {
 		directory = target
 		target = filepath.Join(target, DefaultConfigName)
 	} else {
@@ -74,11 +74,7 @@ func initAction(_ context.Context, cmd *cli.Command) error {
 			}
 		}
 	}
-	if directory != "." {
-		if err := os.MkdirAll(directory, 0o755); err != nil {
-			return err
-		}
-	}
+	// Each file's parent is created below, which covers directory itself.
 	for _, path := range slices.Sorted(maps.Keys(files)) {
 		if parent := filepath.Dir(path); parent != "" && parent != "." {
 			if err := os.MkdirAll(parent, 0o755); err != nil {

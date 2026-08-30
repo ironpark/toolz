@@ -2,8 +2,6 @@ package app
 
 import (
 	"maps"
-	"os"
-	"slices"
 
 	agentdriver "github.com/ironpark/toolz/cli/mohae/internal/driver"
 )
@@ -38,12 +36,4 @@ func newDriverOptions(config *Config, workspace *Workspace, servers []MCPServerS
 		MCPServers: driverMCPServers(servers),
 		OnText:     onText,
 	}
-}
-
-func processEnv(extra map[string]string) []string {
-	environ := os.Environ()
-	for _, key := range slices.Sorted(maps.Keys(extra)) {
-		environ = append(environ, key+"="+extra[key])
-	}
-	return environ
 }

@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	agentdriver "github.com/ironpark/toolz/cli/mohae/internal/driver"
 	"time"
+
+	agentdriver "github.com/ironpark/toolz/cli/mohae/internal/driver"
 )
 
 // writeFile writes one file, creating its parents, and fails the test if it

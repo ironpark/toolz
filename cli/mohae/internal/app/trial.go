@@ -1,13 +1,11 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -252,47 +250,20 @@ func runVerifyCommands(ctx context.Context, config *Config, workspace *Workspace
 	// The same variables the agent had, resolved once: a grading command that
 	// reads $MOHAE_MODEL should not see something different from the trial it
 	// grades.
-	env := processEnv(trialEnv(config, workspace))
+	env := processutil.Env(trialEnv(config, workspace))
 	results := make([]VerifyResult, 0, len(config.Verify.Commands))
 	for _, text := range config.Verify.Commands {
-		started := time.Now()
-		command := exec.CommandContext(ctx, "sh", "-c", text)
-		command.Dir = workspace.Scratch
-		command.Env = env
-		processutil.Isolate(command)
-		output := &bytes.Buffer{}
-		command.Stdout = output
-		command.Stderr = output
-		err := command.Run()
-
-		result := VerifyResult{
-			Command:         text,
-			Passed:          err == nil,
-			Output:          strings.TrimSpace(output.String()),
-			DurationSeconds: time.Since(started).Seconds(),
-		}
-		var exitErr *exec.ExitError
-		switch {
-		case err == nil:
-		case errors.As(err, &exitErr):
-			result.ExitCode = exitErr.ExitCode()
-		default:
-			// A command that could not be started at all: the shell's own
-			// failure is the output, since there is none of its own.
-			result.ExitCode = -1
-			result.Output = strings.TrimSpace(result.Output + "\n" + err.Error())
-		}
+		step := runShellStep(ctx, text, workspace.Scratch, env)
 		if options.ShowDialogue {
-			fmt.Fprintf(out, "verify %s: %s\n", verdictWord(result.Passed), text)
+			fmt.Fprintf(out, "verify %s: %s\n", verdictWord(step.Passed), text)
 		}
-		results = append(results, result)
+		results = append(results, VerifyResult{
+			Command:         text,
+			ExitCode:        step.ExitCode,
+			Passed:          step.Passed,
+			Output:          step.Output,
+			DurationSeconds: step.Duration,
+		})
 	}
 	return results
-}
-
-func verdictWord(passed bool) string {
-	if passed {
-		return "pass"
-	}
-	return "fail"
 }

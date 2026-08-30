@@ -9,6 +9,8 @@ import (
 	"time"
 
 	agentdriver "github.com/ironpark/toolz/cli/mohae/internal/driver"
+
+	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
 )
 
 // stubAgent writes an executable standing in for an agent CLI. Every driver
@@ -220,7 +222,7 @@ func TestDriverEnvLetsTheConfigurationWin(t *testing.T) {
 		t.Fatalf("MOHAE_MODEL = %q, want %q", got, "overridden")
 	}
 	found := false
-	for _, entry := range processEnv(env) {
+	for _, entry := range processutil.Env(env) {
 		if entry == "MOHAE_MODEL=overridden" {
 			found = true
 		}

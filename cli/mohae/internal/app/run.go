@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -27,8 +26,8 @@ func runAction(version string) cli.ActionFunc {
 			return err
 		}
 		output := cmd.String("output")
-		if !slices.Contains(KnownFormats, output) {
-			return fmt.Errorf("unknown output format %q", output)
+		if err := checkFlagValue("output", output, KnownFormats); err != nil {
+			return err
 		}
 		concurrency := cmd.Int("concurrency")
 		if concurrency < 1 {

@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	agentdriver "github.com/ironpark/toolz/cli/mohae/internal/driver"
+	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -136,7 +137,7 @@ func (s MCPServerSpec) Transport(ctx context.Context) (mcp.Transport, error) {
 		return &mcp.StreamableClientTransport{Endpoint: s.URL}, nil
 	}
 	command := exec.CommandContext(ctx, s.Command, s.Args...)
-	command.Env = processEnv(s.Env)
+	command.Env = processutil.Env(s.Env)
 	return &mcp.CommandTransport{Command: command}, nil
 }
 

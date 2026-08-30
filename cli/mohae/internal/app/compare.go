@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"github.com/urfave/cli/v3"
 )
@@ -17,11 +16,13 @@ var CompareFields = []string{"auto", "prompts", "agent-md", "agent", "mcp", "con
 var CompareMetrics = []string{"success-rate", "tokens", "cost", "duration"}
 
 func compareAction(_ context.Context, cmd *cli.Command) error {
-	if !slices.Contains(CompareFields, cmd.String("target")) {
-		return fmt.Errorf("unknown --target %q", cmd.String("target"))
+	if err := checkFlagValue("target", cmd.String("target"), CompareFields); err != nil {
+		return err
 	}
-	if metric := cmd.String("metric"); metric != "" && !slices.Contains(CompareMetrics, metric) {
-		return fmt.Errorf("unknown --metric %q", metric)
+	if metric := cmd.String("metric"); metric != "" {
+		if err := checkFlagValue("metric", metric, CompareMetrics); err != nil {
+			return err
+		}
 	}
 	if cmd.Int("repeat") < 1 {
 		return fmt.Errorf("--repeat must be at least 1")
