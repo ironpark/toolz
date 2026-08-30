@@ -137,8 +137,8 @@ func TestDescribeSectionMismatch(t *testing.T) {
 		want  string
 	}{
 		{name: "missing", found: []string{"GOALS", "SCOPE", "PHASES"}, want: "missing section(s): CONTEXT, VERIFICATION, ORDERING, NEXT"},
-		{name: "unexpected", found: append(append([]string{}, draft.RequiredSections...), "EXTRA"), want: "unexpected section(s): EXTRA"},
-		{name: "duplicated", found: append(append([]string{}, draft.RequiredSections...), "GOALS"), want: "duplicated section(s): GOALS"},
+		{name: "unexpected", found: append(draft.RequiredSections(), "EXTRA"), want: "unexpected section(s): EXTRA"},
+		{name: "duplicated", found: append(draft.RequiredSections(), "GOALS"), want: "duplicated section(s): GOALS"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			if got := draft.DescribeSectionMismatch(testCase.found); !strings.Contains(got, testCase.want) {

@@ -1,6 +1,10 @@
 package cli
 
-import "runtime/debug"
+import (
+	"runtime/debug"
+
+	ucli "github.com/urfave/cli/v3"
+)
 
 // version is overridable at link time
 // (-ldflags "-X github.com/ironpark/toolz/cli/planr/cli.version=v1.2.3") for
@@ -17,4 +21,16 @@ func buildVersion() string {
 		return "unknown"
 	}
 	return info.Main.Version
+}
+
+func jsonFlag() ucli.Flag {
+	return &ucli.BoolFlag{Name: "json", Usage: "write machine-readable JSON"}
+}
+
+func sectionFlag() ucli.Flag {
+	return &ucli.StringFlag{Name: "section", Usage: "goals, context, or plan"}
+}
+
+func forceFlag(usage string) ucli.Flag {
+	return &ucli.BoolFlag{Name: "force", Usage: usage}
 }

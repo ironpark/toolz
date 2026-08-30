@@ -1,7 +1,4 @@
-// Package phase implements the `planr phase` command group. Phase status is
-// the only plan state a command mutates directly, so it lives apart from the
-// document commands that go through `apply`.
-package phase
+package cli
 
 import (
 	"context"
@@ -10,8 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ironpark/toolz/cli/planr/internal/cliflag"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
+	"github.com/ironpark/toolz/cli/planr/internal/draft"
+	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/notes"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
@@ -19,10 +17,7 @@ import (
 	ucli "github.com/urfave/cli/v3"
 )
 
-// Command builds the `phase` command group. complete is the shared plan-name
-// completion, which the parent package owns because it reads the same
-// configuration the other commands do.
-func Command(complete ucli.ShellCompleteFunc) *ucli.Command {
+func phaseCommand() *ucli.Command {
 	return &ucli.Command{
 		Name:  "phase",
 		Usage: "manage plan phases",
@@ -34,51 +29,76 @@ func Command(complete ucli.ShellCompleteFunc) *ucli.Command {
 				ArgsUsage: "<plan-name> <phase-number>",
 				Flags: []ucli.Flag{
 					&ucli.StringFlag{Name: "status", Usage: "planned, conditional, in-progress, or done"},
-					cliflag.Force("mark done despite uncommitted source changes"),
+					forceFlag("mark done despite uncommitted source changes"),
 				},
-				ShellComplete: complete,
-				Action:        setCommand,
+				ShellComplete: planNameShellComplete,
+				Action:        setPhaseCommand,
 			},
-			startCommand(complete),
-			doneCommand(complete),
+			phaseStartCommand(),
+			phaseDoneCommand(),
 			{
 				Name:          "reset",
 				Usage:         "reset a phase to planned",
 				ArgsUsage:     "<plan-name> <phase-number>",
-				ShellComplete: complete,
-				Action:        shortcut("planned"),
+				ShellComplete: planNameShellComplete,
+				Action:        phaseShortcut(draft.StatusPlanned),
 			},
 			{
 				Name:      "rm",
 				Usage:     "remove a phase from an open plan",
 				ArgsUsage: "<plan-name> <phase-number>",
 				Flags: []ucli.Flag{
-					cliflag.Force("remove a phase despite dependent phases"),
+					forceFlag("remove a phase despite dependent phases"),
 				},
-				ShellComplete: complete,
-				Action:        removeCommand,
+				ShellComplete: planNameShellComplete,
+				Action:        removePhaseCommand,
 			},
 		},
 	}
 }
 
-func setCommand(_ context.Context, cmd *ucli.Command) error {
-	return run(cmd, strings.TrimSpace(cmd.String("status")))
-}
-
-// shortcut binds a fixed status to a subcommand that takes no --status flag.
-func shortcut(status string) func(context.Context, *ucli.Command) error {
-	return func(_ context.Context, cmd *ucli.Command) error {
-		return run(cmd, status)
+func phaseStartCommand() *ucli.Command {
+	return &ucli.Command{
+		Name:      "start",
+		Usage:     "start a phase",
+		ArgsUsage: "<plan-name> <phase-number>",
+		Flags: []ucli.Flag{
+			forceFlag("start despite unfinished dependencies"),
+		},
+		ShellComplete: planNameShellComplete,
+		Action:        phaseShortcut(draft.StatusInProgress),
 	}
 }
 
-func run(cmd *ucli.Command, status string) error {
+func phaseDoneCommand() *ucli.Command {
+	return &ucli.Command{
+		Name:      "done",
+		Usage:     "complete a phase",
+		ArgsUsage: "<plan-name> <phase-number>",
+		Flags: []ucli.Flag{
+			forceFlag("complete despite unfinished dependencies or uncommitted source changes"),
+		},
+		ShellComplete: planNameShellComplete,
+		Action:        phaseShortcut(draft.StatusDone),
+	}
+}
+
+func setPhaseCommand(_ context.Context, cmd *ucli.Command) error {
+	return runPhaseCommand(cmd, strings.TrimSpace(cmd.String("status")))
+}
+
+func phaseShortcut(status string) func(context.Context, *ucli.Command) error {
+	return func(_ context.Context, cmd *ucli.Command) error {
+		return runPhaseCommand(cmd, status)
+	}
+}
+
+func runPhaseCommand(cmd *ucli.Command, status string) error {
 	if cmd.NArg() != 2 {
 		return fmt.Errorf("phase command requires <plan-name> <phase-number>")
 	}
-	if !plan.StatusValues[status] {
-		return fmt.Errorf("invalid phase status %q; use planned, conditional, in-progress, or done", status)
+	if !draft.ValidStatus(status) {
+		return fmt.Errorf("invalid phase status %q; use %s", status, strings.Join(draft.Statuses(), ", "))
 	}
 	phaseID, err := strconv.Atoi(cmd.Args().Get(1))
 	if err != nil || phaseID < 0 {
@@ -103,16 +123,16 @@ func run(cmd *ucli.Command, status string) error {
 		return err
 	}
 	defer planLock.Close()
-	event := plan.HookEvent(status)
+	event := phaseHookEvent(status)
 	willComplete := false
 	planWasDone := false
-	if status == "done" {
+	if status == draft.StatusDone {
 		planWasDone, err = plan.AlreadyDone(planRoot)
 		if err != nil {
 			return err
 		}
 	}
-	if status == "done" && len(settings.Hooks.Commands("before", hooks.EventPlanDone)) > 0 {
+	if status == draft.StatusDone && len(settings.Hooks.Commands("before", hooks.EventPlanDone)) > 0 {
 		willComplete, err = plan.WillComplete(planRoot, phaseID)
 		if err != nil {
 			return err
@@ -120,14 +140,11 @@ func run(cmd *ucli.Command, status string) error {
 		willComplete = willComplete && !planWasDone
 	}
 	if !cmd.Bool("force") {
-		// Starting or completing a phase out of order silently invalidates the
-		// ordering the plan was validated against, so the same graph `apply`
-		// checked is enforced here too.
 		if err := plan.EnsureDependenciesMet(planDirectories, planRoot, planDirectory, phaseID, status); err != nil {
 			return err
 		}
-		if status == "done" {
-			if err := plan.EnsureCleanSource(repoRoot, planDirectories, settings.Ignore); err != nil {
+		if status == draft.StatusDone {
+			if err := gitrepo.EnsureCleanSource(repoRoot, planDirectories, settings.Ignore); err != nil {
 				return err
 			}
 		}
@@ -136,7 +153,7 @@ func run(cmd *ucli.Command, status string) error {
 		return err
 	}
 	if willComplete {
-		if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventPlanDone, planDirectory, -1, "done", os.Stdout); err != nil {
+		if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "before", hooks.EventPlanDone, planDirectory, -1, draft.StatusDone, os.Stdout); err != nil {
 			return err
 		}
 	}
@@ -145,13 +162,12 @@ func run(cmd *ucli.Command, status string) error {
 		return err
 	}
 	fmt.Printf("Updated %s phase %02d: %s\n", planDirectory, phaseID, status)
-	// Link the completion to the commit it landed on, for `planr notes`.
-	if status == "in-progress" {
+	if status == draft.StatusInProgress {
 		if err := notes.RecordCompletion(repoRoot, planDirectory, hooks.EventStart, phaseID); err != nil {
 			notes.Warn("phase start", err)
 		}
 	}
-	if status == "done" {
+	if status == draft.StatusDone {
 		if err := notes.RecordCompletion(repoRoot, planDirectory, hooks.EventDone, phaseID); err != nil {
 			notes.Warn("completion", err)
 		}
@@ -167,10 +183,25 @@ func run(cmd *ucli.Command, status string) error {
 	if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "after", event, planDirectory, phaseID, status, os.Stdout); err != nil {
 		return err
 	}
-	if completed && status == "done" && !planWasDone {
-		if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventPlanDone, planDirectory, -1, "done", os.Stdout); err != nil {
+	if completed && status == draft.StatusDone && !planWasDone {
+		if err := hooks.Run(repoRoot, settings.Hooks, settings.SkipHooks, "after", hooks.EventPlanDone, planDirectory, -1, draft.StatusDone, os.Stdout); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func phaseHookEvent(status string) string {
+	switch status {
+	case draft.StatusPlanned:
+		return hooks.EventReset
+	case draft.StatusConditional:
+		return hooks.EventConditional
+	case draft.StatusInProgress:
+		return hooks.EventStart
+	case draft.StatusDone:
+		return hooks.EventDone
+	default:
+		return ""
+	}
 }

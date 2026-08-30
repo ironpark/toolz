@@ -1,4 +1,4 @@
-package phase
+package cli
 
 import (
 	"context"
@@ -13,11 +13,12 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/planlock"
+	"github.com/ironpark/toolz/cli/planr/internal/planstore"
 	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 	ucli "github.com/urfave/cli/v3"
 )
 
-func removeCommand(_ context.Context, cmd *ucli.Command) error {
+func removePhaseCommand(_ context.Context, cmd *ucli.Command) error {
 	if cmd.NArg() != 2 {
 		return fmt.Errorf("phase rm requires <plan-name> <phase-number>")
 	}
@@ -53,7 +54,7 @@ func removeCommand(_ context.Context, cmd *ucli.Command) error {
 	if err != nil {
 		return fmt.Errorf("parse %s/PLAN.md: %w", planDirectory, err)
 	}
-	if mdoc.FrontString(planFront, "plan_status") == "done" {
+	if mdoc.FrontString(planFront, "plan_status") == draft.StatusDone {
 		return fmt.Errorf("plan %q is already done; phase rm is only allowed for open plans", planDirectory)
 	}
 
@@ -64,6 +65,10 @@ func removeCommand(_ context.Context, cmd *ucli.Command) error {
 	phasePath, err := plan.FindPhaseFile(planRoot, phaseID)
 	if err != nil {
 		return fmt.Errorf("%s: %w", planDirectory, err)
+	}
+	phaseRaw, err := vfs.ReadFile(phasePath)
+	if err != nil {
+		return err
 	}
 	if dependents := phaseDependents(phases, planDirectory, phaseID); len(dependents) > 0 && !cmd.Bool("force") {
 		return fmt.Errorf("cannot remove %s phase %02d because %s depend on it; use --force",
@@ -82,28 +87,28 @@ func removeCommand(_ context.Context, cmd *ucli.Command) error {
 	}
 	completed := len(remaining) > 0
 	for _, phase := range remaining {
-		if phase.Status != "done" {
+		if phase.Status != draft.StatusDone {
 			completed = false
 			break
 		}
 	}
 	if completed {
-		planFront["plan_status"] = "done"
+		planFront["plan_status"] = draft.StatusDone
 		planFront["completed_at"] = plan.CompletionTimestamp()
 	} else {
-		planFront["plan_status"] = "in-progress"
+		planFront["plan_status"] = draft.StatusInProgress
 		delete(planFront, "completed_at")
 	}
 
-	if err := mdoc.WriteFile(planPath, planFront, updatedBody); err != nil {
+	updatedPlan, err := mdoc.Render(planFront, updatedBody)
+	if err != nil {
 		return err
 	}
-	if err := vfs.Remove(phasePath); err != nil {
-		// Keep the documents consistent if the filesystem refuses the removal.
-		if restoreErr := mdoc.WriteAtomically(planPath, string(planRaw)); restoreErr != nil {
-			return fmt.Errorf("remove %s: %w; restore PLAN.md: %v", filepath.Base(phasePath), err, restoreErr)
-		}
-		return fmt.Errorf("remove %s: %w", filepath.Base(phasePath), err)
+	if err := planstore.Apply(
+		planstore.Update(planPath, string(planRaw), updatedPlan),
+		planstore.Delete(phasePath, string(phaseRaw)),
+	); err != nil {
+		return err
 	}
 	fmt.Printf("Removed %s phase %02d: %s\n", planDirectory, phaseID, phasePath)
 	if completed {

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ironpark/toolz/cli/planr/cli/phase"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
@@ -38,7 +37,7 @@ func TestPhaseRemoveRefusesDependentsAndLeavesNumberGapWithForce(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(old) })
 	remove := func(args ...string) error {
-		return phase.Command(nil).Run(context.Background(), append([]string{"phase", "rm"}, args...))
+		return phaseCommand().Run(context.Background(), append([]string{"phase", "rm"}, args...))
 	}
 	if err := remove("checkout-v2", "1"); err == nil || !strings.Contains(err.Error(), "depend on it") {
 		t.Fatalf("phase rm error = %v, want dependent-phase refusal", err)

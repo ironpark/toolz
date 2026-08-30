@@ -13,6 +13,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/agentenv"
 	"github.com/ironpark/toolz/cli/planr/internal/config"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/plantest"
@@ -202,12 +203,12 @@ func TestLoadConfigRejectsUnknownHookSetting(t *testing.T) {
 func TestIsIgnoredPath(t *testing.T) {
 	patterns := []string{"generated/**", "tmp", "*.generated.go"}
 	for _, path := range []string{"generated/build/app.go", "tmp/cache.bin", "main.generated.go"} {
-		if !plan.IsIgnoredPath(path, patterns) {
-			t.Errorf("plan.IsIgnoredPath(%q) = false, want true", path)
+		if !gitrepo.IsIgnoredPath(path, patterns) {
+			t.Errorf("gitrepo.IsIgnoredPath(%q) = false, want true", path)
 		}
 	}
-	if plan.IsIgnoredPath("cmd/main.go", patterns) {
-		t.Error("plan.IsIgnoredPath(cmd/main.go) = true, want false")
+	if gitrepo.IsIgnoredPath("cmd/main.go", patterns) {
+		t.Error("gitrepo.IsIgnoredPath(cmd/main.go) = true, want false")
 	}
 }
 

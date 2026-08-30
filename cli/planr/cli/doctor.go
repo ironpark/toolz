@@ -16,6 +16,29 @@ import (
 	ucli "github.com/urfave/cli/v3"
 )
 
+type doctorReporter struct {
+	records []doctor.Issue
+	json    bool
+}
+
+func (r *doctorReporter) add(issue doctor.Issue) {
+	r.records = append(r.records, issue)
+	if r.json {
+		return
+	}
+	if issue.Location == "" {
+		fmt.Printf("FAIL: %s\n", issue.Message)
+	} else {
+		fmt.Printf("FAIL %s: %s\n", issue.Location, issue.Message)
+	}
+}
+
+func (r *doctorReporter) printf(format string, values ...any) {
+	if !r.json {
+		fmt.Printf(format, values...)
+	}
+}
+
 func doctorCommand(_ context.Context, cmd *ucli.Command) error {
 	if cmd.NArg() != 0 {
 		return fmt.Errorf("doctor does not accept positional arguments")
@@ -28,26 +51,26 @@ func doctorCommand(_ context.Context, cmd *ucli.Command) error {
 	if err != nil {
 		return err
 	}
-	reporter := &doctor.Reporter{JSON: cmd.Bool("json")}
+	reporter := &doctorReporter{json: cmd.Bool("json")}
 
 	if err := gitrepo.EnsureRepository(cwd); err != nil {
-		reporter.Add(doctor.Issue{Location: "git", Message: err.Error()})
+		reporter.add(doctor.Issue{Location: "git", Message: err.Error()})
 	} else {
-		reporter.Printf("PASS git repository: %s\n", location.BaseRoot)
+		reporter.printf("PASS git repository: %s\n", location.BaseRoot)
 	}
 
-	reporter.Printf("INFO agent: %s\n", agentenv.CurrentDescription())
+	reporter.printf("INFO agent: %s\n", agentenv.CurrentDescription())
 
 	settings := config.Default()
 	if location.Path == "" {
-		reporter.Printf("INFO config: .planr.yaml not found; using defaults\n")
+		reporter.printf("INFO config: .planr.yaml not found; using defaults\n")
 	} else {
 		parsed, parseErr := config.ParseFile(location.Path)
 		if parseErr != nil {
-			reporter.Add(doctor.Issue{Location: location.Path, Message: parseErr.Error()})
+			reporter.add(doctor.Issue{Location: location.Path, Message: parseErr.Error()})
 		} else {
 			settings = parsed
-			reporter.Printf("PASS config: %s\n", location.Path)
+			reporter.printf("PASS config: %s\n", location.Path)
 		}
 	}
 
@@ -57,13 +80,13 @@ func doctorCommand(_ context.Context, cmd *ucli.Command) error {
 		info, statErr := vfs.Stat(plans)
 		switch {
 		case statErr != nil && os.IsNotExist(statErr):
-			reporter.Add(doctor.Issue{Location: "plans_dirs", Message: fmt.Sprintf("directory does not exist: %s", plans)})
+			reporter.add(doctor.Issue{Location: "plans_dirs", Message: fmt.Sprintf("directory does not exist: %s", plans)})
 		case statErr != nil:
-			reporter.Add(doctor.Issue{Location: "plans_dirs", Message: fmt.Sprintf("cannot inspect %s: %v", plans, statErr)})
+			reporter.add(doctor.Issue{Location: "plans_dirs", Message: fmt.Sprintf("cannot inspect %s: %v", plans, statErr)})
 		case !info.IsDir():
-			reporter.Add(doctor.Issue{Location: "plans_dirs", Message: fmt.Sprintf("path is not a directory: %s", plans)})
+			reporter.add(doctor.Issue{Location: "plans_dirs", Message: fmt.Sprintf("path is not a directory: %s", plans)})
 		default:
-			reporter.Printf("PASS plans_dirs: %s\n", plans)
+			reporter.printf("PASS plans_dirs: %s\n", plans)
 			validDirectories = append(validDirectories, plans)
 		}
 	}
@@ -72,7 +95,7 @@ func doctorCommand(_ context.Context, cmd *ucli.Command) error {
 	for _, plansRoot := range validDirectories {
 		entries, readErr := vfs.ReadDir(plansRoot)
 		if readErr != nil {
-			reporter.Add(doctor.Issue{Location: filepath.Base(plansRoot), Message: fmt.Sprintf("cannot read plans directory: %v", readErr)})
+			reporter.add(doctor.Issue{Location: filepath.Base(plansRoot), Message: fmt.Sprintf("cannot read plans directory: %v", readErr)})
 			continue
 		}
 		for _, entry := range entries {
@@ -90,13 +113,13 @@ func doctorCommand(_ context.Context, cmd *ucli.Command) error {
 					issues = append(issues, doctor.Issue{Location: inspection.Directory + "/PLAN.md", Message: fmt.Sprintf("cannot repair checklist: %v", writeErr)})
 					issues = append(issues, inspection.ChecklistIssues...)
 				} else {
-					reporter.Printf("FIXED %s/PLAN.md: synchronized checklist with phases\n", inspection.Directory)
+					reporter.printf("FIXED %s/PLAN.md: synchronized checklist with phases\n", inspection.Directory)
 				}
 			} else {
 				issues = append(issues, inspection.ChecklistIssues...)
 			}
 			for _, issue := range issues {
-				reporter.Add(issue)
+				reporter.add(issue)
 			}
 			plans = append(plans, inspection)
 		}
@@ -106,26 +129,28 @@ func doctorCommand(_ context.Context, cmd *ucli.Command) error {
 	for _, inspection := range plans {
 		name := draft.PlanName(inspection.Directory)
 		if previous, found := byName[name]; found {
-			reporter.Add(doctor.Issue{Location: inspection.Directory, Message: fmt.Sprintf("duplicate plan name %q also exists at %s", name, previous.Directory)})
+			reporter.add(doctor.Issue{Location: inspection.Directory, Message: fmt.Sprintf("duplicate plan name %q also exists at %s", name, previous.Directory)})
 			continue
 		}
 		byName[name] = inspection
 	}
 	for _, inspection := range plans {
-		doctor.CheckPlanDependencies(reporter, inspection, byName)
+		for _, issue := range doctor.CheckPlanDependencies(inspection, byName) {
+			reporter.add(issue)
+		}
 	}
 
-	if reporter.Issues == 0 {
-		if reporter.JSON {
-			return jsonout.Write(jsonout.Doctor(reporter.Records))
+	if len(reporter.records) == 0 {
+		if reporter.json {
+			return jsonout.Write(jsonout.Doctor(reporter.records))
 		}
 		fmt.Println("Doctor found no problems")
 		return nil
 	}
-	if reporter.JSON {
-		if err := jsonout.Write(jsonout.Doctor(reporter.Records)); err != nil {
+	if reporter.json {
+		if err := jsonout.Write(jsonout.Doctor(reporter.records)); err != nil {
 			return err
 		}
 	}
-	return fmt.Errorf("doctor found %d problem(s)", reporter.Issues)
+	return fmt.Errorf("doctor found %d problem(s)", len(reporter.records))
 }

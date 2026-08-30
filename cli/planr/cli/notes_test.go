@@ -10,7 +10,6 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/ironpark/toolz/cli/planr/cli/phase"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
 	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/ironpark/toolz/cli/planr/internal/hooks"
@@ -127,7 +126,7 @@ func TestPhaseStartRecordsNoteForCurrentHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(old) })
-	if err := phase.Command(nil).Run(context.Background(), []string{"phase", "start", "checkout-v2", "0"}); err != nil {
+	if err := phaseCommand().Run(context.Background(), []string{"phase", "start", "checkout-v2", "0"}); err != nil {
 		t.Fatalf("phase start failed: %v", err)
 	}
 	recorded, err := notes.Read(root, "checkout-v2")

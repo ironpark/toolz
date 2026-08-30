@@ -9,6 +9,7 @@ import (
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/ironpark/toolz/cli/planr/internal/doc"
+	"github.com/ironpark/toolz/cli/planr/internal/gitrepo"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/plantest"
@@ -165,12 +166,12 @@ func TestUncommittedSourcePathsExcludePlanFiles(t *testing.T) {
 		t.Fatalf("write config file: %v", err)
 	}
 
-	paths, err := plan.UncommittedSourcePaths(root, []string{filepath.Join(root, "plan")}, nil)
+	paths, err := gitrepo.UncommittedSourcePaths(root, []string{filepath.Join(root, "plan")}, nil)
 	if err != nil {
-		t.Fatalf("plan.UncommittedSourcePaths() unexpected error: %v", err)
+		t.Fatalf("gitrepo.UncommittedSourcePaths() unexpected error: %v", err)
 	}
 	if len(paths) != 1 || paths[0] != "main.go" {
-		t.Fatalf("plan.UncommittedSourcePaths() = %#v, want [main.go]", paths)
+		t.Fatalf("gitrepo.UncommittedSourcePaths() = %#v, want [main.go]", paths)
 	}
 }
 
@@ -237,17 +238,17 @@ func TestUncommittedSourcePathsIgnoresPlanDrafts(t *testing.T) {
 		}
 	}
 
-	paths, err := plan.UncommittedSourcePaths(root, []string{filepath.Join(root, "plan")}, nil)
+	paths, err := gitrepo.UncommittedSourcePaths(root, []string{filepath.Join(root, "plan")}, nil)
 	if err != nil {
-		t.Fatalf("plan.UncommittedSourcePaths() unexpected error: %v", err)
+		t.Fatalf("gitrepo.UncommittedSourcePaths() unexpected error: %v", err)
 	}
 	want := []string{"empty.txt", "main.go", "notes.md"}
 	if len(paths) != len(want) {
-		t.Fatalf("plan.UncommittedSourcePaths() = %#v, want %#v", paths, want)
+		t.Fatalf("gitrepo.UncommittedSourcePaths() = %#v, want %#v", paths, want)
 	}
 	for index, path := range want {
 		if paths[index] != path {
-			t.Fatalf("plan.UncommittedSourcePaths() = %#v, want %#v", paths, want)
+			t.Fatalf("gitrepo.UncommittedSourcePaths() = %#v, want %#v", paths, want)
 		}
 	}
 }

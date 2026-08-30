@@ -14,6 +14,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/planlock"
+	"github.com/ironpark/toolz/cli/planr/internal/planstore"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
@@ -110,7 +111,7 @@ func phaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte, targ
 		detail := fmt.Sprintf("cannot apply phase edit for %s phase %02d: status changed from %q to %q; use `planr phase %s` to change phase status", planDirectory, phaseID, currentStatus, incomingStatus, phaseStatusCommand(incomingStatus))
 		return Operation{}, validation.NewFailure(validation.Record{Rule: "status_transition", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
-	if !plan.StatusValues[currentStatus] {
+	if !draft.ValidStatus(currentStatus) {
 		detail := fmt.Sprintf("%s phase %02d has invalid status %q", planDirectory, phaseID, currentStatus)
 		return Operation{}, validation.NewFailure(validation.Record{Rule: "status", Section: "frontmatter", Phase: validation.IntPointer(phaseID), Detail: detail}, detail)
 	}
@@ -184,7 +185,7 @@ func phaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte, targ
 		if frontErr != nil {
 			return Operation{}, frontErr
 		}
-		updatedBody, updateErr := plan.ReplaceChecklistEntry(planBody, phaseID, title, meta.Slug, currentStatus == "done")
+		updatedBody, updateErr := plan.ReplaceChecklistEntry(planBody, phaseID, title, meta.Slug, currentStatus == draft.StatusDone)
 		if updateErr != nil {
 			return Operation{}, updateErr
 		}
@@ -199,13 +200,16 @@ func phaseEdit(raw []byte, incomingFront map[string]any, currentRaw []byte, targ
 	if dryRun || !op.Changed {
 		return op, nil
 	}
-	if err := mdoc.WriteAtomically(target, newPhase); err != nil {
-		return Operation{}, err
-	}
+	changes := []planstore.Change{planstore.Update(target, string(currentRaw), newPhase)}
 	if planPath, ok := changedPlanPath(documents, target); ok {
-		if err := mdoc.WriteAtomically(planPath, documents[planPath]); err != nil {
+		planRaw, err := vfs.ReadFile(planPath)
+		if err != nil {
 			return Operation{}, err
 		}
+		changes = append(changes, planstore.Update(planPath, string(planRaw), documents[planPath]))
+	}
+	if err := planstore.Apply(changes...); err != nil {
+		return Operation{}, err
 	}
 	fmt.Fprintf(output, "Updated %s\n", target)
 	return op, nil
@@ -219,13 +223,13 @@ func changedPlanPath(documents map[string]string, phasePath string) (string, boo
 
 func phaseStatusCommand(status string) string {
 	switch status {
-	case "in-progress":
+	case draft.StatusInProgress:
 		return "start"
-	case "done":
+	case draft.StatusDone:
 		return "done"
-	case "planned":
+	case draft.StatusPlanned:
 		return "reset"
-	case "conditional":
+	case draft.StatusConditional:
 		return "set --status conditional"
 	default:
 		return "set --status <status>"

@@ -57,7 +57,7 @@ func (p *Summary) AddDependency(raw string) {
 func (p Summary) Progress() (done, total int, next string) {
 	for _, phase := range p.Phases {
 		total++
-		if phase.Status == "done" {
+		if phase.Status == draft.StatusDone {
 			done++
 		} else if next == "" {
 			next = phase.Title
@@ -126,7 +126,7 @@ func RenderDocuments(d draft.Draft, planDirectory, language, registeredAt string
 	}
 	checklist := []string{}
 	for _, p := range d.Phases {
-		checklist = append(checklist, ChecklistEntry(p.Meta.Phase, p.Title, p.Meta.Slug, p.Meta.Status == "done"))
+		checklist = append(checklist, ChecklistEntry(p.Meta.Phase, p.Title, p.Meta.Slug, p.Meta.Status == draft.StatusDone))
 		path := PhaseDocumentPath(p.Meta.Phase, p.Meta.Slug)
 		contents, err := mdoc.Render(PhaseFrontmatter(planDirectory, p.Meta), PhaseDocumentBody(language, p.Title, p.Planned, p.Completion))
 		if err != nil {
@@ -134,7 +134,7 @@ func RenderDocuments(d draft.Draft, planDirectory, language, registeredAt string
 		}
 		documents[path] = contents
 	}
-	meta := map[string]any{"description": d.Description, "registered_at": registeredAt, "plan_status": "in-progress", "depends_on": d.DependsOn, "succeeded_by": nil, "preceded_by": nil}
+	meta := map[string]any{"description": d.Description, "registered_at": registeredAt, "plan_status": draft.StatusInProgress, "depends_on": d.DependsOn, "succeeded_by": nil, "preceded_by": nil}
 	header, err := yaml.Marshal(mdoc.PruneEmptyMeta(meta))
 	if err != nil {
 		return nil, err
@@ -336,7 +336,7 @@ func CollectSummaries(planDirectories []string, filter string) ([]Summary, bool,
 			for _, dependency := range mdoc.Strings(front["depends_on"]) {
 				summary.AddDependency(dependency)
 			}
-			if status != "done" {
+			if status != draft.StatusDone {
 				for _, phase := range phases {
 					for _, dependency := range phase.Dependencies {
 						if _, _, found := strings.Cut(dependency, "#"); found {
@@ -361,7 +361,7 @@ func AnnotateWaits(summaries []Summary) map[string]bool {
 	}
 	for index := range summaries {
 		summary := &summaries[index]
-		if summary.Status == "done" {
+		if summary.Status == draft.StatusDone {
 			continue
 		}
 		for _, dependency := range summary.DependsOn {
@@ -376,7 +376,7 @@ func AnnotateWaits(summaries []Summary) map[string]bool {
 				continue
 			}
 			if dependency.Phase == nil {
-				if target.Status != "done" {
+				if target.Status != draft.StatusDone {
 					summary.Wait = append(summary.Wait, fmt.Sprintf("%s (%s)", label, target.Status))
 				}
 				continue
@@ -387,7 +387,7 @@ func AnnotateWaits(summaries []Summary) map[string]bool {
 					continue
 				}
 				phaseFound = true
-				if phase.Status != "done" {
+				if phase.Status != draft.StatusDone {
 					summary.Wait = append(summary.Wait, fmt.Sprintf("%s (%s)", label, phase.Status))
 				}
 				break
