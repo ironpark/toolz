@@ -13,6 +13,7 @@ import (
 
 	configuration "github.com/ironpark/toolz/cli/mohae/internal/config"
 	"github.com/ironpark/toolz/cli/mohae/internal/report"
+	reportformat "github.com/ironpark/toolz/cli/mohae/internal/report/format"
 	"github.com/ironpark/toolz/cli/mohae/internal/runner"
 	"github.com/urfave/cli/v3"
 )
@@ -54,7 +55,7 @@ func runAction(version string) cli.ActionFunc {
 			return err
 		}
 		output := cmd.String("output")
-		if err := checkFlagValue("output", output, report.KnownFormats); err != nil {
+		if err := checkFlagValue("output", output, reportformat.All()); err != nil {
 			return err
 		}
 		concurrency := cmd.Int("concurrency")

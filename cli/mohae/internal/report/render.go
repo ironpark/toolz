@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ironpark/toolz/cli/mohae/internal/fileutil"
-	"github.com/ironpark/toolz/cli/mohae/internal/reportformat"
+	"github.com/ironpark/toolz/cli/mohae/internal/fsutil"
+	reportformat "github.com/ironpark/toolz/cli/mohae/internal/report/format"
 	"github.com/ironpark/toolz/cli/mohae/internal/runner"
 )
 
@@ -28,11 +28,9 @@ type ReportOptions struct {
 	ShowDialogue bool
 }
 
-// reportFormats is the one place a report format is defined: how it renders
-// and, if it can be written to disk, under what suffix. A format added here is
-// accepted by validation, rendered and written; there is no second table to
-// keep in step, so a format cannot pass `mohae run --output` and then fail only
-// after every trial has been paid for.
+// reportFormats connects each name from the format package to its renderer and,
+// if it can be written to disk, its suffix. A consistency test keeps this
+// executable registry aligned with the names accepted by config and flags.
 //
 // terminal has no extension on purpose: it is a rendering for a screen, and
 // writing it to a file would produce something no other tool can read.
@@ -45,9 +43,6 @@ var reportFormats = map[string]struct {
 	reportformat.Markdown: {".md", func(r []runner.TrialResult, o ReportOptions) (string, error) { return renderMarkdown(r, o), nil }},
 	reportformat.HTML:     {".html", func(r []runner.TrialResult, o ReportOptions) (string, error) { return renderHTML(r, o), nil }},
 }
-
-// KnownFormats are the report renderings, in a stable order for error messages.
-var KnownFormats = reportformat.Known
 
 // RenderReport renders a run's results in one format.
 func RenderReport(format string, results []runner.TrialResult, options ReportOptions) (string, error) {
@@ -77,7 +72,10 @@ func WriteReports(dir string, name string, formats []string, results []runner.Tr
 	created := false
 	for _, format := range formats {
 		entry, ok := reportFormats[format]
-		if !ok || entry.extension == "" || seen[format] {
+		if !ok {
+			return written, fmt.Errorf("unknown report format %q", format)
+		}
+		if entry.extension == "" || seen[format] {
 			continue
 		}
 		seen[format] = true
@@ -93,7 +91,7 @@ func WriteReports(dir string, name string, formats []string, results []runner.Tr
 			}
 			created = true
 		}
-		path, err := writeUnique(dir, stem, entry.extension, []byte(content))
+		path, err := fsutil.WriteFileUnique(dir, stem, entry.extension, []byte(content), 0o644)
 		if err != nil {
 			return written, err
 		}
@@ -115,31 +113,6 @@ func summarize(results []runner.TrialResult) (passed int, total runner.TokenUsag
 	return passed, total
 }
 
-// writeUnique writes content as stem+extension in dir, appending a counter if
-// that name is taken. The same trial run twice inside one second is rare but it
-// does happen — a re-run to check a flake is exactly when it would — and
-// silently replacing the earlier report would destroy the measurement being
-// compared against. O_EXCL makes the claim atomic, so two trials racing to the
-// same name cannot both think they created it.
-func writeUnique(dir, stem, extension string, content []byte) (string, error) {
-	return fileutil.ClaimUniqueName(dir, stem, extension, func(path string) error {
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-		if err != nil {
-			return err
-		}
-		if _, err := file.Write(content); err != nil {
-			file.Close()
-			return err
-		}
-		return file.Close()
-	})
-}
-
-// claimUniqueName finds a name built from stem in dir that create can claim,
-// appending a counter on collision, and returns the path it created. Both a
-// written report file and a created artifact directory need this same
-// "try, retry with -N on collision" claim, so it lives once here rather than
-// twice.
 // renderTerminal is the rendering a run prints as it finishes: the verdict
 // first, then what it cost, then what failed. Anything that passed needs no
 // explanation, so only failures carry their detail.

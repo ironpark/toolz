@@ -148,6 +148,22 @@ func TestArtifactCapturePreservesSymlinksWithoutFollowingThem(t *testing.T) {
 	}
 }
 
+func TestArtifactDirectoryKeepsItsSuffixAfterACollision(t *testing.T) {
+	directory := t.TempDir()
+	started := time.Date(2026, time.August, 30, 12, 34, 56, 0, time.UTC)
+	first, err := makeArtifactDirectory(directory, "trial", started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := makeArtifactDirectory(directory, "trial", started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(first) != "trial-20260830-123456.artifacts" || filepath.Base(second) != "trial-20260830-123456-2.artifacts" {
+		t.Fatalf("created %q and %q", first, second)
+	}
+}
+
 func TestRunTrialFailsAndKeepsTheWorkspaceWhenVerificationFails(t *testing.T) {
 	config := trialConfig(t, "echo i did nothing\n")
 	config.Verify.Commands = []string{

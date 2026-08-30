@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ironpark/toolz/cli/mohae/internal/report"
+	reportformat "github.com/ironpark/toolz/cli/mohae/internal/report/format"
 	"github.com/urfave/cli/v3"
 )
 
@@ -24,7 +24,7 @@ func NewReport() *cli.Command {
 }
 
 func reportAction(_ context.Context, cmd *cli.Command) error {
-	if err := checkFlagValue("output", cmd.String("output"), report.KnownFormats); err != nil {
+	if err := checkFlagValue("output", cmd.String("output"), reportformat.All()); err != nil {
 		return err
 	}
 	if cmd.NArg() > 1 {

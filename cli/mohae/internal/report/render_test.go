@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	reportformat "github.com/ironpark/toolz/cli/mohae/internal/report/format"
 )
 
 // sampleResults are one passing and one failing trial, which is enough to
@@ -156,6 +158,24 @@ func TestHTMLReportEscapesWhatTheAgentWrote(t *testing.T) {
 
 func TestRenderReportRejectsAnUnknownFormat(t *testing.T) {
 	if _, err := RenderReport("carrier-pigeon", sampleResults(), ReportOptions{}); err == nil {
+		t.Fatal("expected an unknown format to be refused")
+	}
+}
+
+func TestEveryKnownFormatHasExactlyOneRenderer(t *testing.T) {
+	known := reportformat.All()
+	if len(reportFormats) != len(known) {
+		t.Fatalf("renderers = %v, known formats = %v", reportFormats, known)
+	}
+	for _, name := range known {
+		if _, ok := reportFormats[name]; !ok {
+			t.Errorf("known format %q has no renderer", name)
+		}
+	}
+}
+
+func TestWriteReportsRejectsAnUnknownFormat(t *testing.T) {
+	if _, err := WriteReports(t.TempDir(), "", []string{"carrier-pigeon"}, sampleResults(), ReportOptions{}); err == nil {
 		t.Fatal("expected an unknown format to be refused")
 	}
 }

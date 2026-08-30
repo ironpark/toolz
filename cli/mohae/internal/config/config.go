@@ -12,7 +12,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/ironpark/toolz/cli/mohae/internal/agent"
-	"github.com/ironpark/toolz/cli/mohae/internal/reportformat"
+	reportformat "github.com/ironpark/toolz/cli/mohae/internal/report/format"
 )
 
 // DefaultConfigName is the file `run` and `verify` fall back to when no path is
@@ -295,8 +295,8 @@ func (c *Config) Validate() error {
 		}
 	}
 	for _, format := range c.Report.Formats {
-		if !slices.Contains(reportformat.Known, format) {
-			return fmt.Errorf("unknown report format %q (one of: %s)", format, strings.Join(reportformat.Known, ", "))
+		if !reportformat.IsKnown(format) {
+			return fmt.Errorf("unknown report format %q (one of: %s)", format, strings.Join(reportformat.All(), ", "))
 		}
 	}
 	if c.Limits.TimeoutSeconds < 0 {
