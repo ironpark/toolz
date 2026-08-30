@@ -192,6 +192,15 @@ func renderTerminal(results []TrialResult, options ReportOptions) string {
 				fmt.Fprintf(out, "        turn %d failed: %s\n", turn.Index, firstLine(turn.Error))
 			}
 		}
+		for _, hook := range result.Hooks {
+			if hook.Passed {
+				continue
+			}
+			fmt.Fprintf(out, "        hook after failed (%s, exit %d): %s\n", hook.Scope, hook.ExitCode, hook.Command)
+			for _, line := range outputLines(hook.Output, 5) {
+				fmt.Fprintf(out, "          %s\n", line)
+			}
+		}
 		for _, check := range result.Verify {
 			if check.Passed {
 				continue
@@ -291,6 +300,12 @@ func renderMarkdown(results []TrialResult, options ReportOptions) string {
 				fmt.Fprintf(out, "\n```\n> %s\n\n%s\n```\n\n", strings.TrimSpace(turn.Prompt), strings.TrimSpace(turn.Response))
 			}
 		}
+		for _, hook := range result.Hooks {
+			fmt.Fprintf(out, "- hook after %s (%s, exit %d): `%s`\n", verdictWord(hook.Passed), hook.Scope, hook.ExitCode, hook.Command)
+			if !hook.Passed && hook.Output != "" {
+				fmt.Fprintf(out, "\n```\n%s\n```\n\n", hook.Output)
+			}
+		}
 		for _, check := range result.Verify {
 			fmt.Fprintf(out, "- verify %s (exit %d): `%s`\n", verdictWord(check.Passed), check.ExitCode, check.Command)
 			if !check.Passed && check.Output != "" {
@@ -356,6 +371,10 @@ pre { background: #f6f6f6; padding: .6rem; overflow-x: auto; }
 				continue
 			}
 			fmt.Fprintf(out, "<li>turn %d: %s, %s</li>\n", turn.Index, html.EscapeString(usageText(turn.Usage, options.DetailedTokens)), durationText(turn.DurationSeconds))
+		}
+		for _, hook := range result.Hooks {
+			fmt.Fprintf(out, "<li class=\"%s\">hook after %s (%s, exit %d): <code>%s</code></li>\n",
+				verdictWord(hook.Passed), verdictWord(hook.Passed), html.EscapeString(hook.Scope), hook.ExitCode, html.EscapeString(hook.Command))
 		}
 		for _, check := range result.Verify {
 			fmt.Fprintf(out, "<li class=\"%s\">verify %s (exit %d): <code>%s</code></li>\n",

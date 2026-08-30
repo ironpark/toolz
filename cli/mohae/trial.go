@@ -95,15 +95,23 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 		result.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 		return result
 	}
-	defer driver.Close()
 
 	result.Turns, result.Usage, err = runConversation(ctx, config, workspace, driver, options, out, started)
+	// End the agent session before exposing the workspace to completion hooks.
+	// In particular, a persistent driver must not still be able to write while
+	// a hook is finalizing the same files.
+	_ = driver.Close()
 	if err != nil {
 		result.Error = err.Error()
 	}
 	result.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 
-	// Verification runs even after a failed or timed-out conversation: the
+	// Completion hooks run even after a failed or timed-out conversation: the
+	// workspace may still need to be finalized before it can be graded. They
+	// get a fresh bounded context for the same reason verification does.
+	result.Hooks = runAfterHooks(ctx, config, workspace, options, out)
+
+	// Verification runs even after a failed hook or conversation: the
 	// workspace is still there to be graded, and "the agent stopped early but
 	// the task was done" is a result worth telling apart from "it was not".
 	result.Verify = runVerifyCommands(ctx, config, workspace, options, out)
@@ -111,7 +119,8 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 	if err != nil {
 		result.ArtifactError = err.Error()
 	}
-	result.Passed = result.Error == "" && result.ArtifactError == "" && !result.TimedOut && result.VerifyPassed() == len(result.Verify)
+	result.Passed = result.Error == "" && result.ArtifactError == "" && !result.TimedOut &&
+		result.HooksPassed() == len(result.Hooks) && result.VerifyPassed() == len(result.Verify)
 	return result
 }
 

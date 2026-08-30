@@ -42,6 +42,7 @@ type Config struct {
 	Prompts []Prompt          `yaml:"prompts"`
 	Skills  []SkillConfig     `yaml:"skills,omitempty"`
 	MCP     []MCPServerConfig `yaml:"mcp,omitempty"`
+	Hooks   HooksConfig       `yaml:"hooks,omitempty"`
 	Verify  VerifyConfig      `yaml:"verify,omitempty"`
 	// Artifacts are workspace-relative paths or glob patterns copied into the
 	// report directory after verification, before a passing workspace is
@@ -119,6 +120,49 @@ func (m MCPServerConfig) EnabledFor(agentType string) bool {
 // the checks.
 type VerifyConfig struct {
 	Commands []string `yaml:"commands,omitempty"`
+}
+
+// HooksConfig contains commands that may change the isolated workspace at a
+// lifecycle boundary. After commands run once the agent session has finished,
+// before verification and artifact capture, either inside the workspace or in
+// its isolated scratch sibling.
+type HooksConfig struct {
+	After []HookCommand `yaml:"after,omitempty"`
+}
+
+const (
+	HookScopeWorkspace = "workspace"
+	HookScopeOutside   = "outside"
+)
+
+// HookCommand is one lifecycle command. Scope selects whether it
+// can change the agent's workspace or runs from the isolated scratch sibling.
+// A bare YAML string is shorthand for a workspace command.
+type HookCommand struct {
+	Run   string `yaml:"run"`
+	Scope string `yaml:"scope,omitempty"`
+}
+
+func (h *HookCommand) UnmarshalYAML(data []byte) error {
+	var run string
+	if err := yaml.Unmarshal(data, &run); err == nil {
+		h.Run = run
+		return nil
+	}
+	type hookFields HookCommand
+	fields := hookFields{}
+	if err := yaml.UnmarshalWithOptions(data, &fields, yaml.Strict()); err != nil {
+		return err
+	}
+	*h = HookCommand(fields)
+	return nil
+}
+
+func (h HookCommand) directory(workspace *Workspace) (string, string) {
+	if h.Scope == HookScopeOutside {
+		return workspace.Scratch, HookScopeOutside
+	}
+	return workspace.Root, HookScopeWorkspace
 }
 
 type LimitsConfig struct {
@@ -203,6 +247,14 @@ func (c *Config) Validate() error {
 	for index, pattern := range c.Artifacts {
 		if err := validateWorkspacePattern(pattern); err != nil {
 			return fmt.Errorf("artifacts[%d]: %w", index, err)
+		}
+	}
+	for index, command := range c.Hooks.After {
+		if strings.TrimSpace(command.Run) == "" {
+			return fmt.Errorf("hooks.after[%d].run must not be empty", index)
+		}
+		if command.Scope != "" && command.Scope != HookScopeWorkspace && command.Scope != HookScopeOutside {
+			return fmt.Errorf("hooks.after[%d].scope must be %q or %q", index, HookScopeWorkspace, HookScopeOutside)
 		}
 	}
 	if len(c.Prompts) == 0 {

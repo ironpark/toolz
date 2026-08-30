@@ -21,6 +21,7 @@ type Profile struct {
 	Prompts   []Prompt          `yaml:"prompts,omitempty"`
 	Skills    []SkillConfig     `yaml:"skills,omitempty"`
 	MCP       []MCPServerConfig `yaml:"mcp,omitempty"`
+	Hooks     *HooksConfig      `yaml:"hooks,omitempty"`
 	Verify    *VerifyConfig     `yaml:"verify,omitempty"`
 	Artifacts []string          `yaml:"artifacts,omitempty"`
 	Limits    *LimitsConfig     `yaml:"limits,omitempty"`
@@ -56,6 +57,9 @@ func (c *Config) ApplyProfile(name string) error {
 	}
 	if profile.MCP != nil {
 		c.MCP = profile.MCP
+	}
+	if profile.Hooks != nil {
+		c.Hooks = *profile.Hooks
 	}
 	if profile.Verify != nil {
 		c.Verify = *profile.Verify

@@ -17,6 +17,11 @@ const profiledConfig = minimalConfig + `profiles:
       timeout_seconds: 60
   artifacts-only:
     artifacts: [plans/**]
+  finalize:
+    hooks:
+      after:
+        - run: ./finalize.sh
+          scope: outside
 `
 
 func TestProfilesOverwriteSectionsWholesale(t *testing.T) {
@@ -66,6 +71,20 @@ func TestProfileCanReplaceArtifacts(t *testing.T) {
 	}
 	if len(config.Artifacts) != 1 || config.Artifacts[0] != "plans/**" {
 		t.Errorf("artifacts = %v", config.Artifacts)
+	}
+}
+
+func TestProfileCanReplaceHooks(t *testing.T) {
+	config, err := LoadConfig(writeConfig(t, profiledConfig+"hooks:\n  after: [echo base]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.ApplyProfile("finalize"); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Hooks.After) != 1 || config.Hooks.After[0].Run != "./finalize.sh" ||
+		config.Hooks.After[0].Scope != HookScopeOutside {
+		t.Errorf("hooks = %+v", config.Hooks)
 	}
 }
 

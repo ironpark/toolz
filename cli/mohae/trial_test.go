@@ -44,6 +44,53 @@ func TestRunTrialPassesWhenEveryVerifyCommandPasses(t *testing.T) {
 	}
 }
 
+func TestRunTrialRunsAfterHooksBeforeVerificationAndArtifactCapture(t *testing.T) {
+	config := trialConfig(t, "echo done\n")
+	config.Hooks.After = []HookCommand{
+		{Run: `printf 'finalized\n' > completed.txt`},
+		{Run: `test "$PWD" = "$MOHAE_WORKSPACE" && printf 'environment ok\n'`},
+		{Run: `test "$PWD" != "$MOHAE_WORKSPACE" && touch outside-only`, Scope: HookScopeOutside},
+	}
+	config.Verify.Commands = []string{`test "$(cat "$MOHAE_WORKSPACE/completed.txt")" = finalized && test ! -e "$MOHAE_WORKSPACE/outside-only"`}
+	config.Artifacts = []string{"completed.txt"}
+
+	result := RunTrial(context.Background(), config, TrialOptions{})
+	if !result.Passed || result.HooksPassed() != 3 {
+		t.Fatalf("result = %+v, want hooks and verification to pass", result)
+	}
+	if result.Hooks[1].Output != "environment ok" {
+		t.Errorf("hook output = %q", result.Hooks[1].Output)
+	}
+	if result.Hooks[0].Scope != HookScopeWorkspace || result.Hooks[2].Scope != HookScopeOutside {
+		t.Errorf("hook scopes = %+v", result.Hooks)
+	}
+	data, err := os.ReadFile(filepath.Join(result.ArtifactDir, "completed.txt"))
+	if err != nil || string(data) != "finalized\n" {
+		t.Errorf("captured hook output = %q, %v", data, err)
+	}
+}
+
+func TestRunTrialRecordsAFailedAfterHookAndStillVerifies(t *testing.T) {
+	config := trialConfig(t, "echo done\n")
+	config.Hooks.After = []HookCommand{{Run: "echo hook broke; exit 7"}, {Run: "touch later-hook-ran"}}
+	config.Verify.Commands = []string{`test -f "$MOHAE_WORKSPACE/later-hook-ran"`}
+
+	result := RunTrial(context.Background(), config, TrialOptions{})
+	if result.Passed || len(result.Hooks) != 2 || result.Hooks[0].ExitCode != 7 {
+		t.Fatalf("result = %+v, want a failed hook", result)
+	}
+	if result.Hooks[0].Output != "hook broke" || !result.Hooks[1].Passed {
+		t.Errorf("hooks = %+v", result.Hooks)
+	}
+	if len(result.Verify) != 1 || !result.Verify[0].Passed {
+		t.Errorf("verification did not run after the hook failure: %+v", result.Verify)
+	}
+	if result.Workspace == "" {
+		t.Fatal("a hook failure did not preserve the workspace")
+	}
+	defer os.RemoveAll(filepath.Dir(result.Workspace))
+}
+
 func TestRunTrialCapturesArtifactsBeforeDeletingAPassingWorkspace(t *testing.T) {
 	config := trialConfig(t, "mkdir -p plans/hello .harness\necho plan > plans/hello/PLAN.md\necho event > .harness/events.log\n")
 	config.Verify.Commands = []string{"true"}
@@ -241,7 +288,8 @@ func TestRunTrialStopsTheConversationWhenATurnFails(t *testing.T) {
 func TestRunTrialReportsItsOwnTimeoutAndStillGrades(t *testing.T) {
 	config := trialConfig(t, "sleep 30\n")
 	config.Limits.TimeoutSeconds = 1
-	config.Verify.Commands = []string{"true"}
+	config.Hooks.After = []HookCommand{{Run: "touch finalized-after-timeout"}}
+	config.Verify.Commands = []string{`test -f "$MOHAE_WORKSPACE/finalized-after-timeout"`}
 
 	result := RunTrial(context.Background(), config, TrialOptions{KeepWorkspace: true})
 	defer os.RemoveAll(filepath.Dir(result.Workspace))
@@ -258,6 +306,9 @@ func TestRunTrialReportsItsOwnTimeoutAndStillGrades(t *testing.T) {
 	// was finished before the agent hung is still gradable.
 	if len(result.Verify) != 1 || !result.Verify[0].Passed {
 		t.Errorf("verify = %+v, want it to have run despite the timeout", result.Verify)
+	}
+	if len(result.Hooks) != 1 || !result.Hooks[0].Passed {
+		t.Errorf("hooks = %+v, want completion to have run despite the timeout", result.Hooks)
 	}
 	if result.DurationSeconds > 20 {
 		t.Errorf("the trial took %.1fs; the limit did not stop it", result.DurationSeconds)
@@ -297,12 +348,13 @@ func TestRunTrialSendsAPromptFileAsItsTurn(t *testing.T) {
 func TestRunTrialStreamsTheDialogueWhenAsked(t *testing.T) {
 	config := trialConfig(t, "echo working on it\n")
 	config.Verify.Commands = []string{"true"}
+	config.Hooks.After = []HookCommand{{Run: "echo finalized"}}
 	out := &bytes.Buffer{}
 
 	RunTrial(context.Background(), config, TrialOptions{ShowDialogue: true, Out: out})
 	text := out.String()
 	// Both halves of the conversation, so the transcript on screen reads as one.
-	for _, want := range []string{"do the thing", "working on it", "verify pass"} {
+	for _, want := range []string{"do the thing", "working on it", "hook after pass", "verify pass"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("dialogue = %q, want it to contain %q", text, want)
 		}

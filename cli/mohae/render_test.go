@@ -30,6 +30,7 @@ func sampleResults() []TrialResult {
 		{
 			Name: "failing", Agent: "custom-cli", DurationSeconds: 3,
 			Turns:     []TurnResult{{Index: 1, Sent: true, Prompt: "do the thing", Response: "gave up"}},
+			Hooks:     []HookResult{{Command: "./finalize.sh", Scope: HookScopeOutside, ExitCode: 3, Output: "finalize failed"}},
 			Verify:    []VerifyResult{{Command: "test -f out.txt", ExitCode: 1, Output: "out.txt is missing"}},
 			MCP:       []MCPProbe{{Name: "files", Error: "connection refused"}},
 			Workspace: "/tmp/mohae-failing/workspace",
@@ -46,6 +47,8 @@ func TestTerminalReportLeadsWithTheVerdictAndExplainsOnlyFailures(t *testing.T) 
 		"PASS", "FAIL",
 		"1/2 passed",
 		"verify failed (exit 1): test -f out.txt",
+		"hook after failed (outside, exit 3): ./finalize.sh",
+		"finalize failed",
 		"out.txt is missing",
 		// A failed trial's workspace is the only record of what the agent did.
 		"/tmp/mohae-failing/workspace",

@@ -22,6 +22,7 @@ type TrialResult struct {
 	DurationSeconds float64 `json:"duration_seconds"`
 
 	Turns  []TurnResult   `json:"turns"`
+	Hooks  []HookResult   `json:"hooks,omitempty"`
 	Verify []VerifyResult `json:"verify,omitempty"`
 	MCP    []MCPProbe     `json:"mcp,omitempty"`
 	// ArtifactDir is the persistent copy made before the temporary workspace
@@ -54,6 +55,19 @@ type TrialResult struct {
 type ArtifactResult struct {
 	Pattern string   `json:"pattern"`
 	Paths   []string `json:"paths,omitempty"`
+}
+
+// HookResult records one command run after the agent session. Hook commands
+// are operational steps rather than graders, but a failed hook makes the trial
+// fail because verification would otherwise inspect an incompletely finalized
+// workspace.
+type HookResult struct {
+	Command         string  `json:"command"`
+	Scope           string  `json:"scope"`
+	ExitCode        int     `json:"exit_code"`
+	Passed          bool    `json:"passed"`
+	Output          string  `json:"output,omitempty"`
+	DurationSeconds float64 `json:"duration_seconds"`
 }
 
 // TurnResult is one prompt and what it produced. A prompt that was never sent
@@ -102,6 +116,17 @@ func (r TrialResult) VerifyPassed() int {
 	passed := 0
 	for _, check := range r.Verify {
 		if check.Passed {
+			passed++
+		}
+	}
+	return passed
+}
+
+// HooksPassed counts completion hooks that exited successfully.
+func (r TrialResult) HooksPassed() int {
+	passed := 0
+	for _, hook := range r.Hooks {
+		if hook.Passed {
 			passed++
 		}
 	}

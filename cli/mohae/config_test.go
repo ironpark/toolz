@@ -81,6 +81,22 @@ func TestLoadConfigReadsWorkspaceExcludesAndArtifacts(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsAfterHooks(t *testing.T) {
+	config, err := LoadConfig(writeConfig(t, minimalConfig+`hooks:
+  after:
+    - gofmt -w .
+    - run: ./collect-state.sh
+      scope: outside
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Hooks.After) != 2 || config.Hooks.After[0].Run != "gofmt -w ." ||
+		config.Hooks.After[1].Run != "./collect-state.sh" || config.Hooks.After[1].Scope != HookScopeOutside {
+		t.Errorf("hooks.after = %v", config.Hooks.After)
+	}
+}
+
 func TestValidateRejectsUnsafeOrMalformedWorkspacePatterns(t *testing.T) {
 	for name, section := range map[string]string{
 		"absolute exclude": "workspace:\n  source: ./fixture\n  exclude: [/private/data]\n",
@@ -115,6 +131,8 @@ func TestValidateRejectsIncompleteConfigurations(t *testing.T) {
 		"non-boolean when":    minimalConfig + "    when: turn\n",
 		"unknown format":      minimalConfig + "report:\n  formats: [smoke-signal]\n",
 		"custom without argv": strings.Replace(minimalConfig, "codex", "custom-cli", 1),
+		"empty after hook":    minimalConfig + "hooks:\n  after: ['  ']\n",
+		"invalid hook scope":  minimalConfig + "hooks:\n  after:\n    - run: true\n      scope: source\n",
 	}
 	for name, contents := range cases {
 		t.Run(name, func(t *testing.T) {

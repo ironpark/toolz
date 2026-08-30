@@ -169,6 +169,15 @@ prompts:
   - text: Add a regression test for the build fix.
     after: [fix-build]
 
+# Commands run after the agent session ends and before verification. Scope
+# selects the workspace or its outside scratch directory. A failed command
+# fails the trial; later hooks still run.
+# hooks:
+#   after:
+#     - ./finalize.sh
+#     - run: ./publish-summary.sh
+#       scope: outside
+
 verify:
   # Shell commands run in order outside the workspace once the agent stops,
   # with $MOHAE_WORKSPACE pointing at it. Each exits zero to pass; what it
