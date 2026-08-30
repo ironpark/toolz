@@ -1,14 +1,16 @@
 # SCOPE
 
-- cli/mohae/init.go — scaffolding for the files the template references.
-- cli/mohae/run.go — the run action, concurrency, fail-fast, exit status.
-- cli/mohae/workspace.go — isolated workspace copy, init script, AGENTS.md,
+- cli/mohae/internal/app/init.go and templates/ — scaffolding and its embedded
+  project templates.
+- cli/mohae/internal/app/run.go — the run action, concurrency, fail-fast, exit
+  status.
+- cli/mohae/internal/app/workspace.go — isolated workspace copy, init script, AGENTS.md,
   skills, optional git.
 - cli/mohae/internal/driver/ — the agent drivers behind one interface.
-- cli/mohae/mcpwiring.go — MCP configuration files parsed once and handed to
+- cli/mohae/internal/app/mcpwiring.go — MCP configuration files parsed once and handed to
   each driver in the form it wants.
-- cli/mohae/trial.go — the turn loop and the verification stage.
-- cli/mohae/result.go, render.go — trial results and their renderings.
+- cli/mohae/internal/app/trial.go — the turn loop and the verification stage.
+- cli/mohae/internal/app/result.go, render.go — trial results and their renderings.
 - cli/mohae/README.md — Korean documentation of the behaviour that changed.
 
 # CONTEXT

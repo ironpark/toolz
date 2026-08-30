@@ -1,0 +1,74 @@
+# mohae trial configuration.
+# Paths are resolved relative to this file. See `mohae verify` to check
+# them before spending tokens on a run.
+name: {{template}}-trial
+description: what this trial is meant to measure
+
+agent:
+  type: codex
+  model: gpt-5.6-luna
+  effort: medium
+
+workspace:
+  # Copied into an isolated directory before every trial, so a run never
+  # modifies the source and repeated runs start from identical state.
+  source: ./fixture
+  # Source-relative globs omitted from the isolated copy. A slashless pattern
+  # matches a basename at any depth; ** crosses directory boundaries.
+  # exclude: [FIXTURE.*]
+  init_script: ./init.sh
+  # Installed as AGENTS.md in the workspace. Kept outside the fixture so one
+  # document can be shared by every configuration.
+  agent_md: ./AGENTS.md
+  git: true
+
+prompts:
+  # The conversation, in order. Deliberately not placed in the workspace: the
+  # agent works from what it was told, not from a task file it can re-read on
+  # disk. More than one entry makes the trial multi-turn.
+  # timeout_seconds bounds one turn alone: the clock starts when the prompt is
+  # sent and the turn is cancelled once it runs out. Without it, only the
+  # trial-wide limits.timeout_seconds applies.
+  - file: ./PROMPT.md
+    timeout_seconds: 120
+  # A follow-up sent only when its condition holds. Conditions are expr
+  # expressions over the conversation so far (turn, previous, responses,
+  # elapsed_seconds, timed_out) and the workspace the agent
+  # worked in (exists, read, sh).
+  # name labels a prompt so a later one can come after it; a dependent prompt
+  # is skipped when the prompt it comes after was never sent.
+  - name: fix-build
+    text: The build is broken. Fix it before you stop.
+    when: sh("go build ./...") != 0
+  - text: Add a regression test for the build fix.
+    after: [fix-build]
+
+# Commands run after the agent session ends and before verification. A bare
+# string uses workspace scope; outside runs from the isolated scratch sibling.
+# A failed command fails the trial, but later hooks and verification still run.
+# hooks:
+#   after:
+#     - ./finalize.sh
+#     - run: ./publish-summary.sh
+#       scope: outside
+
+verify:
+  # Shell commands run in order outside the workspace once the agent stops,
+  # with $MOHAE_WORKSPACE pointing at it. Each exits zero to pass; what it
+  # prints is up to it.
+  commands:
+    - ./verify.sh
+    - test -f "$MOHAE_WORKSPACE/README.md"
+
+# Preserve selected output after verification and before a passing workspace
+# is deleted. Paths and globs are relative to the workspace; missing matches
+# are reported but do not grade the trial.
+# artifacts:
+#   - .harness/*.log
+
+limits:
+  timeout_seconds: 300
+
+report:
+  dir: .mohae/reports
+  formats: [terminal, json]

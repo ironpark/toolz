@@ -1,0 +1,7 @@
+
+# Build and install the CLI under test from init.sh, which runs inside the
+# isolated workspace before the agent starts. Building there rather than
+# relying on the machine means the agent gets the current source:
+#
+#   go build -o "$PWD/bin/mytool" ./cmd/mytool
+#   export PATH="$PWD/bin:$PATH"
