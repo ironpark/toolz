@@ -169,9 +169,9 @@ prompts:
   - text: Add a regression test for the build fix.
     after: [fix-build]
 
-# Commands run after the agent session ends and before verification. Scope
-# selects the workspace or its outside scratch directory. A failed command
-# fails the trial; later hooks still run.
+# Commands run after the agent session ends and before verification. A bare
+# string uses workspace scope; outside runs from the isolated scratch sibling.
+# A failed command fails the trial, but later hooks and verification still run.
 # hooks:
 #   after:
 #     - ./finalize.sh
