@@ -1,7 +1,7 @@
 [project]
 name = "planr-scripts"
 version = "0.1.0"
-description = "Development runners for planr: plan scenario and Codex evaluation"
+description = "Development runners for planr: Codex evaluation"
 requires-python = ">=3.10"
 dependencies = [
   "openai-codex==0.147.0",

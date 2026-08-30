@@ -3,13 +3,10 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/ironpark/toolz/cli/planr/internal/jsonout"
-	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 )
 
 // The checkout release scenario: a finished plan, a plan waiting on another
@@ -49,24 +46,11 @@ const scenarioPhaseCount = 3
 
 func TestCheckoutReleaseScenarioReportsPlanStates(t *testing.T) {
 	root := seedRepository(t)
-	if err := os.WriteFile(filepath.Join(root, ".planr.yaml"), []byte("language: ko\nplans_dirs:\n  - plans-active\n  - plans-archive\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	writeConfig(t, root, "language: ko\nplans_dirs:\n  - plans-active\n  - plans-archive\n")
 	withWorkingDirectory(t, root)
 
-	body, err := plantest.DraftBody(plantest.Fixtures(), plantest.CheckoutFixture)
-	if err != nil {
-		t.Fatalf("plantest.DraftBody() unexpected error: %v", err)
-	}
 	for _, name := range scenarioPlans {
-		document, err := plantest.DraftDocument(name, scenarioDependencies[name], body)
-		if err != nil {
-			t.Fatalf("plantest.DraftDocument(%s) unexpected error: %v", name, err)
-		}
-		draftPath := filepath.Join(root, name+".md")
-		if err := os.WriteFile(draftPath, []byte(document), 0644); err != nil {
-			t.Fatal(err)
-		}
+		writeDraft(t, root, name, scenarioDependencies[name])
 		if output, err := runRoot(t, "apply", name+".md"); err != nil {
 			t.Fatalf("apply %s: %v; output=%q", name, err, output)
 		}

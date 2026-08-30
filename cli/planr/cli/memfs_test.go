@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ironpark/toolz/cli/planr/internal/plantest"
 	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 	"github.com/spf13/afero"
 )
@@ -30,21 +29,8 @@ func TestApplyAndStatusRunOnAnInMemoryFilesystem(t *testing.T) {
 		t.Fatal(err)
 	}
 	withWorkingDirectory(t, root)
-	if err := vfs.WriteFile(filepath.Join(root, ".planr.yaml"), []byte("language: en\nplans_dir: plans\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	body, err := plantest.DraftBody(plantest.Fixtures(), plantest.CheckoutFixture)
-	if err != nil {
-		t.Fatal(err)
-	}
-	document, err := plantest.DraftDocument("checkout-v2", nil, body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	draftPath := filepath.Join(root, "checkout-v2.md")
-	if err := vfs.WriteFile(draftPath, []byte(document), 0644); err != nil {
-		t.Fatal(err)
-	}
+	writeConfig(t, root, "language: en\nplans_dir: plans\n")
+	draftPath := writeDraft(t, root, "checkout-v2", nil)
 
 	// The draft is named absolutely: a relative path resolves against the
 	// process working directory on the disk and against the root of an
