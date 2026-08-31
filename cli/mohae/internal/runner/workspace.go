@@ -14,6 +14,7 @@ import (
 
 	"github.com/ironpark/toolz/cli/mohae/internal/agent"
 	"github.com/ironpark/toolz/cli/mohae/internal/container"
+	"github.com/ironpark/toolz/cli/mohae/internal/fsutil"
 
 	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
 )
@@ -61,12 +62,12 @@ type Workspace struct {
 //
 // The configured source is only ever read. Nothing here writes to it, which is
 // what lets two runs of the same configuration start from identical state.
-func PrepareWorkspace(ctx context.Context, config *Config, agentType string) (*Workspace, error) {
-	base, err := os.MkdirTemp("", "mohae-"+sanitizeName(config.Name)+"-")
+func PrepareWorkspace(ctx context.Context, config *Config, agentType string) (workspace *Workspace, err error) {
+	base, err := os.MkdirTemp("", "mohae-"+fsutil.SanitizeName(config.Name)+"-")
 	if err != nil {
 		return nil, err
 	}
-	workspace := &Workspace{
+	prepared := &Workspace{
 		Root:    filepath.Join(base, "workspace"),
 		Scratch: filepath.Join(base, "scratch"),
 		Home:    filepath.Join(base, "home"),
@@ -75,44 +76,45 @@ func PrepareWorkspace(ctx context.Context, config *Config, agentType string) (*W
 		base:    base,
 		setup:   filepath.Join(base, "setup"),
 	}
-	for _, directory := range []string{workspace.Scratch, workspace.Home, workspace.setup} {
+	// One place rather than at each step below: a preparation step added later
+	// cannot forget the cleanup call and leave a temporary tree behind.
+	defer func() {
+		if err != nil {
+			prepared.Cleanup()
+		}
+	}()
+	for _, directory := range []string{prepared.Scratch, prepared.Home, prepared.setup} {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
-			workspace.Cleanup()
 			return nil, err
 		}
 	}
-	if err := copyTreeExcluding(config.Resolve(config.Workspace.Source), workspace.Root, config.Workspace.Exclude); err != nil {
-		workspace.Cleanup()
+	if err := copyTreeExcluding(config.Resolve(config.Workspace.Source), prepared.Root, config.Workspace.Exclude); err != nil {
 		return nil, fmt.Errorf("copying workspace.source: %w", err)
 	}
-	if err := workspace.install(config, agentType); err != nil {
-		workspace.Cleanup()
+	if err := prepared.install(config, agentType); err != nil {
 		return nil, err
 	}
 	// After the files are in place and before anything runs: the container is
 	// where the setup script and everything after it happens, and it mounts a
 	// directory that has to already hold what the trial provided.
 	if config.Container.Enabled() {
-		if err := workspace.startContainer(ctx, config); err != nil {
-			workspace.Cleanup()
+		if err := prepared.startContainer(ctx, config); err != nil {
 			return nil, err
 		}
 	}
 	if script := config.Workspace.InitScript; script != "" {
-		if err := workspace.runInitScript(ctx, config, config.Resolve(script)); err != nil {
-			workspace.Cleanup()
+		if err := prepared.runInitScript(ctx, config, config.Resolve(script)); err != nil {
 			return nil, err
 		}
 	}
 	if config.Workspace.Git {
 		// After the setup script, so the baseline commit contains everything the
 		// trial provided and nothing the agent produced.
-		if err := workspace.initGit(ctx); err != nil {
-			workspace.Cleanup()
+		if err := prepared.initGit(ctx); err != nil {
 			return nil, err
 		}
 	}
-	return workspace, nil
+	return prepared, nil
 }
 
 // install places the documents the agent is meant to find: AGENTS.md at the
@@ -158,13 +160,14 @@ func (w *Workspace) runInitScript(ctx context.Context, config *Config, script st
 	if err != nil {
 		return fmt.Errorf("workspace.init_script: %w", err)
 	}
-	// The same variables the agent and the verify commands get: setup, work
-	// and grading all read one environment.
-	command := processutil.Shell(ctx, w.Exec(), shellQuote(w.Exec().Path(script)),
+	// Through runShellStep like the hooks and the verify commands, so a setup
+	// script that cannot be started reports the same way one of those would,
+	// and with the same variables: setup, work and grading read one
+	// environment.
+	step := runShellStep(ctx, w.Exec(), shellQuote(w.Exec().Path(script)),
 		w.Exec().Path(w.Root), trialEnv(config, w, w.Exec()))
-	output, err := command.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("workspace.init_script failed: %w\n%s", err, strings.TrimSpace(string(output)))
+	if !step.Passed {
+		return fmt.Errorf("workspace.init_script failed (exit %d)\n%s", step.ExitCode, step.Output)
 	}
 	return nil
 }
@@ -473,20 +476,4 @@ func copyFile(source, target string, mode os.FileMode) error {
 // in its name still runs.
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
-}
-
-// sanitizeName keeps a config name usable as a directory prefix.
-func sanitizeName(name string) string {
-	mapped := strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
-			return r
-		default:
-			return '-'
-		}
-	}, name)
-	if mapped == "" {
-		return "trial"
-	}
-	return mapped
 }

@@ -15,37 +15,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// MCPServerSpec is one server as an agent CLI's configuration file describes
-// it. Both shapes are kept because both are in use: a stdio server is a command
-// mohae launches, an HTTP or SSE server is an endpoint it connects to.
-type MCPServerSpec struct {
-	Name string `json:"-"`
-
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-
-	// Type is the transport named by the file ("stdio", "http", "sse"). It is
-	// optional: a spec with a URL is HTTP and one with a command is stdio, so
-	// only an SSE endpoint has to say so.
-	Type string `json:"type,omitempty"`
-	URL  string `json:"url,omitempty"`
-
-	// Headers are sent with every HTTP request, which is how a hosted server is
-	// authenticated.
-	Headers map[string]string `json:"headers,omitempty"`
-}
-
-func driverMCPServers(specs []MCPServerSpec) []agentdriver.MCPServerSpec {
-	converted := make([]agentdriver.MCPServerSpec, len(specs))
-	for index, spec := range specs {
-		converted[index] = agentdriver.MCPServerSpec{
-			Name: spec.Name, Command: spec.Command, Args: spec.Args, Env: spec.Env,
-			Type: spec.Type, URL: spec.URL, Headers: spec.Headers,
-		}
-	}
-	return converted
-}
+// MCPServerSpec is owned by driver; the alias keeps runner's API readable
+// while preserving that single source of truth.
+type MCPServerSpec = agentdriver.MCPServerSpec
 
 // mcpConfigFile is the format the agent CLIs already read. mohae reads the same
 // file rather than inventing its own so one server configuration can be handed
@@ -94,7 +66,7 @@ func LoadMCPServers(config *Config, agentType string) ([]MCPServerSpec, error) {
 			if server.Name != "" && len(entries) == 1 {
 				spec.Name = server.Name
 			}
-			if err := spec.validate(); err != nil {
+			if err := validateSpec(spec); err != nil {
 				return nil, fmt.Errorf("mcp[%d].config: %s: %w", index, path, err)
 			}
 			byName[spec.Name] = spec
@@ -112,7 +84,7 @@ func LoadMCPServers(config *Config, agentType string) ([]MCPServerSpec, error) {
 	return specs, nil
 }
 
-func (s MCPServerSpec) validate() error {
+func validateSpec(s MCPServerSpec) error {
 	if s.Command == "" && s.URL == "" {
 		return fmt.Errorf("server %q has neither a command nor a url", s.Name)
 	}
@@ -124,12 +96,12 @@ func (s MCPServerSpec) validate() error {
 	return nil
 }
 
-// Transport builds the go-sdk transport for this server. mohae uses the SDK
+// SpecTransport builds the go-sdk transport for this server. mohae uses the SDK
 // rather than its own client so what it can reach is what a compliant MCP
 // client can reach: a server mohae connects to here is one the agent will be
 // able to use, and a failure here is a real one rather than a quirk of a
 // hand-written probe.
-func (s MCPServerSpec) Transport(ctx context.Context) (mcp.Transport, error) {
+func SpecTransport(ctx context.Context, s MCPServerSpec) (mcp.Transport, error) {
 	if s.URL != "" {
 		if strings.EqualFold(s.Type, "sse") {
 			return &mcp.SSEClientTransport{Endpoint: s.URL}, nil
@@ -166,16 +138,16 @@ func ProbeMCPServers(ctx context.Context, specs []MCPServerSpec, version string)
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			probes[index] = spec.probe(ctx, version)
+			probes[index] = probeSpec(ctx, spec, version)
 		}()
 	}
 	wait.Wait()
 	return probes
 }
 
-func (s MCPServerSpec) probe(ctx context.Context, version string) MCPProbe {
+func probeSpec(ctx context.Context, s MCPServerSpec, version string) MCPProbe {
 	probe := MCPProbe{Name: s.Name}
-	transport, err := s.Transport(ctx)
+	transport, err := SpecTransport(ctx, s)
 	if err != nil {
 		probe.Error = err.Error()
 		return probe

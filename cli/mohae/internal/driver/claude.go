@@ -3,11 +3,9 @@ package driver
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/ironpark/toolz/cli/mohae/internal/claude"
-	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
 )
 
 // claudeDriver drives Claude Code through the in-repo SDK client. One client
@@ -40,7 +38,7 @@ func newClaudeDriver(ctx context.Context, options Options) (Driver, error) {
 		// trial runs its agent in a container, which is what closes the gap
 		// the comment above describes: the workspace is then the only
 		// filesystem the agent has.
-		Command:    containedClaudeCommand(options),
+		Command:    claude.CommandBuilder(options.containedCommand()),
 		Env:        options.Env,
 		MCPServers: claudeMCPServers(servers),
 		// Only what the trial installed: a server the host happens to have
@@ -56,21 +54,6 @@ func newClaudeDriver(ctx context.Context, options Options) (Driver, error) {
 		return nil, fmt.Errorf("claude-code: %w", err)
 	}
 	return &claudeDriver{client: client, onText: options.OnText}, nil
-}
-
-// containedClaudeCommand builds the CLI somewhere other than this host, or
-// returns nil when the agent runs here after all. The SDK builds a full
-// environment on top of this process's own; only what it added is forwarded,
-// since the container has its own PATH and HOME and inheriting this machine's
-// would point the agent at directories that do not exist inside it.
-func containedClaudeCommand(options Options) claude.CommandBuilder {
-	executor := options.executor()
-	if !executor.Contained() {
-		return nil
-	}
-	return func(ctx context.Context, path string, args []string, dir string, env []string) *exec.Cmd {
-		return executor.Command(ctx, append([]string{path}, args...), dir, processutil.Overlay(env))
-	}
 }
 
 // claudeMCPServers translates the parsed specs into the SDK's own shapes. The

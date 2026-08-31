@@ -102,7 +102,7 @@ func makeArtifactDirectory(reportDir, name string, started time.Time) (string, e
 	if err := os.MkdirAll(reportDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating artifact report directory: %w", err)
 	}
-	stem := sanitizeName(name) + "-" + started.Format("20060102-150405")
+	stem := fsutil.SanitizeName(name) + "-" + started.Format("20060102-150405")
 	directory, err := fsutil.MkdirUnique(reportDir, stem, ".artifacts", 0o755)
 	if err != nil {
 		return "", fmt.Errorf("creating artifact directory: %w", err)

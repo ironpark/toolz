@@ -147,33 +147,28 @@ func checkContainer(config *configuration.Config) checkResult {
 }
 
 func checkScripts(config *configuration.Config) []checkResult {
-	results := []checkResult{}
-	// Verify commands are shell text rather than files, so only the init
-	// script has an executable bit to check.
-	for _, script := range []configuration.LabeledPath{{Field: "workspace.init_script", Path: config.Workspace.InitScript}} {
-		if script.Path == "" {
-			continue
-		}
-		path := config.Resolve(script.Path)
-		info, err := os.Stat(path)
-		if err != nil {
-			continue // Already reported as a missing referenced path.
-		}
-		if info.Mode()&0o111 == 0 {
-			results = append(results, checkResult{statusFail, script.Field, path + " is not executable (chmod +x)"})
-			continue
-		}
-		if _, err := exec.LookPath("bash"); err == nil {
-			// `bash -n` parses without running, which is the only way to catch
-			// a syntax error before it aborts a trial that already ran.
-			if output, err := exec.Command("bash", "-n", path).CombinedOutput(); err != nil {
-				results = append(results, checkResult{statusFail, script.Field, strings.TrimSpace(string(output))})
-				continue
-			}
-		}
-		results = append(results, checkResult{statusPass, script.Field + " syntax", ""})
+	// Verify commands are shell text rather than files, so the init script is
+	// the only one with an executable bit to check.
+	const field = "workspace.init_script"
+	if config.Workspace.InitScript == "" {
+		return nil
 	}
-	return results
+	path := config.Resolve(config.Workspace.InitScript)
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil // Already reported as a missing referenced path.
+	}
+	if info.Mode()&0o111 == 0 {
+		return []checkResult{{statusFail, field, path + " is not executable (chmod +x)"}}
+	}
+	if _, err := exec.LookPath("bash"); err == nil {
+		// `bash -n` parses without running, which is the only way to catch a
+		// syntax error before it aborts a trial that already ran.
+		if output, err := exec.Command("bash", "-n", path).CombinedOutput(); err != nil {
+			return []checkResult{{statusFail, field, strings.TrimSpace(string(output))}}
+		}
+	}
+	return []checkResult{{statusPass, field + " syntax", ""}}
 }
 
 func checkAgentMarkdown(config *configuration.Config) checkResult {

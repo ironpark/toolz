@@ -224,7 +224,7 @@ func (c *Config) ApplyDefaults() {
 		c.Report.Dir = DefaultReportDir
 	}
 	if len(c.Report.Formats) == 0 {
-		c.Report.Formats = []string{"terminal"}
+		c.Report.Formats = []string{reportformat.Terminal}
 	}
 	c.Container.applyDefaults()
 }

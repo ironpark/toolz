@@ -39,7 +39,7 @@ func newDriverOptions(config *Config, workspace *Workspace, servers []MCPServerS
 		Workspace:  workspace.Agent().Path(workspace.Root),
 		Version:    version,
 		Env:        trialEnv(config, workspace, workspace.Agent()),
-		MCPServers: driverMCPServers(servers),
+		MCPServers: servers,
 		OnText:     onText,
 		Exec:       workspace.Agent(),
 	}

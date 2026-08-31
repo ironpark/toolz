@@ -64,7 +64,7 @@ func RenderReport(format string, results []runner.TrialResult, options ReportOpt
 func WriteReports(dir string, name string, formats []string, results []runner.TrialResult, options ReportOptions) ([]string, error) {
 	stem := "run"
 	if name != "" {
-		stem = sanitizeName(name)
+		stem = fsutil.SanitizeName(name)
 	}
 	stem += "-" + time.Now().Format("20060102-150405")
 	written := []string{}
@@ -263,13 +263,13 @@ func renderMarkdown(results []runner.TrialResult, options ReportOptions) string 
 			}
 		}
 		for _, hook := range result.Hooks {
-			fmt.Fprintf(out, "- hook after %s (%s, exit %d): `%s`\n", verdictWord(hook.Passed), hook.Scope, hook.ExitCode, hook.Command)
+			fmt.Fprintf(out, "- hook after %s (%s, exit %d): `%s`\n", runner.VerdictWord(hook.Passed), hook.Scope, hook.ExitCode, hook.Command)
 			if !hook.Passed && hook.Output != "" {
 				fmt.Fprintf(out, "\n```\n%s\n```\n\n", hook.Output)
 			}
 		}
 		for _, check := range result.Verify {
-			fmt.Fprintf(out, "- verify %s (exit %d): `%s`\n", verdictWord(check.Passed), check.ExitCode, check.Command)
+			fmt.Fprintf(out, "- verify %s (exit %d): `%s`\n", runner.VerdictWord(check.Passed), check.ExitCode, check.Command)
 			if !check.Passed && check.Output != "" {
 				fmt.Fprintf(out, "\n```\n%s\n```\n\n", check.Output)
 			}
@@ -336,11 +336,11 @@ pre { background: #f6f6f6; padding: .6rem; overflow-x: auto; }
 		}
 		for _, hook := range result.Hooks {
 			fmt.Fprintf(out, "<li class=\"%s\">hook after %s (%s, exit %d): <code>%s</code></li>\n",
-				verdictWord(hook.Passed), verdictWord(hook.Passed), html.EscapeString(hook.Scope), hook.ExitCode, html.EscapeString(hook.Command))
+				runner.VerdictWord(hook.Passed), runner.VerdictWord(hook.Passed), html.EscapeString(hook.Scope), hook.ExitCode, html.EscapeString(hook.Command))
 		}
 		for _, check := range result.Verify {
 			fmt.Fprintf(out, "<li class=\"%s\">verify %s (exit %d): <code>%s</code></li>\n",
-				verdictWord(check.Passed), verdictWord(check.Passed), check.ExitCode, html.EscapeString(check.Command))
+				runner.VerdictWord(check.Passed), runner.VerdictWord(check.Passed), check.ExitCode, html.EscapeString(check.Command))
 		}
 		if result.ArtifactDir != "" {
 			fmt.Fprintf(out, "<li>artifacts: <code>%s</code></li>\n", html.EscapeString(result.ArtifactDir))

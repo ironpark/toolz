@@ -92,7 +92,7 @@ func TestLoadMCPServersRejectsAnUnusableSpec(t *testing.T) {
 
 func TestMCPServerSpecBuildsTheTransportItsShapeImplies(t *testing.T) {
 	ctx := context.Background()
-	stdio, err := MCPServerSpec{Name: "files", Command: "server", Args: []string{"--root", "."}}.Transport(ctx)
+	stdio, err := SpecTransport(ctx, MCPServerSpec{Name: "files", Command: "server", Args: []string{"--root", "."}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,14 +104,14 @@ func TestMCPServerSpecBuildsTheTransportItsShapeImplies(t *testing.T) {
 		t.Errorf("command = %v", command.Command.Args)
 	}
 
-	http, err := MCPServerSpec{Name: "hosted", URL: "https://example.test/mcp"}.Transport(ctx)
+	http, err := SpecTransport(ctx, MCPServerSpec{Name: "hosted", URL: "https://example.test/mcp"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := http.(*mcp.StreamableClientTransport); !ok {
 		t.Errorf("http transport = %T", http)
 	}
-	sse, err := MCPServerSpec{Name: "hosted", Type: "SSE", URL: "https://example.test/sse"}.Transport(ctx)
+	sse, err := SpecTransport(ctx, MCPServerSpec{Name: "hosted", Type: "SSE", URL: "https://example.test/sse"})
 	if err != nil {
 		t.Fatal(err)
 	}

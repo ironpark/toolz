@@ -6,10 +6,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	configuration "github.com/ironpark/toolz/cli/mohae/internal/config"
 	"github.com/ironpark/toolz/cli/mohae/internal/container"
@@ -92,9 +92,14 @@ func runAction(version string) cli.ActionFunc {
 		}
 		// Containers are reclaimed on the same pass and for a stronger reason:
 		// a left-behind directory costs disk, while a left-behind container
-		// holds memory for as long as the machine is up.
-		if pruned := container.PruneStale(); pruned > 0 {
-			fmt.Fprintf(cmd.Writer, "removed %d container(s) left by earlier runs\n", pruned)
+		// holds memory for as long as the machine is up. Only when this run
+		// uses containers at all: the sweep costs a runtime probe and a daemon
+		// round-trip, and a run made entirely of host trials cannot have
+		// leaked one.
+		if slices.ContainsFunc(configs, func(c *configuration.Config) bool { return c.Container.Enabled() }) {
+			if pruned := container.PruneStale(); pruned > 0 {
+				fmt.Fprintf(cmd.Writer, "removed %d container(s) left by earlier runs\n", pruned)
+			}
 		}
 
 		results := runTrials(ctx, configs, concurrency, cmd.Bool("fail-fast"), trialOptions)
@@ -140,12 +145,11 @@ func runTrials(ctx context.Context, configs []*configuration.Config, concurrency
 	slots := make(chan struct{}, concurrency)
 	var wait sync.WaitGroup
 	var mutex sync.Mutex
-	// Its own flag rather than a field under mutex: the mutex guards the result
-	// slices, and the two are read at different times by different goroutines.
-	var stopped atomic.Bool
 
 	for index, config := range configs {
-		if stopped.Load() {
+		// The cancelled context is the stop signal: fail-fast cancels, so a
+		// second flag saying the same thing could only drift from it.
+		if ctx.Err() != nil {
 			break
 		}
 		slots <- struct{}{}
@@ -157,7 +161,7 @@ func runTrials(ctx context.Context, configs []*configuration.Config, concurrency
 			// for a slot is exactly when an earlier trial fails, and a
 			// fail-fast run that started the next trial anyway would spend
 			// tokens on a verdict already decided.
-			if stopped.Load() {
+			if ctx.Err() != nil {
 				return
 			}
 			result := runner.RunTrial(ctx, config, options)
@@ -166,7 +170,6 @@ func runTrials(ctx context.Context, configs []*configuration.Config, concurrency
 			results[index] = result
 			ran[index] = true
 			if failFast && !result.Passed {
-				stopped.Store(true)
 				cancel()
 			}
 		}()

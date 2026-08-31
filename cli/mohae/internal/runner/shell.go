@@ -53,7 +53,10 @@ func runShellStep(ctx context.Context, executor processutil.Executor, text, dir 
 	return step
 }
 
-func verdictWord(passed bool) string {
+// VerdictWord is the word a pass or a fail is printed as. The live run and the
+// rendered report both use it, so the two cannot describe the same result with
+// different vocabulary.
+func VerdictWord(passed bool) string {
 	if passed {
 		return "pass"
 	}

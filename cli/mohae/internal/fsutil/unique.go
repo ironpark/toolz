@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // WriteFileUnique writes data to stem+suffix in dir without replacing an
@@ -62,4 +63,24 @@ func claimUniqueName(dir, stem, suffix string, create func(path string) error) (
 		}
 		return path, nil
 	}
+}
+
+// SanitizeName keeps a config name usable as a filename stem or directory
+// prefix. Report files and workspace directories are both named from the same
+// config name, so the mapping lives here with the naming helpers above rather
+// than once per package, where the two could drift into spelling the same
+// config differently.
+func SanitizeName(name string) string {
+	mapped := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			return r
+		default:
+			return '-'
+		}
+	}, strings.TrimSpace(name))
+	if mapped == "" {
+		return "trial"
+	}
+	return mapped
 }

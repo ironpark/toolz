@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // Executor is where a trial's commands run. Everything mohae starts on a
@@ -67,13 +68,7 @@ func Shell(ctx context.Context, executor Executor, text, dir string, env map[str
 // that is not this host, and forwarding the rest would carry the host's PATH
 // and HOME into a container that has its own.
 func Overlay(env []string) map[string]string {
-	current := map[string]string{}
-	for _, entry := range os.Environ() {
-		key, value, ok := strings.Cut(entry, "=")
-		if ok {
-			current[key] = value
-		}
-	}
+	current := currentEnv()
 	overlay := map[string]string{}
 	for _, entry := range env {
 		key, value, ok := strings.Cut(entry, "=")
@@ -86,3 +81,15 @@ func Overlay(env []string) map[string]string {
 	}
 	return overlay
 }
+
+// currentEnv is this process's own environment as a map, built once: it does
+// not change during a run, and Overlay is called for every agent subprocess.
+var currentEnv = sync.OnceValue(func() map[string]string {
+	current := map[string]string{}
+	for _, entry := range os.Environ() {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			current[key] = value
+		}
+	}
+	return current
+})

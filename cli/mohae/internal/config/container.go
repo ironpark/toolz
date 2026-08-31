@@ -188,9 +188,6 @@ func expandHome(value string) string {
 	return filepath.Join(home, filepath.FromSlash(strings.TrimPrefix(value, "~/")))
 }
 
-// defaultUserHomeDir is what userHomeDir is; tests replace the variable so ~
-// expansion can be checked without depending on who is running them, and put
-// this back afterwards.
-var defaultUserHomeDir = os.UserHomeDir
-
-var userHomeDir = defaultUserHomeDir
+// userHomeDir is a variable so tests can replace it and check ~ expansion
+// without depending on who is running them, restoring it afterwards.
+var userHomeDir = os.UserHomeDir

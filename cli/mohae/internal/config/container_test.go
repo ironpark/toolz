@@ -104,8 +104,9 @@ func TestContainerRejectsARelativeMountTarget(t *testing.T) {
 }
 
 func TestContainerSpecResolvesPathsAgainstTheConfiguration(t *testing.T) {
+	saved := userHomeDir
 	userHomeDir = func() (string, error) { return filepath.FromSlash("/home/tester"), nil }
-	t.Cleanup(func() { userHomeDir = defaultUserHomeDir })
+	t.Cleanup(func() { userHomeDir = saved })
 
 	config := containerConfig(t, ContainerConfig{
 		Build: "./docker",

@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"os/exec"
 
 	"github.com/ironpark/toolz/cli/mohae/internal/agent"
 	"github.com/ironpark/toolz/cli/mohae/internal/process"
@@ -99,17 +100,30 @@ func (o Options) executor() process.Executor {
 	return o.Exec
 }
 
-// MCPServerSpec is the driver-facing representation of one configured MCP
-// server. The runner owns loading and probing; drivers only translate this
-// value into the selected agent CLI's configuration.
+// MCPServerSpec is one server as an agent CLI's configuration file describes
+// it, and the driver-facing representation of the same thing — the runner
+// aliases this type rather than keeping a parallel copy, so a field added here
+// reaches the drivers instead of being dropped by a converter nobody updated.
+// Both shapes are kept because both are in use: a stdio server is a command
+// mohae launches, an HTTP or SSE server is an endpoint it connects to.
+//
+// The json tags are the agent CLIs' own file format, which the runner decodes.
 type MCPServerSpec struct {
-	Name    string
-	Command string
-	Args    []string
-	Env     map[string]string
-	Type    string
-	URL     string
-	Headers map[string]string
+	Name string `json:"-"`
+
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+
+	// Type is the transport named by the file ("stdio", "http", "sse"). It is
+	// optional: a spec with a URL is HTTP and one with a command is stdio, so
+	// only an SSE endpoint has to say so.
+	Type string `json:"type,omitempty"`
+	URL  string `json:"url,omitempty"`
+
+	// Headers are sent with every HTTP request, which is how a hosted server is
+	// authenticated.
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // agentTypes binds each shared agent kind to its concrete session opener.
@@ -133,3 +147,23 @@ func New(ctx context.Context, options Options) (Driver, error) {
 // Exec passes the overlay map instead, so a container is handed the trial's
 // variables rather than this host's.
 func (o Options) environ() []string { return process.Env(o.Env) }
+
+// containedCommand builds the agent process somewhere other than this host, or
+// returns nil when the agent runs here after all. The SDK transports hand a
+// fully built environment layered on this process's own; only what they added
+// is forwarded, since a container has its own PATH and HOME and inheriting this
+// machine's would point the agent at directories that do not exist inside it.
+//
+// Both SDK packages spell their builder as this signature, so each driver
+// converts the result to its own named type. Keeping the body here means the
+// decision that puts an agent inside the sandbox is made once: a driver that
+// grew its own copy could silently leave its agent on the host.
+func (o Options) containedCommand() func(ctx context.Context, path string, args []string, dir string, env []string) *exec.Cmd {
+	executor := o.executor()
+	if !executor.Contained() {
+		return nil
+	}
+	return func(ctx context.Context, path string, args []string, dir string, env []string) *exec.Cmd {
+		return executor.Command(ctx, append([]string{path}, args...), dir, process.Overlay(env))
+	}
+}

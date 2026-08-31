@@ -261,7 +261,7 @@ func runVerifyCommands(ctx context.Context, config *Config, workspace *Workspace
 	for _, text := range config.Verify.Commands {
 		step := runShellStep(ctx, workspace.Exec(), text, workspace.Exec().Path(workspace.Scratch), env)
 		if options.ShowDialogue {
-			fmt.Fprintf(out, "verify %s: %s\n", verdictWord(step.Passed), text)
+			fmt.Fprintf(out, "verify %s: %s\n", VerdictWord(step.Passed), text)
 		}
 		results = append(results, VerifyResult{
 			Command:         text,

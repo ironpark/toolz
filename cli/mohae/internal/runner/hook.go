@@ -28,7 +28,7 @@ func runAfterHooks(ctx context.Context, config *Config, workspace *Workspace, op
 		env["PWD"] = directory
 		step := runShellStep(ctx, workspace.Exec(), hook.Run, directory, env)
 		if options.ShowDialogue {
-			fmt.Fprintf(out, "hook after %s (%s): %s\n", verdictWord(step.Passed), location, hook.Run)
+			fmt.Fprintf(out, "hook after %s (%s): %s\n", VerdictWord(step.Passed), location, hook.Run)
 		}
 		results = append(results, HookResult{
 			Command:         hook.Run,
