@@ -22,6 +22,27 @@ workspace:
   agent_md: ./AGENTS.md
   git: true
 
+# Runs the trial in a container instead of on the host, so the toolchain it is
+# built and graded with is the image's rather than whatever this machine has.
+# Off entirely unless image or build is set, and then requires docker or podman.
+# container:
+#   image: golang:1.26        # or: build: ./docker  (a directory with a Dockerfile)
+#   runtime: auto             # auto | docker | podman
+#   scope: setup              # setup: init_script, hooks and verify run inside,
+#                             # the agent stays on the host.
+#                             # full: the agent runs inside too, which is the
+#                             # only way it is bounded by the workspace — the
+#                             # image must then carry the agent CLI, and its
+#                             # credentials have to be mounted in.
+#   network: none             # what a reproducible grading step wants
+#   user: host                # keeps files the trial writes owned by you
+#   mounts:
+#     - source: ~/.codex      # ~ is expanded; relative paths resolve from here
+#       target: /mohae-home/.codex
+#       read_only: true
+#   env:
+#     CODEX_HOME: /mohae-home/.codex
+
 prompts:
   # The conversation, in order. Deliberately not placed in the workspace: the
   # agent works from what it was told, not from a task file it can re-read on

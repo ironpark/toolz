@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -30,8 +29,9 @@ const PromptPlaceholder = "{{prompt}}"
 // is the same contract a stateless CLI already imposes on its users.
 type customDriver struct {
 	command   []string
-	env       []string
+	env       map[string]string
 	workspace string
+	executor  processutil.Executor
 	onText    func(string)
 }
 
@@ -44,8 +44,9 @@ func newCustomDriver(_ context.Context, options Options) (Driver, error) {
 	}
 	return &customDriver{
 		command:   command,
-		env:       options.environ(),
+		env:       options.Env,
 		workspace: options.Workspace,
+		executor:  options.executor(),
 		onText:    options.OnText,
 	}, nil
 }
@@ -61,10 +62,7 @@ func (d *customDriver) Send(ctx context.Context, prompt string) (Response, error
 		arguments = append(arguments, argument)
 	}
 
-	command := exec.CommandContext(ctx, arguments[0], arguments[1:]...)
-	command.Dir = d.workspace
-	command.Env = d.env
-	processutil.Isolate(command)
+	command := d.executor.Command(ctx, arguments, d.workspace, d.env)
 	// A backstop for a child that outlives the kill and holds stdout open: the
 	// turn's timeout has already expired by then, so waiting further would only
 	// stall the run.

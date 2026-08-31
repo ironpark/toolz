@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os/exec"
 	"slices"
 	"strings"
 
 	"github.com/ironpark/toolz/cli/mohae/internal/codex"
+	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
 )
 
 // codexDriver drives Codex through the app-server client. One thread holds the
@@ -34,6 +36,10 @@ func newCodexDriver(ctx context.Context, options Options) (Driver, error) {
 		Args: codexArgs(servers),
 		Dir:  options.Workspace,
 		Env:  options.environ(),
+		// Nil on the host; set when the trial runs its agent in a container,
+		// in which case the app-server starts inside it and the sandbox
+		// policy below applies to a filesystem that is already the trial's.
+		Command: containedCodexCommand(options),
 		// The subprocess's own logging is not part of the trial's transcript.
 		Stderr:     io.Discard,
 		ClientInfo: codex.ClientInfo{Name: "mohae", Version: options.Version},
@@ -81,6 +87,20 @@ func newCodexDriver(ctx context.Context, options Options) (Driver, error) {
 // only way to give a trial exactly the servers the config named — and not
 // whatever the host machine has configured — is to override them on the
 // command line.
+// containedCodexCommand builds the app-server somewhere other than this host,
+// or returns nil when the agent runs here. Only the trial's own variables are
+// forwarded: the environment the driver assembled sits on top of this
+// process's, and the container has its own.
+func containedCodexCommand(options Options) codex.CommandBuilder {
+	executor := options.executor()
+	if !executor.Contained() {
+		return nil
+	}
+	return func(ctx context.Context, path string, args []string, dir string, env []string) *exec.Cmd {
+		return executor.Command(ctx, append([]string{path}, args...), dir, processutil.Overlay(env))
+	}
+}
+
 func codexArgs(specs []MCPServerSpec) []string {
 	if len(specs) == 0 {
 		return nil

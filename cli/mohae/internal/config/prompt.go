@@ -13,6 +13,7 @@ import (
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
 	"github.com/goccy/go-yaml"
+	"github.com/ironpark/toolz/cli/mohae/internal/process"
 )
 
 // Prompt is one user message in the trial conversation. A configuration lists
@@ -151,7 +152,13 @@ type PromptEnv struct {
 }
 
 // NewPromptEnv builds an environment whose helpers are rooted at workspace.
-func NewPromptEnv(workspace string) PromptEnv {
+//
+// The path helpers read the host's copy: a containerised trial bind-mounts its
+// workspace, so exists() and read() are looking at the same bytes either way,
+// and going through the runtime for a stat would cost a process per condition.
+// sh() does go through the executor, because a condition that shells out is
+// asking about the environment the trial runs in and not about this machine.
+func NewPromptEnv(workspace string, executor process.Executor) PromptEnv {
 	resolve := func(path string) string {
 		if filepath.IsAbs(path) {
 			return path
@@ -171,8 +178,8 @@ func NewPromptEnv(workspace string) PromptEnv {
 			return string(data)
 		},
 		Sh: func(command string) int {
-			cmd := exec.Command("sh", "-c", command)
-			cmd.Dir = workspace
+			cmd := process.Shell(context.Background(), executor, command,
+				executor.Path(workspace), nil)
 			if err := cmd.Run(); err != nil {
 				var exitErr *exec.ExitError
 				if errors.As(err, &exitErr) {

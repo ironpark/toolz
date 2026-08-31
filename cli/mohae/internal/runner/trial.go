@@ -11,7 +11,6 @@ import (
 
 	configuration "github.com/ironpark/toolz/cli/mohae/internal/config"
 	agentdriver "github.com/ironpark/toolz/cli/mohae/internal/driver"
-	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
 )
 
 // TrialOptions are the run-time choices a trial takes from the command line
@@ -63,6 +62,12 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 		result.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 		return result
 	}
+	result.Container = workspace.Container()
+	// Unconditional, and before the cleanup below: the workspace may be kept,
+	// the container never is. It has nothing left to run once the trial ends,
+	// and one left behind per failing trial would accumulate for as long as
+	// the machine lives.
+	defer func() { _ = workspace.Close() }()
 	defer func() {
 		// Asked of the verdict rather than re-derived here, so what counts as
 		// a disposable workspace and what reads as "pass" cannot drift apart.
@@ -152,7 +157,7 @@ func runConversation(ctx context.Context, config *Config, workspace *Workspace, 
 			turns = append(turns, turn)
 			continue
 		}
-		env := configuration.NewPromptEnv(workspace.Root)
+		env := configuration.NewPromptEnv(workspace.Root, workspace.Exec())
 		env.Turn = index + 1
 		env.Responses = responses
 		if len(responses) > 0 {
@@ -251,10 +256,10 @@ func runVerifyCommands(ctx context.Context, config *Config, workspace *Workspace
 	// The same variables the agent had, resolved once: a grading command that
 	// reads $MOHAE_MODEL should not see something different from the trial it
 	// grades.
-	env := processutil.Env(trialEnv(config, workspace))
+	env := trialEnv(config, workspace, workspace.Exec())
 	results := make([]VerifyResult, 0, len(config.Verify.Commands))
 	for _, text := range config.Verify.Commands {
-		step := runShellStep(ctx, text, workspace.Scratch, env)
+		step := runShellStep(ctx, workspace.Exec(), text, workspace.Exec().Path(workspace.Scratch), env)
 		if options.ShowDialogue {
 			fmt.Fprintf(out, "verify %s: %s\n", verdictWord(step.Passed), text)
 		}

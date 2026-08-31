@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ironpark/toolz/cli/mohae/internal/agent"
+	"github.com/ironpark/toolz/cli/mohae/internal/container"
 
 	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
 )
@@ -20,13 +22,36 @@ import (
 //
 // Root is what the agent works in. Scratch is a sibling directory the verify
 // commands run from: grading happens outside the workspace so a check cannot
-// leave files behind that would be mistaken for the agent's work.
+// leave files behind that would be mistaken for the agent's work. Home is a
+// third sibling, and exists so a trial running in a container has a $HOME it
+// owns rather than one the image happens to provide.
+//
+// The two executors are where the trial's commands actually run. They are the
+// host unless the configuration asked for a container, and they are the same
+// executor only when it asked for the agent to run inside as well: pinning the
+// toolchain a trial is built and graded with is useful on its own, and does
+// not require the agent's CLI to be in the image.
 type Workspace struct {
 	Root    string
 	Scratch string
+	Home    string
 
-	// base holds both directories and is what Cleanup removes.
+	// exec runs the setup script, the hooks and the verification commands;
+	// agent runs the agent under test. They are reached through methods that
+	// fall back to the host, so a Workspace built in code rather than by
+	// PrepareWorkspace behaves like the uncontainerised trial it describes.
+	exec  processutil.Executor
+	agent processutil.Executor
+
+	// base holds the directories and is what Cleanup removes. It is also what
+	// a container sees mounted, so every path under it maps and nothing else
+	// does.
 	base string
+	// setup holds copies of the scripts the configuration named, which live
+	// beside the config file and so are not visible inside a container.
+	setup string
+
+	container *container.Container
 }
 
 // PrepareWorkspace builds the directory a trial runs in: the source tree copied
@@ -44,11 +69,17 @@ func PrepareWorkspace(ctx context.Context, config *Config, agentType string) (*W
 	workspace := &Workspace{
 		Root:    filepath.Join(base, "workspace"),
 		Scratch: filepath.Join(base, "scratch"),
+		Home:    filepath.Join(base, "home"),
+		exec:    processutil.Host{},
+		agent:   processutil.Host{},
 		base:    base,
+		setup:   filepath.Join(base, "setup"),
 	}
-	if err := os.MkdirAll(workspace.Scratch, 0o755); err != nil {
-		workspace.Cleanup()
-		return nil, err
+	for _, directory := range []string{workspace.Scratch, workspace.Home, workspace.setup} {
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			workspace.Cleanup()
+			return nil, err
+		}
 	}
 	if err := copyTreeExcluding(config.Resolve(config.Workspace.Source), workspace.Root, config.Workspace.Exclude); err != nil {
 		workspace.Cleanup()
@@ -57,6 +88,15 @@ func PrepareWorkspace(ctx context.Context, config *Config, agentType string) (*W
 	if err := workspace.install(config, agentType); err != nil {
 		workspace.Cleanup()
 		return nil, err
+	}
+	// After the files are in place and before anything runs: the container is
+	// where the setup script and everything after it happens, and it mounts a
+	// directory that has to already hold what the trial provided.
+	if config.Container.Enabled() {
+		if err := workspace.startContainer(ctx, config); err != nil {
+			workspace.Cleanup()
+			return nil, err
+		}
 	}
 	if script := config.Workspace.InitScript; script != "" {
 		if err := workspace.runInitScript(ctx, config, config.Resolve(script)); err != nil {
@@ -114,11 +154,14 @@ func (w *Workspace) install(config *Config, agentType string) error {
 // into the error because a setup failure that only reported an exit status
 // would send the caller looking through a workspace that no longer exists.
 func (w *Workspace) runInitScript(ctx context.Context, config *Config, script string) error {
-	command := exec.CommandContext(ctx, "sh", "-c", shellQuote(script))
-	command.Dir = w.Root
+	script, err := w.reachable(script)
+	if err != nil {
+		return fmt.Errorf("workspace.init_script: %w", err)
+	}
 	// The same variables the agent and the verify commands get: setup, work
 	// and grading all read one environment.
-	command.Env = processutil.Env(trialEnv(config, w))
+	command := processutil.Shell(ctx, w.Exec(), shellQuote(w.Exec().Path(script)),
+		w.Exec().Path(w.Root), trialEnv(config, w, w.Exec()))
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("workspace.init_script failed: %w\n%s", err, strings.TrimSpace(string(output)))
@@ -148,6 +191,22 @@ func (w *Workspace) initGit(ctx context.Context) error {
 	return nil
 }
 
+// Close ends the trial's container while leaving its directories in place. It
+// is separate from Cleanup because the two have different lifetimes: a failed
+// trial keeps its workspace, which is the only record of what the agent did,
+// but its container has nothing left to run and would otherwise outlive every
+// failing run on the machine. Safe to call more than once.
+func (w *Workspace) Close() error {
+	if w == nil || w.container == nil {
+		return nil
+	}
+	err := w.container.Remove()
+	w.container = nil
+	w.exec = processutil.Host{}
+	w.agent = processutil.Host{}
+	return err
+}
+
 // Cleanup removes the trial's directories. It is safe to call more than once.
 func (w *Workspace) Cleanup() error {
 	if w == nil || w.base == "" {
@@ -155,7 +214,82 @@ func (w *Workspace) Cleanup() error {
 	}
 	base := w.base
 	w.base = ""
+	// The container goes first: it holds the directory open, and anything
+	// still running in it would be writing to files as they are removed.
+	_ = w.Close()
 	return os.RemoveAll(base)
+}
+
+// Exec is where the setup script, the hooks and the verification commands run.
+func (w *Workspace) Exec() processutil.Executor {
+	if w == nil || w.exec == nil {
+		return processutil.Host{}
+	}
+	return w.exec
+}
+
+// Agent is where the agent under test runs. It is the same executor as Exec
+// only when the configuration asked for container.scope: full.
+func (w *Workspace) Agent() processutil.Executor {
+	if w == nil || w.agent == nil {
+		return processutil.Host{}
+	}
+	return w.agent
+}
+
+// Container describes the container the trial ran in, or an empty string when
+// it ran on the host. It is recorded in the report because two runs of one
+// configuration on different images are not the same measurement.
+func (w *Workspace) Container() string {
+	if w == nil || w.container == nil {
+		return ""
+	}
+	return w.container.Image()
+}
+
+// startContainer resolves the runtime and starts the trial's container. It is
+// reached only when the configuration asked for one, so a missing runtime is
+// an error rather than a reason to fall back to the host: a trial that quietly
+// ran unsandboxed would be reported as one that ran sandboxed.
+func (w *Workspace) startContainer(ctx context.Context, config *Config) error {
+	runtime, err := container.Detect(config.Container.Runtime)
+	if err != nil {
+		return fmt.Errorf("container: %w", err)
+	}
+	spec := config.ContainerSpec(w.base)
+	// A home the trial owns. Both agent CLIs and most package managers write
+	// under $HOME, and a container started as the host's user usually has no
+	// passwd entry and so no home to write to. The configuration may still
+	// override it, which is what a mounted credentials directory needs.
+	env := map[string]string{"HOME": container.MountPoint + "/home"}
+	maps.Copy(env, spec.Env)
+	spec.Env = env
+
+	started, err := container.Start(ctx, runtime, spec)
+	if err != nil {
+		return err
+	}
+	w.container = started
+	w.exec = started
+	if config.Container.AgentInside() {
+		w.agent = started
+	}
+	return nil
+}
+
+// reachable returns a path the trial's executor can open. A script named by
+// the configuration lives beside the configuration file, which a container
+// cannot see, so it is copied into the trial's own directory; on the host it
+// is already reachable and is left where it is.
+func (w *Workspace) reachable(source string) (string, error) {
+	if !w.Exec().Contained() {
+		return source, nil
+	}
+	target := filepath.Join(w.setup, filepath.Base(source))
+	if err := copyPath(source, target); err != nil {
+		return "", err
+	}
+	return target, nil
 }
 
 // StaleWorkspaceAge is how long a left-behind workspace is kept before a later

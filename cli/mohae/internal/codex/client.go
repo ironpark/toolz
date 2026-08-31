@@ -20,11 +20,17 @@ const defaultEventBuffer = 64
 type Options struct {
 	// Binary is the codex executable; it defaults to DefaultBinary on PATH.
 	Binary string
+	// Command builds the process that runs the app-server. Nil starts it as a
+	// child of this process; a builder is handed the same command line and is
+	// free to run it elsewhere, which is how mohae runs the agent inside a
+	// container.
+	Command CommandBuilder
 	// Args replaces the default subcommand arguments ("app-server").
 	Args []string
 	// Env replaces the child process environment; nil inherits the parent's.
 	Env []string
-	// Dir is the working directory of the subprocess.
+	// Dir is the working directory of the subprocess, in whatever namespace
+	// Command runs it in.
 	Dir string
 	// Stderr receives the subprocess stderr; it defaults to os.Stderr.
 	Stderr io.Writer
@@ -81,7 +87,7 @@ func New(ctx context.Context, opts Options) (*Client, error) {
 	if args == nil {
 		args = []string{"app-server"}
 	}
-	proc, err := startProcess(binary, args, opts.Env, opts.Dir, opts.Stderr)
+	proc, err := startProcess(ctx, opts.Command, binary, args, opts.Env, opts.Dir, opts.Stderr)
 	if err != nil {
 		return nil, err
 	}

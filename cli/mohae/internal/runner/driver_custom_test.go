@@ -196,7 +196,7 @@ func TestDriverEnvIsResolvedForEveryAgentType(t *testing.T) {
 		config.Agent.Env = map[string]string{"EXTRA": "1"}
 		workspace := &Workspace{Root: filepath.Join(directory, agentType)}
 
-		env := trialEnv(config, workspace)
+		env := trialEnv(config, workspace, workspace.Exec())
 		for key, want := range map[string]string{
 			"MOHAE_WORKSPACE": workspace.Root,
 			"MOHAE_TRIAL":     "env-trial",
@@ -218,7 +218,7 @@ func TestDriverEnvLetsTheConfigurationWin(t *testing.T) {
 	config := fixtureConfig(t, t.TempDir())
 	config.Agent.Model = "configured"
 	config.Agent.Env = map[string]string{"MOHAE_MODEL": "overridden"}
-	env := trialEnv(config, &Workspace{Root: "/tmp/ws"})
+	env := trialEnv(config, &Workspace{Root: "/tmp/ws"}, processutil.Host{})
 	if got := env["MOHAE_MODEL"]; got != "overridden" {
 		t.Fatalf("MOHAE_MODEL = %q, want %q", got, "overridden")
 	}

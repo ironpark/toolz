@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	configuration "github.com/ironpark/toolz/cli/mohae/internal/config"
+	"github.com/ironpark/toolz/cli/mohae/internal/container"
 	"github.com/urfave/cli/v3"
 )
 
@@ -111,6 +112,9 @@ func verifyConfig(cmd *cli.Command, config *configuration.Config) []checkResult 
 	if config.Workspace.AgentMD == "" {
 		results = append(results, checkResult{statusWarn, "workspace.agent_md", "not set: the agent gets no instructions"})
 	}
+	if config.Container.Enabled() {
+		results = append(results, checkContainer(config))
+	}
 	if cmd.Bool("check-scripts") {
 		results = append(results, checkScripts(config)...)
 	}
@@ -121,6 +125,25 @@ func verifyConfig(cmd *cli.Command, config *configuration.Config) []checkResult 
 		results = append(results, checkResult{statusWarn, "mcp", "--check-mcp is not implemented yet"})
 	}
 	return results
+}
+
+// checkContainer reports whether the runtime the configuration asked for is
+// actually installed. It is the one thing about a containerised trial that can
+// be known before the run and that otherwise fails after the workspace has
+// already been prepared.
+func checkContainer(config *configuration.Config) checkResult {
+	runtime, err := container.Detect(config.Container.Runtime)
+	if err != nil {
+		return checkResult{statusFail, "container.runtime", err.Error()}
+	}
+	target := config.Container.Image
+	if target == "" {
+		target = config.Container.Build
+	}
+	// Whether the image exists is deliberately not checked: pulling or
+	// building it is the run's job, and a check that did it here would cost
+	// what the run costs.
+	return checkResult{statusPass, "container", fmt.Sprintf("%s, %s, scope %s", runtime.Name, target, config.Container.Scope)}
 }
 
 func checkScripts(config *configuration.Config) []checkResult {

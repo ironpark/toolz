@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	configuration "github.com/ironpark/toolz/cli/mohae/internal/config"
+	"github.com/ironpark/toolz/cli/mohae/internal/container"
 	"github.com/ironpark/toolz/cli/mohae/internal/report"
 	reportformat "github.com/ironpark/toolz/cli/mohae/internal/report/format"
 	"github.com/ironpark/toolz/cli/mohae/internal/runner"
@@ -30,6 +31,8 @@ func NewRun(version string) *cli.Command {
 			&cli.StringSliceFlag{Name: "prompt-when", Usage: "expr condition gating the prompt at the same position; use '' to leave one unconditional (repeatable)"},
 			&cli.StringFlag{Name: "agent-md", Usage: "override the AGENTS.md installed in the workspace"},
 			&cli.StringFlag{Name: "init-script", Usage: "override the workspace setup script"},
+			&cli.StringFlag{Name: "container-image", Usage: "run the trial in this image instead of on the host"},
+			&cli.StringFlag{Name: "container-scope", Usage: "what runs in the container: setup (the default) or full, which includes the agent"},
 			&cli.StringSliceFlag{Name: "verify-command", Usage: "replace the commands that grade the finished workspace (repeatable)"},
 			&cli.StringFlag{Name: "mcp-config", Aliases: []string{"m"}, Usage: "override the MCP server configuration"},
 			&cli.StringFlag{Name: "output", Aliases: []string{"o"}, Value: "terminal", Usage: "report format: terminal, json, markdown, html"},
@@ -86,6 +89,12 @@ func runAction(version string) cli.ActionFunc {
 		// directories being reclaimed are debugging material.
 		if pruned := runner.PruneStaleWorkspaces(runner.StaleWorkspaceAge); pruned > 0 {
 			fmt.Fprintf(cmd.Writer, "pruned %d workspace(s) left by earlier runs\n", pruned)
+		}
+		// Containers are reclaimed on the same pass and for a stronger reason:
+		// a left-behind directory costs disk, while a left-behind container
+		// holds memory for as long as the machine is up.
+		if pruned := container.PruneStale(); pruned > 0 {
+			fmt.Fprintf(cmd.Writer, "removed %d container(s) left by earlier runs\n", pruned)
 		}
 
 		results := runTrials(ctx, configs, concurrency, cmd.Bool("fail-fast"), trialOptions)
@@ -250,6 +259,18 @@ func applyRunOverrides(cmd *cli.Command, configs []*configuration.Config) error 
 		if value := cmd.String("init-script"); value != "" {
 			config.Workspace.InitScript = absoluteOverride(value)
 		}
+		if value := cmd.String("container-image"); value != "" {
+			// The image replaces whatever the configuration said, build
+			// included: a run cannot be asked for both.
+			config.Container.Image = value
+			config.Container.Build = ""
+		}
+		if value := cmd.String("container-scope"); value != "" {
+			if !config.Container.Enabled() {
+				return fmt.Errorf("--container-scope needs a container: set one in the config or pass --container-image")
+			}
+			config.Container.Scope = value
+		}
 		if values := cmd.StringSlice("verify-command"); len(values) > 0 {
 			// Commands are shell text, not paths, so they pass through as
 			// typed; anything path-like inside them is the caller's business.
@@ -266,6 +287,9 @@ func applyRunOverrides(cmd *cli.Command, configs []*configuration.Config) error 
 		if cmd.IsSet("report-dir") {
 			config.Report.Dir = absoluteOverride(cmd.String("report-dir"))
 		}
+		// A profile or a flag may have replaced a section with one whose own
+		// fields are empty, and Validate reads them as written.
+		config.ApplyDefaults()
 		if err := config.Validate(); err != nil {
 			return fmt.Errorf("%s: %w", config.Path, err)
 		}

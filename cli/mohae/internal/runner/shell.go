@@ -22,14 +22,13 @@ type shellStep struct {
 	Duration float64
 }
 
-// runShellStep runs text with stdout and stderr merged, in its own process
-// group so cancelling the context reaches whatever the command started.
-func runShellStep(ctx context.Context, text, dir string, env []string) shellStep {
+// runShellStep runs text with stdout and stderr merged, wherever the trial's
+// executor puts it. dir and any path in env are already in the executor's
+// namespace: a container's workspace path is not the host's, and the mapping
+// belongs to the caller that knows which directory it means.
+func runShellStep(ctx context.Context, executor processutil.Executor, text, dir string, env map[string]string) shellStep {
 	started := time.Now()
-	command := exec.CommandContext(ctx, "sh", "-c", text)
-	command.Dir = dir
-	command.Env = env
-	processutil.Isolate(command)
+	command := processutil.Shell(ctx, executor, text, dir, env)
 	output := &bytes.Buffer{}
 	command.Stdout = output
 	command.Stderr = output

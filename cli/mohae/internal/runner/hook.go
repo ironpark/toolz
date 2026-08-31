@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"slices"
-
-	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
+	"maps"
 )
 
 // runAfterHooks finalizes the workspace after the agent session and before it
@@ -18,15 +16,17 @@ func runAfterHooks(ctx context.Context, config *Config, workspace *Workspace, op
 	}
 	ctx, cancel := config.Limits.Bound(context.WithoutCancel(ctx))
 	defer cancel()
-	base := processutil.Env(trialEnv(config, workspace))
+	base := trialEnv(config, workspace, workspace.Exec())
 	results := make([]HookResult, 0, len(config.Hooks.After))
 	for _, hook := range config.Hooks.After {
 		directory, location := hookDirectory(hook, workspace)
+		directory = workspace.Exec().Path(directory)
 		// Cmd.Dir changes the process directory but an explicitly supplied
-		// environment otherwise retains the parent's PWD. Clipped so the hooks
-		// do not append into a shared backing array.
-		env := append(slices.Clip(base), "PWD="+directory)
-		step := runShellStep(ctx, hook.Run, directory, env)
+		// environment otherwise retains the parent's PWD. Copied so one hook's
+		// directory does not leak into the next.
+		env := maps.Clone(base)
+		env["PWD"] = directory
+		step := runShellStep(ctx, workspace.Exec(), hook.Run, directory, env)
 		if options.ShowDialogue {
 			fmt.Fprintf(out, "hook after %s (%s): %s\n", verdictWord(step.Passed), location, hook.Run)
 		}

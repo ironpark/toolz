@@ -18,6 +18,7 @@ import (
 type Profile struct {
 	Agent     *AgentConfig      `yaml:"agent,omitempty"`
 	Workspace *WorkspaceConfig  `yaml:"workspace,omitempty"`
+	Container *ContainerConfig  `yaml:"container,omitempty"`
 	Prompts   []Prompt          `yaml:"prompts,omitempty"`
 	Skills    []SkillConfig     `yaml:"skills,omitempty"`
 	MCP       []MCPServerConfig `yaml:"mcp,omitempty"`
@@ -49,6 +50,9 @@ func (c *Config) ApplyProfile(name string) error {
 	if profile.Workspace != nil {
 		c.Workspace = *profile.Workspace
 	}
+	if profile.Container != nil {
+		c.Container = *profile.Container
+	}
 	if profile.Prompts != nil {
 		c.Prompts = profile.Prompts
 	}
@@ -76,6 +80,6 @@ func (c *Config) ApplyProfile(name string) error {
 	// A profile may leave defaults empty again (a replaced limits section with
 	// no timeout, a report section with no dir), so they are refilled the same
 	// way loading does.
-	c.applyDefaults()
+	c.ApplyDefaults()
 	return nil
 }

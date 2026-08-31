@@ -40,6 +40,10 @@ type Config struct {
 
 	Agent     AgentConfig     `yaml:"agent"`
 	Workspace WorkspaceConfig `yaml:"workspace"`
+	// Container runs the trial inside a container rather than on the host. It
+	// is off unless it names an image, so a configuration that does not ask
+	// for one never needs a runtime installed.
+	Container ContainerConfig `yaml:"container,omitempty"`
 	// Prompts is the conversation, in order. More than one makes the trial
 	// multi-turn; each entry may carry a `when` condition, so the same
 	// configuration can describe follow-ups that only some runs need.
@@ -197,14 +201,18 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	config.Path = absolute
-	config.applyDefaults()
+	config.ApplyDefaults()
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return config, nil
 }
 
-func (c *Config) applyDefaults() {
+// ApplyDefaults fills in what a configuration may leave out. Loading calls it,
+// and so does anything that changes a configuration afterwards — a profile, a
+// command-line override — because a replaced section arrives with its own
+// fields empty and Validate reads them as written.
+func (c *Config) ApplyDefaults() {
 	if c.Name == "" {
 		c.Name = strings.TrimSuffix(filepath.Base(c.Path), filepath.Ext(c.Path))
 		c.Name = strings.TrimSuffix(c.Name, ".config")
@@ -218,6 +226,7 @@ func (c *Config) applyDefaults() {
 	if len(c.Report.Formats) == 0 {
 		c.Report.Formats = []string{"terminal"}
 	}
+	c.Container.applyDefaults()
 }
 
 // Validate reports what a trial cannot proceed without. It checks the shape of
@@ -235,6 +244,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Workspace.Source == "" {
 		return fmt.Errorf("workspace.source is required")
+	}
+	if err := c.Container.validate(); err != nil {
+		return err
 	}
 	for index, pattern := range c.Workspace.Exclude {
 		if err := validateWorkspacePattern(pattern); err != nil {
@@ -325,6 +337,12 @@ func (c *Config) ReferencedPaths() []LabeledPath {
 		{"workspace.source", c.Workspace.Source},
 		{"workspace.init_script", c.Workspace.InitScript},
 		{"workspace.agent_md", c.Workspace.AgentMD},
+		{"container.build", c.Container.Build},
+	}
+	for index, mount := range c.Container.Mounts {
+		candidates = append(candidates, LabeledPath{
+			fmt.Sprintf("container.mounts[%d].source", index), expandHome(mount.Source),
+		})
 	}
 	for index, skill := range c.Skills {
 		candidates = append(candidates, LabeledPath{fmt.Sprintf("skills[%d].path", index), skill.Path})

@@ -1,6 +1,16 @@
 package claude
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+	"os/exec"
+)
+
+// CommandBuilder starts the CLI somewhere other than as a plain child of this
+// process. It is handed the executable, its arguments, the working directory
+// and the full environment, and must return a command that has not been
+// started; the transport pipes it and starts it as it would its own.
+type CommandBuilder func(ctx context.Context, path string, args []string, dir string, env []string) *exec.Cmd
 
 // ---------------------------------------------------------------------------
 // System prompt
@@ -304,12 +314,22 @@ type Options struct {
 	// Betas enables beta features.
 	Betas []SDKBeta
 
-	// Cwd is the working directory of the CLI subprocess.
+	// Cwd is the working directory of the CLI subprocess, in whatever namespace
+	// Command runs it in.
 	Cwd string
 
 	// CLIPath is the path to the claude executable. Empty triggers
-	// discovery on PATH and in the usual install locations.
+	// discovery on PATH and in the usual install locations, or — when Command
+	// is set — the bare name, since the process is not being started here and
+	// this host's copy of the CLI is not the one that will run.
 	CLIPath string
+
+	// Command builds the process that runs the CLI. Nil starts it as a child
+	// of this process, which is what every caller outside a sandbox wants.
+	// A builder is given the same command line and is free to run it
+	// elsewhere: it is how mohae runs the agent inside a container, and it is
+	// also why Cwd is not checked against the local filesystem when one is set.
+	Command CommandBuilder
 
 	// Settings is a path to an extra settings JSON file, or an inline JSON
 	// settings object, passed through to --settings.

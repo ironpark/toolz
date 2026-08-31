@@ -1,6 +1,7 @@
 package config
 
 import (
+	process "github.com/ironpark/toolz/cli/mohae/internal/process"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +41,7 @@ func TestPromptConditionsGovernWhetherAPromptIsSent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, "out.txt"), []byte("built ok\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	env := NewPromptEnv(workspace)
+	env := NewPromptEnv(workspace, process.Host{})
 	env.Turn = 2
 	env.Previous = "I gave up on the tests."
 	env.Responses = []string{"done", env.Previous}

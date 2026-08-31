@@ -251,7 +251,7 @@ func TestPrepareWorkspaceMakesTheBaselineCommit(t *testing.T) {
 	}
 	// A baseline that did not include the fixture would show the whole tree as
 	// the agent's work.
-	status := configuration.NewPromptEnv(workspace.Root).Sh("test -z \"$(git status --porcelain)\"")
+	status := NewPromptEnv(workspace.Root).Sh("test -z \"$(git status --porcelain)\"")
 	if status != 0 {
 		t.Errorf("the baseline commit left changes uncommitted (git status = %d)", status)
 	}

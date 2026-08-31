@@ -83,11 +83,18 @@ func (t *subprocessTransport) Connect(ctx context.Context) error {
 
 	cliPath := t.opts.CLIPath
 	if cliPath == "" {
-		found, err := findCLI()
-		if err != nil {
-			return err
+		if t.opts.Command != nil {
+			// Discovery would answer with this host's copy, which is not the
+			// one about to run. The bare name is resolved wherever the builder
+			// starts the process.
+			cliPath = defaultCLIName
+		} else {
+			found, err := findCLI()
+			if err != nil {
+				return err
+			}
+			cliPath = found
 		}
-		cliPath = found
 	}
 	t.cliPath = cliPath
 
@@ -96,7 +103,10 @@ func (t *subprocessTransport) Connect(ctx context.Context) error {
 		return err
 	}
 
-	if t.opts.Cwd != "" {
+	// Only meaningful for a local process: with a builder, Cwd is a path in
+	// whatever namespace the builder runs the CLI in, and this host's
+	// filesystem has nothing to say about it.
+	if t.opts.Cwd != "" && t.opts.Command == nil {
 		if info, err := os.Stat(t.opts.Cwd); err != nil || !info.IsDir() {
 			return NewConnectionError("Working directory does not exist: " + t.opts.Cwd)
 		}
@@ -114,9 +124,14 @@ func (t *subprocessTransport) Connect(ctx context.Context) error {
 	}()
 	t.cancel = cancel
 
-	cmd := exec.CommandContext(runCtx, cliPath, args...)
-	cmd.Dir = t.opts.Cwd
-	cmd.Env = buildEnv(t.opts)
+	var cmd *exec.Cmd
+	if t.opts.Command != nil {
+		cmd = t.opts.Command(runCtx, cliPath, args, t.opts.Cwd, buildEnv(t.opts))
+	} else {
+		cmd = exec.CommandContext(runCtx, cliPath, args...)
+		cmd.Dir = t.opts.Cwd
+		cmd.Env = buildEnv(t.opts)
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -356,10 +371,14 @@ func (t *subprocessTransport) ReadMessages() iter.Seq2[json.RawMessage, error] {
 // CLI discovery
 // ---------------------------------------------------------------------------
 
+// defaultCLIName is the executable's name, used both as the start of local
+// discovery and as the whole answer when the process is started elsewhere.
+const defaultCLIName = "claude"
+
 // findCLI locates the claude executable on PATH or in the usual install
 // locations.
 func findCLI() (string, error) {
-	name := "claude"
+	name := defaultCLIName
 	if runtime.GOOS == "windows" {
 		name = "claude.exe"
 	}

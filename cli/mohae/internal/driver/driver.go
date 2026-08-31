@@ -82,6 +82,21 @@ type Options struct {
 	// It may be nil, and drivers whose transport reports only finished turns
 	// call it once with the whole reply rather than not at all.
 	OnText func(string)
+	// Exec is where the agent process runs. It is the host unless the trial
+	// asked for its agent to run inside a container, and Workspace is already
+	// expressed in its namespace. A driver that reaches for exec.Command
+	// directly instead of this would run the agent on the host while the rest
+	// of the trial ran somewhere else.
+	Exec process.Executor
+}
+
+// executor is Exec with the host as the default, so a caller that builds
+// Options in code — a test, mostly — does not have to name it.
+func (o Options) executor() process.Executor {
+	if o.Exec == nil {
+		return process.Host{}
+	}
+	return o.Exec
 }
 
 // MCPServerSpec is the driver-facing representation of one configured MCP
@@ -113,5 +128,8 @@ func New(ctx context.Context, options Options) (Driver, error) {
 	return open(ctx, options)
 }
 
-// environ is the environment a driver's subprocess starts from.
+// environ is the environment a driver's subprocess starts from. It is only for
+// drivers whose SDK takes a fully built environment; anything going through
+// Exec passes the overlay map instead, so a container is handed the trial's
+// variables rather than this host's.
 func (o Options) environ() []string { return process.Env(o.Env) }

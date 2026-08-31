@@ -7,6 +7,7 @@ import "github.com/ironpark/toolz/cli/mohae/internal/config"
 type Config = config.Config
 type Prompt = config.Prompt
 type HookCommand = config.HookCommand
+type ContainerConfig = config.ContainerConfig
 
 const (
 	HookScopeWorkspace = config.HookScopeWorkspace

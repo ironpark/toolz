@@ -3,9 +3,11 @@ package driver
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/ironpark/toolz/cli/mohae/internal/claude"
+	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
 )
 
 // claudeDriver drives Claude Code through the in-repo SDK client. One client
@@ -25,15 +27,20 @@ func newClaudeDriver(ctx context.Context, options Options) (Driver, error) {
 		// The agent starts in the trial's copy, and nothing outside it is added
 		// to the session.
 		//
-		// TODO(sandbox): this is where the agent begins, not a boundary it is
-		// held to. With permission prompts bypassed below, nothing stops the
-		// agent from reading or writing anywhere on the host — a prompt that
-		// does not name a directory has been seen to leave its work outside the
-		// workspace, which then fails verification for the wrong reason. The
-		// codex driver constrains writes with SandboxWorkspaceWrite; this one
-		// has no equivalent yet, so the two agents are not measured under the
-		// same rules.
-		Cwd:        options.Workspace,
+		// Without a container this is where the agent begins, not a boundary
+		// it is held to: with permission prompts bypassed below, nothing stops
+		// it reading or writing anywhere on the host, and a prompt that does
+		// not name a directory has been seen to leave its work outside the
+		// workspace and then fail verification for the wrong reason. The codex
+		// driver constrains writes with SandboxWorkspaceWrite; this one has no
+		// equivalent, so container.scope: full is what makes the two agents
+		// measurable under the same rules.
+		Cwd: options.Workspace,
+		// Nil on the host, so the SDK starts the CLI itself. Set when the
+		// trial runs its agent in a container, which is what closes the gap
+		// the comment above describes: the workspace is then the only
+		// filesystem the agent has.
+		Command:    containedClaudeCommand(options),
 		Env:        options.Env,
 		MCPServers: claudeMCPServers(servers),
 		// Only what the trial installed: a server the host happens to have
@@ -49,6 +56,21 @@ func newClaudeDriver(ctx context.Context, options Options) (Driver, error) {
 		return nil, fmt.Errorf("claude-code: %w", err)
 	}
 	return &claudeDriver{client: client, onText: options.OnText}, nil
+}
+
+// containedClaudeCommand builds the CLI somewhere other than this host, or
+// returns nil when the agent runs here after all. The SDK builds a full
+// environment on top of this process's own; only what it added is forwarded,
+// since the container has its own PATH and HOME and inheriting this machine's
+// would point the agent at directories that do not exist inside it.
+func containedClaudeCommand(options Options) claude.CommandBuilder {
+	executor := options.executor()
+	if !executor.Contained() {
+		return nil
+	}
+	return func(ctx context.Context, path string, args []string, dir string, env []string) *exec.Cmd {
+		return executor.Command(ctx, append([]string{path}, args...), dir, processutil.Overlay(env))
+	}
 }
 
 // claudeMCPServers translates the parsed specs into the SDK's own shapes. The

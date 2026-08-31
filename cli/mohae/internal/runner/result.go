@@ -23,6 +23,10 @@ type TrialResult struct {
 	ConfigPath  string `json:"config_path"`
 	Agent       string `json:"agent"`
 	Model       string `json:"model,omitempty"`
+	// Container is the image the trial ran in, empty when it ran on the host.
+	// Two runs of one configuration on different images are not the same
+	// measurement, and the report is the only place that would say so.
+	Container string `json:"container,omitempty"`
 
 	StartedAt time.Time `json:"started_at"`
 	// DurationSeconds covers the whole trial, setup and verification included:

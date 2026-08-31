@@ -19,6 +19,8 @@
 
 1. **격리** — `workspace.source`를 임시 디렉터리로 복사합니다. mohae는 원본을
    수정하지 않으므로 같은 설정의 두 실행은 동일한 상태에서 시작합니다.
+   `container`를 지정하면 이후 단계가 호스트가 아니라 그 이미지 안에서 실행되어,
+   시작 상태뿐 아니라 툴체인까지 고정됩니다.
 2. **준비** — `workspace.init_script`로 의존성을 빌드하거나 데이터를 심고,
    `workspace.agent_md`를 `AGENTS.md`로 설치합니다.
 3. **실행** — `prompts`를 순서대로 보냅니다. 각 프롬프트는 앞 턴이 끝난 뒤에 전송되고,
@@ -54,6 +56,19 @@ workspace:
   init_script: ./init.sh
   agent_md: ./AGENTS.md # 워크스페이스에 AGENTS.md로 설치
   git: true
+
+container: # 생략하면 호스트에서 실행. image나 build가 있어야 켜집니다
+  image: golang:1.26 # 또는 build: ./docker (Dockerfile이 있는 디렉터리)
+  runtime: auto # auto | docker | podman
+  scope: setup # setup | full
+  network: none
+  user: host # host | root | uid:gid
+  mounts:
+    - source: ~/.codex
+      target: /mohae-home/.codex
+      read_only: true
+  env:
+    CODEX_HOME: /mohae-home/.codex
 
 prompts: # 대화. 순서대로 전송되며, 둘 이상이면 멀티턴
   - file: ./PROMPT.md
@@ -91,6 +106,47 @@ report:
   dir: .mohae/reports
   formats: [terminal, json]
 ```
+
+### 컨테이너 격리
+
+`container`가 있으면 trial은 호스트가 아니라 컨테이너 안에서 실행됩니다. 워크스페이스
+복사만으로는 **에이전트가 무엇에서 시작하는지**만 고정될 뿐, 그것을 빌드하는 툴체인과
+채점하는 명령은 여전히 그 머신에 깔린 것을 씁니다. 이미지는 그 나머지를 고정합니다.
+
+`scope`가 경계를 어디에 둘지 정합니다.
+
+| scope             | 컨테이너 안                                 | 호스트     | 이미지 요구사항        |
+| ----------------- | ------------------------------------------- | ---------- | ---------------------- |
+| `setup` (기본값)  | `init_script`, `hooks.after`, `verify`, `sh()` | 에이전트   | 과제의 툴체인          |
+| `full`            | 위 전부 + 에이전트                          | —          | 툴체인 + 에이전트 CLI  |
+
+`setup`은 채점 환경의 재현성만 필요할 때 쓰는 값이고, 이미지에 에이전트를 넣지 않아도
+됩니다. `full`은 에이전트까지 컨테이너가 묶으므로 [알려진 한계](#알려진-한계)의
+`claude-code` 샌드박스 문제를 해소하지만, 이미지가 에이전트 CLI를 담고 있어야 하고
+로그인 자격 증명을 `mounts`로 넣어 줘야 합니다.
+
+동작에 관해 알아 둘 것:
+
+- **경로.** trial의 임시 디렉터리는 컨테이너 안에서 항상 `/mohae`에 마운트됩니다.
+  워크스페이스는 `/mohae/workspace`, scratch는 `/mohae/scratch`입니다. `$MOHAE_WORKSPACE`는
+  **그 명령이 보는 경로**로 채워지므로, `scope: setup`에서는 에이전트가 호스트 경로를,
+  검증 명령이 컨테이너 경로를 받습니다. 두 이름은 같은 파일을 가리킵니다.
+- **`$HOME`.** `/mohae/home`이 기본값입니다. 호스트 사용자로 실행되는 컨테이너에는
+  대개 passwd 항목도 홈도 없어서, 이것이 없으면 패키지 매니저와 에이전트 CLI가
+  쓰기에 실패합니다. `container.env`로 덮어쓸 수 있습니다.
+- **파일 소유권.** `user: host`(기본값)는 호스트의 uid/gid로 실행하므로 trial이 만든
+  파일을 그대로 읽고 지울 수 있습니다. rootless podman에는 `--userns=keep-id`가 함께
+  붙습니다. `user: root`는 호스트에 root 소유 파일을 남기고 워크스페이스 정리를
+  실패시킵니다.
+- **스크립트.** `init_script`는 설정 파일 옆에 있어 컨테이너가 볼 수 없으므로 trial의
+  디렉터리로 복사한 뒤 실행합니다.
+- **취소.** 턴 제한 시간이나 `limits.timeout_seconds`가 만료되면 컨테이너 안에서 그
+  명령이 시작한 프로세스 전체를 죽입니다. 워크스페이스 정리 시 컨테이너도 제거됩니다.
+- **런타임.** `auto`는 docker, podman 순으로 찾습니다. 설정이 지정한 런타임이 없으면
+  호스트로 물러서지 않고 실패합니다 — 격리되지 않은 실행이 격리된 것으로 기록되는
+  편이 더 나쁘기 때문입니다. `mohae verify`가 실행 전에 이를 검사합니다.
+- **비용.** trial마다 컨테이너를 하나 띄웁니다. `build`는 매번 호출하지만 런타임의
+  레이어 캐시가 반복 빌드를 감당합니다.
 
 ### 프로파일
 
@@ -239,6 +295,8 @@ mohae run -p 'file://PROMPT.md' -p '이제 테스트를 작성하세요'
 | `--prompt-when <EXPR>`   | 같은 순서의 프롬프트에 붙일 실행 조건 (반복 가능)          |
 | `--agent-md <PATH>`      | 설치할 `AGENTS.md` 대체                                    |
 | `--init-script <PATH>`   | 환경 구성 스크립트 대체                                    |
+| `--container-image <IMG>`| 이 이미지 안에서 trial 실행                                |
+| `--container-scope`      | `setup`(기본) 또는 `full`                                  |
 | `--verify-command <CMD>` | 검증 명령 목록 대체 (반복 가능)                            |
 | `-m, --mcp-config`       | MCP 서버 설정 주입                                         |
 | `-o, --output <FORMAT>`  | `terminal`, `json`, `markdown`, `html`                      |
@@ -386,7 +444,7 @@ mohae init trials/kvstore --template cli-skill --with-scripts
 | 명령      | 상태                                              |
 | --------- | ------------------------------------------------- |
 | `init`    | 동작 — 설정과 참조 파일 일체 생성 (`--all`)       |
-| `verify`  | 동작 — 경로·스크립트·`AGENTS.md` 검사 (MCP는 예정) |
+| `verify`  | 동작 — 경로·스크립트·`AGENTS.md`·컨테이너 런타임 검사 (MCP는 예정) |
 | `run`     | 동작 — 실행·훅·검증·artifact·리포트 (`--web`은 예정) |
 | `compare` | 인자 검증까지 동작                                |
 | `report`  | 인자 검증까지 동작                                |
@@ -401,10 +459,13 @@ mohae init trials/kvstore --template cli-skill --with-scripts
 띄우므로 호스트의 아무 경로나 읽고 쓸 수 있습니다. 실제로 프롬프트가 경로를 명시하지
 않자 에이전트가 워크스페이스 밖에 결과물을 만들어 `when` 조건과 `verify`가 함께
 어긋나는 일이 관측됐습니다. 두 에이전트가 같은 규칙에서 측정되지 않는다는 뜻이기도
-합니다. 신뢰할 수 없는 설정은 컨테이너 같은 별도 샌드박스 안에서 실행하세요.
+합니다. [`container.scope: full`](#컨테이너-격리)이 이를 해소합니다 — 그 경우 두
+에이전트 모두 컨테이너가 경계입니다.
 
 **실패한 trial의 워크스페이스는 남습니다.** 무엇이 일어났는지 볼 방법이 그것뿐이기
 때문입니다. 24시간이 지난 것은 다음 `run`이 정리하며, 정리한 개수를 출력합니다.
+컨테이너는 남기지 않습니다 — 워크스페이스를 보존하는 경우에도 trial이 끝나면 제거하고,
+mohae가 강제 종료돼 남은 컨테이너는 다음 `run`이 회수합니다.
 
 ## 개발
 
