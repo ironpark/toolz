@@ -13,6 +13,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/ironpark/toolz/cli/mohae/internal/agent"
 	reportformat "github.com/ironpark/toolz/cli/mohae/internal/report/format"
+	skillsource "github.com/ironpark/toolz/cli/mohae/internal/skill"
 )
 
 // DefaultConfigName is the file `run` and `verify` fall back to when no path is
@@ -96,10 +97,29 @@ type WorkspaceConfig struct {
 // SkillConfig installs one skill into the workspace before the trial starts.
 // Agents limits which agent types see it; an empty list enables it for all,
 // so the common single-agent config never has to repeat the agent's name.
+//
+// A skill comes either from this machine or from somewhere else, and the two
+// are separate fields rather than one that is guessed at: Path is resolved
+// against the configuration file, while Source is fetched. Naming both would
+// leave which one won up to mohae, so it is rejected.
 type SkillConfig struct {
-	Path   string   `yaml:"path"`
-	Agents []string `yaml:"agents,omitempty"`
+	Path string `yaml:"path,omitempty"`
+	// Source is a remote skill: `owner/repo`, a GitHub URL including the
+	// /tree/<ref>/<path> form, a git remote, or an archive URL.
+	Source string `yaml:"source,omitempty"`
+	// Ref pins Source to a branch, tag or commit. It is optional but worth
+	// setting: an unpinned source is resolved afresh on every run, so the same
+	// configuration can install different instructions next week and the
+	// comparison it was written for stops being one.
+	Ref string `yaml:"ref,omitempty"`
+	// Subpath selects one skill inside a repository holding several. Empty
+	// installs every skill the repository publishes.
+	Subpath string   `yaml:"subpath,omitempty"`
+	Agents  []string `yaml:"agents,omitempty"`
 }
+
+// Remote reports whether this skill is fetched rather than read from disk.
+func (s SkillConfig) Remote() bool { return s.Source != "" }
 
 // EnabledFor reports whether this skill applies to the given agent type.
 func (s SkillConfig) EnabledFor(agentType string) bool {
@@ -291,8 +311,18 @@ func (c *Config) Validate() error {
 		}
 	}
 	for index, skill := range c.Skills {
-		if skill.Path == "" {
-			return fmt.Errorf("skills[%d].path is required", index)
+		switch {
+		case skill.Path == "" && skill.Source == "":
+			return fmt.Errorf("skills[%d]: one of path or source is required", index)
+		case skill.Path != "" && skill.Source != "":
+			return fmt.Errorf("skills[%d]: path and source are mutually exclusive", index)
+		case skill.Path != "" && (skill.Ref != "" || skill.Subpath != ""):
+			return fmt.Errorf("skills[%d]: ref and subpath apply to source, not path", index)
+		}
+		if skill.Source != "" {
+			if _, err := skillsource.ParseSource(skill.Source, skill.Ref, skill.Subpath); err != nil {
+				return fmt.Errorf("skills[%d]: %w", index, err)
+			}
 		}
 		if err := validateAgents(fmt.Sprintf("skills[%d]", index), skill.Agents); err != nil {
 			return err
@@ -345,7 +375,11 @@ func (c *Config) ReferencedPaths() []LabeledPath {
 		})
 	}
 	for index, skill := range c.Skills {
-		candidates = append(candidates, LabeledPath{fmt.Sprintf("skills[%d].path", index), skill.Path})
+		// A remote skill is not a path on this machine; it is checked by being
+		// parsed, and reported only once it has been fetched.
+		if !skill.Remote() {
+			candidates = append(candidates, LabeledPath{fmt.Sprintf("skills[%d].path", index), skill.Path})
+		}
 	}
 	for index, server := range c.MCP {
 		candidates = append(candidates, LabeledPath{fmt.Sprintf("mcp[%d].config", index), server.Config})

@@ -30,7 +30,7 @@ func openCustomDriver(t *testing.T, command []string, onText func(string)) (agen
 	directory := t.TempDir()
 	config := fixtureConfig(t, directory)
 	config.Agent.Command = command
-	workspace, err := PrepareWorkspace(context.Background(), config, config.Agent.Type)
+	workspace, err := PrepareWorkspace(context.Background(), config, config.Agent.Type, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestCustomDriverRunsInTheWorkspaceWithTheTrialEnvironment(t *testing.T) {
 	config.Agent.Model = "stub-1"
 	config.Agent.Effort = "high"
 	config.Agent.Env = map[string]string{"CUSTOM": "yes"}
-	workspace, err := PrepareWorkspace(context.Background(), config, config.Agent.Type)
+	workspace, err := PrepareWorkspace(context.Background(), config, config.Agent.Type, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestNewDriverRejectsAnAgentTypeItCannotDrive(t *testing.T) {
 	directory := t.TempDir()
 	config := fixtureConfig(t, directory)
 	config.Agent.Type = "nonesuch"
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

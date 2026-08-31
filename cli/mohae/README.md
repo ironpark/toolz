@@ -76,8 +76,11 @@ prompts: # 대화. 순서대로 전송되며, 둘 이상이면 멀티턴
     when: sh("go build ./...") != 0 # 조건이 참일 때만 전송
 
 skills: # 워크스페이스에 설치할 스킬. agents로 대상 에이전트 제한
-  - path: ./skills/commit
+  - path: ./skills/commit # 로컬 경로
     agents: [claude-code]
+  - source: vercel-labs/skills # 원격에서 내려받아 설치
+    ref: v1.2.0 # 브랜치·태그·커밋. 생략 가능하지만 지정을 권장
+    subpath: skills/commit # 생략하면 저장소가 제공하는 스킬을 모두 설치
 
 mcp: # 연결할 MCP 서버. agents 생략 시 모든 에이전트에 제공
   - name: context7
@@ -147,6 +150,44 @@ report:
   편이 더 나쁘기 때문입니다. `mohae verify`가 실행 전에 이를 검사합니다.
 - **비용.** trial마다 컨테이너를 하나 띄웁니다. `build`는 매번 호출하지만 런타임의
   레이어 캐시가 반복 빌드를 감당합니다.
+
+### 원격 스킬
+
+`skills`의 각 항목은 로컬 경로(`path`)이거나 원격 소스(`source`)입니다. 둘은 같은
+질문에 대한 두 가지 답이므로 함께 쓸 수 없고, 함께 쓰면 설정 검증에서 거부됩니다.
+
+`source`가 받는 형태:
+
+| 형태          | 예시                                                        |
+| ------------- | ----------------------------------------------------------- |
+| GitHub 축약형 | `vercel-labs/skills`                                        |
+| GitHub URL    | `https://github.com/vercel-labs/skills`                     |
+| GitHub 경로   | `https://github.com/vercel-labs/skills/tree/v1.2.0/skills/commit` |
+| git 리모트    | `git@gitlab.com:org/repo.git`, `https://gitlab.com/org/repo` |
+| 아카이브      | `https://example.com/skills.tar.gz`, `.tgz`, `.tar`, `.zip` |
+
+`/tree/<ref>/<path>` URL은 브라우저 주소창에서 그대로 복사해 쓸 수 있습니다. URL이
+담은 ref·경로는 `ref`·`subpath`가 비어 있을 때 채워지며, 둘이 서로 다른 값을 가리키면
+어느 쪽을 따를지 mohae가 정하지 않고 오류를 냅니다.
+
+동작에 관해 알아 둘 것:
+
+- **고정.** `ref`는 브랜치·태그·커밋을 받습니다. 생략하면 실행할 때마다 기본 브랜치를
+  새로 확인하므로, 같은 설정이 다음 주에는 다른 지시문을 설치할 수 있습니다 — 비교를
+  위해 쓰는 도구에서는 이것이 측정 자체를 무너뜨립니다. `mohae verify`는 고정되지
+  않은 소스를 경고합니다.
+- **기록.** 소스는 내려받기 전에 **불변 커밋으로 확정**되고, 그 커밋이 JSON 리포트의
+  `skills[].commit`에 남습니다. 실행을 재현하려면 그 값을 `ref`에 넣으면 됩니다.
+- **캐시.** 캐시는 소스 문자열이 아니라 확정된 커밋으로 키를 잡습니다. 같은 커밋을
+  다르게 적은 두 설정은 같은 바이트를 공유하고, 브랜치가 움직이면 기존 항목을 덮어쓰는
+  대신 새 항목이 생깁니다. `--skill-cache`로 위치를 바꿀 수 있습니다.
+- **선택.** `subpath`를 주면 그 디렉터리 하나만, 생략하면 저장소가 제공하는 스킬을 모두
+  설치합니다. 스킬은 `SKILL.md`를 가진 디렉터리이며, 저장소 루트와 `skills/`,
+  `.claude/skills/` 등 관례적인 위치에서 찾습니다.
+- **오프라인.** `--offline`은 네트워크를 쓰지 않고 캐시에 있는 것만 씁니다. 네트워크가
+  닿지 않을 때는 그 ref를 이 머신에서 마지막으로 확정했던 커밋으로 물러섭니다.
+- **인증.** 비공개 GitHub 저장소는 `MOHAE_GITHUB_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN` 중
+  설정된 것을 씁니다. git 리모트는 git에 이미 설정된 자격 증명을 그대로 씁니다.
 
 ### 프로파일
 
@@ -302,6 +343,8 @@ mohae run -p 'file://PROMPT.md' -p '이제 테스트를 작성하세요'
 | `-o, --output <FORMAT>`  | `terminal`, `json`, `markdown`, `html`                      |
 | `--report-dir <DIR>`     | 리포트 저장 위치 (기본 `.mohae/reports`)                   |
 | `--show-dialogue`        | 대화 내용을 터미널로 실시간 출력                           |
+| `--offline`              | 원격 스킬을 내려받지 않고 캐시에 있는 것만 사용            |
+| `--skill-cache <DIR>`    | 원격 스킬 캐시 위치 (기본: 사용자 캐시 디렉터리)           |
 | `--detailed-tokens`      | 입력·출력·캐시 읽기/쓰기로 토큰을 나눠 출력                |
 | `-t, --timeout <SEC>`    | 실행 하나당 제한 시간 (기본 300)                           |
 | `--fail-fast`            | 검증 실패나 명령 에러 발생 시 즉시 중단                    |

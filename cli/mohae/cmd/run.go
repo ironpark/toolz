@@ -16,6 +16,7 @@ import (
 	"github.com/ironpark/toolz/cli/mohae/internal/report"
 	reportformat "github.com/ironpark/toolz/cli/mohae/internal/report/format"
 	"github.com/ironpark/toolz/cli/mohae/internal/runner"
+	skillsrc "github.com/ironpark/toolz/cli/mohae/internal/skill"
 	"github.com/urfave/cli/v3"
 )
 
@@ -39,6 +40,8 @@ func NewRun(version string) *cli.Command {
 			&cli.StringFlag{Name: "report-dir", Value: configuration.DefaultReportDir, Usage: "directory to write reports into"},
 			&cli.BoolFlag{Name: "show-dialogue", Usage: "stream the conversation to the terminal while it runs"},
 			&cli.BoolFlag{Name: "detailed-tokens", Usage: "break tokens down by input, output, cache read and cache write"},
+			&cli.BoolFlag{Name: "offline", Usage: "never fetch remote skills: use what is already cached, or fail saying what is missing"},
+			&cli.StringFlag{Name: "skill-cache", Usage: "directory to cache fetched skills in (default: the user cache directory)"},
 			&cli.BoolFlag{Name: "web", Usage: "serve the dashboard alongside the run"},
 			&cli.IntFlag{Name: "timeout", Aliases: []string{"t"}, Value: configuration.DefaultTimeoutSeconds, Usage: "seconds allowed for one trial"},
 			&cli.BoolFlag{Name: "fail-fast", Usage: "stop at the first failed verification or command error"},
@@ -82,6 +85,12 @@ func runAction(version string) cli.ActionFunc {
 			// Serialized: with --concurrency the trials write at the same time, and
 			// unsynchronised writes would tear each other's lines apart.
 			Out: newLockedWriter(cmd.Writer),
+			// One resolver for the whole run: several configurations naming the
+			// same skill source should cost one download, not one per trial.
+			Skills: &skillsrc.Resolver{
+				Root:    cmd.String("skill-cache"),
+				Offline: cmd.Bool("offline"),
+			},
 		}
 
 		// Before the run, so a machine that has been benchmarking for weeks does not

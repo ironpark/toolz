@@ -7,7 +7,6 @@ import (
 
 type AgentConfig = config.AgentConfig
 type WorkspaceConfig = config.WorkspaceConfig
-type SkillConfig = config.SkillConfig
 type MCPServerConfig = config.MCPServerConfig
 type PromptEnv = config.PromptEnv
 type LabeledPath = config.LabeledPath

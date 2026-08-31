@@ -15,6 +15,7 @@ import (
 	"github.com/ironpark/toolz/cli/mohae/internal/agent"
 	"github.com/ironpark/toolz/cli/mohae/internal/container"
 	"github.com/ironpark/toolz/cli/mohae/internal/fsutil"
+	skillsrc "github.com/ironpark/toolz/cli/mohae/internal/skill"
 
 	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
 )
@@ -36,6 +37,11 @@ type Workspace struct {
 	Root    string
 	Scratch string
 	Home    string
+
+	// Skills is what install placed under the agent's skill directory, in the
+	// order it did. The trial result carries it forward so a report says which
+	// revision of a fetched skill the agent was actually given.
+	Skills []SkillInstall
 
 	// exec runs the setup script, the hooks and the verification commands;
 	// agent runs the agent under test. They are reached through methods that
@@ -62,7 +68,7 @@ type Workspace struct {
 //
 // The configured source is only ever read. Nothing here writes to it, which is
 // what lets two runs of the same configuration start from identical state.
-func PrepareWorkspace(ctx context.Context, config *Config, agentType string) (workspace *Workspace, err error) {
+func PrepareWorkspace(ctx context.Context, config *Config, agentType string, skills *skillsrc.Resolver) (workspace *Workspace, err error) {
 	base, err := os.MkdirTemp("", "mohae-"+fsutil.SanitizeName(config.Name)+"-")
 	if err != nil {
 		return nil, err
@@ -91,7 +97,7 @@ func PrepareWorkspace(ctx context.Context, config *Config, agentType string) (wo
 	if err := copyTreeExcluding(config.Resolve(config.Workspace.Source), prepared.Root, config.Workspace.Exclude); err != nil {
 		return nil, fmt.Errorf("copying workspace.source: %w", err)
 	}
-	if err := prepared.install(config, agentType); err != nil {
+	if err := prepared.install(ctx, config, agentType, skills); err != nil {
 		return nil, err
 	}
 	// After the files are in place and before anything runs: the container is
@@ -120,7 +126,7 @@ func PrepareWorkspace(ctx context.Context, config *Config, agentType string) (wo
 // install places the documents the agent is meant to find: AGENTS.md at the
 // workspace root, and the skills scoped to this agent type under the directory
 // that agent reads.
-func (w *Workspace) install(config *Config, agentType string) error {
+func (w *Workspace) install(ctx context.Context, config *Config, agentType string, skills *skillsrc.Resolver) error {
 	if source := config.Workspace.AgentMD; source != "" {
 		data, err := os.ReadFile(config.Resolve(source))
 		if err != nil {
@@ -133,23 +139,65 @@ func (w *Workspace) install(config *Config, agentType string) error {
 		}
 	}
 	skillDir, known := agent.SkillDir(agentType)
-	for index, skill := range config.Skills {
-		if !skill.EnabledFor(agentType) {
+	for index, entry := range config.Skills {
+		if !entry.EnabledFor(agentType) {
 			continue
 		}
 		if !known {
 			return fmt.Errorf("skills[%d]: unknown agent type %q", index, agentType)
 		}
-		source := config.Resolve(skill.Path)
-		target := filepath.Join(w.Root, filepath.FromSlash(skillDir), filepath.Base(source))
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		if err := copyPath(source, target); err != nil {
+		installed, err := w.installSkill(ctx, config, entry, skillDir, skills)
+		if err != nil {
 			return fmt.Errorf("installing skills[%d]: %w", index, err)
 		}
+		w.Skills = append(w.Skills, installed...)
 	}
 	return nil
+}
+
+// installSkill places one configured entry under the agent's skill directory.
+// A local entry is one directory; a remote one may be a repository publishing
+// several, and each is installed under its own name.
+func (w *Workspace) installSkill(ctx context.Context, config *Config, entry SkillConfig, skillDir string, skills *skillsrc.Resolver) ([]SkillInstall, error) {
+	if !entry.Remote() {
+		source := config.Resolve(entry.Path)
+		if err := w.copySkill(source, skillDir, filepath.Base(source)); err != nil {
+			return nil, err
+		}
+		return []SkillInstall{{Name: filepath.Base(source), Path: entry.Path}}, nil
+	}
+
+	parsed, err := skillsrc.ParseSource(entry.Source, entry.Ref, entry.Subpath)
+	if err != nil {
+		return nil, err
+	}
+	if skills == nil {
+		skills = &skillsrc.Resolver{}
+	}
+	resolved, err := skills.Resolve(ctx, parsed)
+	if err != nil {
+		return nil, err
+	}
+	installs := make([]SkillInstall, 0, len(resolved.Skills))
+	for _, found := range resolved.Skills {
+		if err := w.copySkill(found.Dir, skillDir, found.Name); err != nil {
+			return nil, err
+		}
+		installs = append(installs, SkillInstall{
+			Name:   found.Name,
+			Source: parsed.String(),
+			Commit: resolved.Commit,
+		})
+	}
+	return installs, nil
+}
+
+func (w *Workspace) copySkill(source, skillDir, name string) error {
+	target := filepath.Join(w.Root, filepath.FromSlash(skillDir), name)
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	return copyPath(source, target)
 }
 
 // runInitScript runs the setup script inside the copy. Its output is folded

@@ -9,6 +9,7 @@ import (
 
 	configuration "github.com/ironpark/toolz/cli/mohae/internal/config"
 	"github.com/ironpark/toolz/cli/mohae/internal/container"
+	skillsrc "github.com/ironpark/toolz/cli/mohae/internal/skill"
 	"github.com/urfave/cli/v3"
 )
 
@@ -115,6 +116,9 @@ func verifyConfig(cmd *cli.Command, config *configuration.Config) []checkResult 
 	if config.Container.Enabled() {
 		results = append(results, checkContainer(config))
 	}
+	// Unconditional: this reads the configuration and touches nothing, and an
+	// unpinned skill is exactly what someone runs verify to be told about.
+	results = append(results, checkSkills(config)...)
 	if cmd.Bool("check-scripts") {
 		results = append(results, checkScripts(config)...)
 	}
@@ -169,6 +173,33 @@ func checkScripts(config *configuration.Config) []checkResult {
 		}
 	}
 	return []checkResult{{statusPass, field + " syntax", ""}}
+}
+
+// checkSkills reports what each remote skill entry will fetch. Nothing is
+// downloaded: verify is the cheap check run before a benchmark, and a fetch
+// belongs to the run. An unpinned source is a warning rather than a failure —
+// it works, but it makes the configuration mean something different on a
+// different day, which is the one thing a benchmark cannot afford.
+func checkSkills(config *configuration.Config) []checkResult {
+	results := []checkResult{}
+	for index, entry := range config.Skills {
+		if !entry.Remote() {
+			continue
+		}
+		field := fmt.Sprintf("skills[%d].source", index)
+		source, err := skillsrc.ParseSource(entry.Source, entry.Ref, entry.Subpath)
+		if err != nil {
+			results = append(results, checkResult{statusFail, field, err.Error()})
+			continue
+		}
+		if source.Ref == "" {
+			results = append(results, checkResult{statusWarn, field,
+				source.Spec + " is unpinned: set ref: to a tag or commit so the trial can be reproduced"})
+			continue
+		}
+		results = append(results, checkResult{statusPass, field, source.String()})
+	}
+	return results
 }
 
 func checkAgentMarkdown(config *configuration.Config) checkResult {

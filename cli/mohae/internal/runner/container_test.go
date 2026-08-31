@@ -53,7 +53,7 @@ func TestContainerTrialRunsSetupAndGradingInside(t *testing.T) {
 	writeFile(t, filepath.Join(directory, "init.sh"), "#!/bin/sh\nuname -s > kernel\n", 0o755)
 	config.Workspace.InitScript = "./init.sh"
 
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestContainerTrialRunsSetupAndGradingInside(t *testing.T) {
 func TestContainerTrialIsRemovedWithTheWorkspace(t *testing.T) {
 	requireRuntime(t)
 	config := containerFixture(t)
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestContainerTrialFailsWhenTheRuntimeIsMissing(t *testing.T) {
 	// sandboxed one, which is worse than not running it at all.
 	config := containerFixture(t)
 	config.Container.Runtime = "containerd"
-	if _, err := PrepareWorkspace(context.Background(), config, "custom-cli"); err == nil {
+	if _, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil); err == nil {
 		t.Fatal("a trial ran without the runtime it asked for")
 	}
 }
@@ -155,7 +155,7 @@ func TestSetupScopeLeavesTheAgentOnTheHost(t *testing.T) {
 	config := containerFixture(t)
 	config.Agent.Command = []string{"sh", "-c", "uname -s"}
 
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestCancellingAStepKillsWhatItStartedInside(t *testing.T) {
 	// would otherwise leave that write racing the verification of the same
 	// files.
 	config := containerFixture(t)
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

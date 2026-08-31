@@ -215,11 +215,39 @@ func TestSkillsAndMCPRejectUnknownAgentsAndMissingPaths(t *testing.T) {
 	for name, section := range map[string]string{
 		"unknown skill agent": "skills:\n  - path: ./s\n    agents: [gemini]\n",
 		"missing skill path":  "skills:\n  - agents: [codex]\n",
-		"unknown mcp agent":   "mcp:\n  - config: ./m.json\n    agents: [gemini]\n",
-		"missing mcp config":  "mcp:\n  - name: unnamed\n",
+		// path and source answer the same question two ways; which one won
+		// would be mohae's guess rather than the author's choice.
+		"both path and source": "skills:\n  - path: ./s\n    source: owner/repo\n",
+		"ref without a source": "skills:\n  - path: ./s\n    ref: v1\n",
+		"unparseable source":   "skills:\n  - source: ./not-a-remote\n",
+		"source ref disagrees": "skills:\n  - source: https://github.com/o/r/tree/main/s\n    ref: v2\n",
+		"unknown mcp agent":    "mcp:\n  - config: ./m.json\n    agents: [gemini]\n",
+		"missing mcp config":   "mcp:\n  - name: unnamed\n",
 	} {
 		if _, err := LoadConfig(writeConfig(t, minimalConfig+section)); err == nil {
 			t.Errorf("%s: expected an error", name)
+		}
+	}
+}
+
+func TestRemoteSkillsAreParsedButNotTreatedAsLocalPaths(t *testing.T) {
+	config, err := LoadConfig(writeConfig(t, minimalConfig+`skills:
+  - source: vercel-labs/skills
+    ref: v1.2.0
+    subpath: skills/commit
+  - path: ./skills/local
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.Skills[0].Remote() || config.Skills[1].Remote() {
+		t.Errorf("remote scoping = %+v", config.Skills)
+	}
+	// A fetched skill is not a file on this machine, so verify must not report
+	// it as a missing referenced path.
+	for _, referenced := range config.ReferencedPaths() {
+		if referenced.Field == "skills[0].source" || referenced.Path == "vercel-labs/skills" {
+			t.Errorf("remote skill listed as a referenced path: %+v", referenced)
 		}
 	}
 }

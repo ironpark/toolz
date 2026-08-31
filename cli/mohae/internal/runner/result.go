@@ -33,6 +33,12 @@ type TrialResult struct {
 	// what a run of this configuration actually costs in wall time.
 	DurationSeconds float64 `json:"duration_seconds"`
 
+	// Skills is what each configured skill entry actually installed. A remote
+	// skill records the commit it resolved to, which is the only way a report
+	// can say which instructions the agent was given: the source alone names a
+	// branch that may have moved since.
+	Skills []SkillInstall `json:"skills,omitempty"`
+
 	Turns  []TurnResult   `json:"turns"`
 	Hooks  []HookResult   `json:"hooks,omitempty"`
 	Verify []VerifyResult `json:"verify,omitempty"`
@@ -176,4 +182,19 @@ func (r TrialResult) Verdict() string {
 	default:
 		return "pass"
 	}
+}
+
+// SkillInstall is one skill as it was installed into a trial's workspace.
+type SkillInstall struct {
+	// Name is the directory the agent sees it under.
+	Name string `json:"name"`
+	// Path is set for a skill read from this machine, and is the configured
+	// path rather than the resolved one: the resolved path names a checkout
+	// that means nothing on another machine.
+	Path string `json:"path,omitempty"`
+	// Source is set for a fetched skill, spelled as the configuration wrote it.
+	Source string `json:"source,omitempty"`
+	// Commit is the immutable revision Source resolved to. Reproducing the run
+	// means putting this back in the configuration's ref.
+	Commit string `json:"commit,omitempty"`
 }

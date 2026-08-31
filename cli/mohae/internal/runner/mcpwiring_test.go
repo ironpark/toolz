@@ -147,7 +147,7 @@ func TestDriversAreSelectedByAgentTypeWithoutAnyAgentInstalled(t *testing.T) {
 	}
 	directory := t.TempDir()
 	config := fixtureConfig(t, directory)
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

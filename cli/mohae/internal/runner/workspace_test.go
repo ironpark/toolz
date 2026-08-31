@@ -49,7 +49,7 @@ func TestPrepareWorkspaceCopiesTheSourceAndLeavesItAlone(t *testing.T) {
 	config := fixtureConfig(t, directory)
 	writeFile(t, filepath.Join(directory, "fixture", "nested", "run.sh"), "#!/bin/sh\n", 0o755)
 
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestPrepareWorkspaceSkipsTheSourceGitDirectory(t *testing.T) {
 	config := fixtureConfig(t, directory)
 	writeFile(t, filepath.Join(directory, "fixture", ".git", "HEAD"), "ref: refs/heads/main\n", 0o644)
 
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestPrepareWorkspaceExcludesEvaluationFilesAndMatchedDirectories(t *testing
 	writeFile(t, filepath.Join(directory, "fixture", "nested", "token.secret"), "hidden\n", 0o644)
 	writeFile(t, filepath.Join(directory, "fixture", "nested", "keep.txt"), "visible\n", 0o644)
 
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestPrepareWorkspaceRunsTheInitScriptInsideTheCopy(t *testing.T) {
 	writeFile(t, filepath.Join(directory, "init.sh"), "#!/bin/sh\npwd > pwd.txt\n", 0o755)
 	config.Workspace.InitScript = "./init.sh"
 
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestPrepareWorkspaceReportsInitScriptFailureWithItsOutput(t *testing.T) {
 	writeFile(t, filepath.Join(directory, "init.sh"), "#!/bin/sh\necho no dependency\nexit 3\n", 0o755)
 	config.Workspace.InitScript = "./init.sh"
 
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err == nil {
 		workspace.Cleanup()
 		t.Fatal("expected the trial to stop when setup failed")
@@ -196,7 +196,7 @@ func TestPrepareWorkspaceInstallsAgentMarkdownUnderTheExpectedName(t *testing.T)
 	writeFile(t, filepath.Join(directory, "instructions.md"), "# Rules\n", 0o644)
 	config.Workspace.AgentMD = "./instructions.md"
 
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestPrepareWorkspaceInstallsOnlyTheSkillsScopedToTheAgent(t *testing.T) {
 		{Path: "./skills/claude-only", Agents: []string{"claude-code"}},
 	}
 
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestPrepareWorkspaceMakesTheBaselineCommit(t *testing.T) {
 	config := fixtureConfig(t, directory)
 	config.Workspace.Git = true
 
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestPrepareWorkspaceMakesTheBaselineCommit(t *testing.T) {
 
 func TestCleanupRemovesEverythingAndIsRepeatable(t *testing.T) {
 	directory := t.TempDir()
-	workspace, err := PrepareWorkspace(context.Background(), fixtureConfig(t, directory), "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), fixtureConfig(t, directory), "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

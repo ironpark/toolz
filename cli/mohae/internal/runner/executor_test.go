@@ -64,7 +64,7 @@ func TestVerificationRunsInTheScratchDirectoryTheExecutorSees(t *testing.T) {
 	// runs from has to be named in the executor's own namespace, or the shell
 	// would start somewhere that does not exist.
 	config := fixtureConfig(t, t.TempDir())
-	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli")
+	workspace, err := PrepareWorkspace(context.Background(), config, "custom-cli", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

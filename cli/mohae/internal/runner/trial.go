@@ -11,6 +11,7 @@ import (
 
 	configuration "github.com/ironpark/toolz/cli/mohae/internal/config"
 	agentdriver "github.com/ironpark/toolz/cli/mohae/internal/driver"
+	skillsrc "github.com/ironpark/toolz/cli/mohae/internal/skill"
 )
 
 // TrialOptions are the run-time choices a trial takes from the command line
@@ -26,6 +27,10 @@ type TrialOptions struct {
 	// A failed trial's workspace is always kept: it is the only record of what
 	// the agent actually did.
 	KeepWorkspace bool
+	// Skills fetches the configuration's remote skills. One resolver is shared
+	// by every trial in a run so a source is downloaded once rather than once
+	// per trial. Nil is a resolver with default settings.
+	Skills *skillsrc.Resolver
 }
 
 // RunTrial runs one configuration end to end and returns what happened. It does
@@ -55,7 +60,7 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 	ctx, cancel := config.Limits.Bound(ctx)
 	defer cancel()
 
-	workspace, err := PrepareWorkspace(ctx, config, config.Agent.Type)
+	workspace, err := PrepareWorkspace(ctx, config, config.Agent.Type, options.Skills)
 	if err != nil {
 		// Nothing ran, so there is nothing to grade and no workspace to keep.
 		result.Error = err.Error()
@@ -63,6 +68,9 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 		return result
 	}
 	result.Container = workspace.Container()
+	// Recorded before anything can fail: which revision of a fetched skill the
+	// agent was given is part of what the run measured, whatever the verdict.
+	result.Skills = workspace.Skills
 	// Unconditional, and before the cleanup below: the workspace may be kept,
 	// the container never is. It has nothing left to run once the trial ends,
 	// and one left behind per failing trial would accumulate for as long as
