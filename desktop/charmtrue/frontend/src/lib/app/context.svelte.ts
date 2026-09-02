@@ -1,6 +1,6 @@
 import { getContext, setContext } from 'svelte';
-import { TrueNASService, type APIKeyMutation, type APIKeyMutationResult, type ConnectionInfo, type GroupMutation, type IdentityOverview, type NetworkConfigurationMutation, type NetworkInterfaceMutation, type NetworkOverview, type RsyncTaskMutation, type SavedServer, type ShareMutation, type SharingOverview, type StaticRouteMutation, type StorageOverview, type SystemManagementOverview, type UserMutation, type UserMutationResult } from '../../../bindings/github.com/ironpark/toolz/desktop/charmtrue';
-import type { AuthenticationMethod } from './types';
+import { TrueNASService, type APIKeyMutation, type APIKeyMutationResult, type ConnectionInfo, type DatasetDeleteOptions, type DatasetMutation, type DatasetSnapshotMutation, type GroupMutation, type IdentityOverview, type NetworkConfigurationMutation, type NetworkInterfaceMutation, type NetworkOverview, type RsyncTaskMutation, type SavedServer, type ShareMutation, type SharingOverview, type SMBShareACL, type StaticRouteMutation, type StorageOverview, type SystemManagementOverview, type UserMutation, type UserMutationResult } from '../../../bindings/github.com/ironpark/toolz/desktop/charmtrue';
+import type { View } from './types';
 
 const APP_CONTEXT = Symbol('charmtrue-app');
 
@@ -37,17 +37,36 @@ export class AppContext {
         if (!this.loading) this.modalOpen = false;
     }
 
-    async connect(endpoint: string, username: string, secret: string, authenticationMethod: AuthenticationMethod, allowPrivateCertificate: boolean, saveServer: boolean, saveCredential: boolean): Promise<void> {
+    async connect(endpoint: string, username: string, secret: string, allowPrivateCertificate: boolean, saveServer: boolean, saveCredential: boolean): Promise<void> {
         this.loading = true;
         this.message = '';
         try {
-            const connection = await TrueNASService.Connect(endpoint, username, secret, authenticationMethod, allowPrivateCertificate, saveServer, saveCredential);
+            const connection = await TrueNASService.Connect(endpoint, username, secret, 'password', allowPrivateCertificate, saveServer, saveCredential);
             await this.completeConnection(connection, saveServer);
         } catch (error) {
             this.message = error instanceof Error ? error.message : String(error || '백엔드 서비스에 연결할 수 없습니다.');
         } finally {
             this.loading = false;
         }
+    }
+
+    isRefreshing(view: View): boolean {
+        if (view === 'overview') return this.storageLoading || this.sharingLoading || this.systemLoading || this.identityLoading || this.networkLoading;
+        if (view === 'storage' || view === 'datasets') return this.storageLoading;
+        if (view === 'services') return this.sharingLoading;
+        if (view === 'network') return this.networkLoading;
+        if (view === 'identity') return this.identityLoading;
+        return this.systemLoading;
+    }
+
+    async refreshView(view: View): Promise<void> {
+        if (view === 'overview') {
+            await Promise.all([this.refreshStorage(), this.refreshSharing(), this.refreshSystem(), this.refreshIdentity(), this.refreshNetwork()]);
+        } else if (view === 'storage' || view === 'datasets') await this.refreshStorage();
+        else if (view === 'services') await this.refreshSharing();
+        else if (view === 'network') await this.refreshNetwork();
+        else if (view === 'identity') await this.refreshIdentity();
+        else await this.refreshSystem();
     }
 
     async connectSavedServer(id: string): Promise<void> {
@@ -102,6 +121,30 @@ export class AppContext {
         }
     }
 
+    async saveDataset(input: DatasetMutation): Promise<void> {
+        this.storageError = '';
+        try { await TrueNASService.SaveDataset(input); await this.refreshStorage(); }
+        catch (error) { this.storageError = error instanceof Error ? error.message : String(error); throw error; }
+    }
+
+    async deleteDataset(input: DatasetDeleteOptions): Promise<void> {
+        this.storageError = '';
+        try { await TrueNASService.DeleteDataset(input); await this.refreshStorage(); }
+        catch (error) { this.storageError = error instanceof Error ? error.message : String(error); throw error; }
+    }
+
+    async createDatasetSnapshot(input: DatasetSnapshotMutation): Promise<void> {
+        this.storageError = '';
+        try { await TrueNASService.CreateDatasetSnapshot(input); await this.refreshStorage(); }
+        catch (error) { this.storageError = error instanceof Error ? error.message : String(error); throw error; }
+    }
+
+    async setDatasetLocked(id: string, secret: string, lock: boolean, recursive: boolean, force: boolean): Promise<void> {
+        this.storageError = '';
+        try { await TrueNASService.SetDatasetLocked(id, secret, lock, recursive, force); await this.refreshStorage(); }
+        catch (error) { this.storageError = error instanceof Error ? error.message : String(error); throw error; }
+    }
+
     async refreshSharing(): Promise<void> {
         if (!this.connection?.connected || this.sharingLoading) return;
         this.sharingLoading = true; this.sharingError = '';
@@ -126,6 +169,20 @@ export class AppContext {
         this.sharingError = '';
         try { await TrueNASService.RunRsyncTask(id); }
         catch (error) { this.sharingError = error instanceof Error ? error.message : String(error); }
+    }
+
+    async deleteRsyncTask(id: number): Promise<void> {
+        this.sharingError = '';
+        try { await TrueNASService.DeleteRsyncTask(id); await this.refreshSharing(); }
+        catch (error) { this.sharingError = error instanceof Error ? error.message : String(error); }
+    }
+
+    async getSMBShareACL(shareName: string): Promise<SMBShareACL> {
+        return TrueNASService.GetSMBShareACL(shareName);
+    }
+
+    async saveSMBShareACL(input: SMBShareACL): Promise<void> {
+        await TrueNASService.SaveSMBShareACL(input);
     }
 
     async saveShare(input: ShareMutation): Promise<void> {

@@ -46,6 +46,10 @@ export function ControlSystemService(name: string, action: string): $Cancellable
     return $Call.ByID(1097167144, name, action);
 }
 
+export function CreateDatasetSnapshot(input: $models.DatasetSnapshotMutation): $CancellablePromise<void> {
+    return $Call.ByID(1712693173, input);
+}
+
 /**
  * CurrentConnection returns the in-memory connection state without exposing
  * credentials.
@@ -54,12 +58,20 @@ export function CurrentConnection(): $CancellablePromise<$models.ConnectionInfo>
     return $Call.ByID(2902204992);
 }
 
+export function DeleteDataset(input: $models.DatasetDeleteOptions): $CancellablePromise<void> {
+    return $Call.ByID(1321560836, input);
+}
+
 export function DeleteIdentity(kind: string, id: number): $CancellablePromise<void> {
     return $Call.ByID(2705484798, kind, id);
 }
 
 export function DeleteNetworkInterface(id: string): $CancellablePromise<void> {
     return $Call.ByID(2935730273, id);
+}
+
+export function DeleteRsyncTask(id: number): $CancellablePromise<void> {
+    return $Call.ByID(253646008, id);
 }
 
 /**
@@ -83,6 +95,10 @@ export function DeleteStaticRoute(id: number): $CancellablePromise<void> {
  */
 export function Disconnect(): $CancellablePromise<void> {
     return $Call.ByID(2224169341);
+}
+
+export function GetSMBShareACL(shareName: string): $CancellablePromise<$models.SMBShareACL> {
+    return $Call.ByID(1776517376, shareName);
 }
 
 export function IdentityOverview(): $CancellablePromise<$models.IdentityOverview> {
@@ -113,6 +129,14 @@ export function SaveAPIKey(input: $models.APIKeyMutation): $CancellablePromise<$
     return $Call.ByID(1017334685, input);
 }
 
+/**
+ * SaveDataset creates or updates a dataset. A changed ID is renamed only when
+ * ForceRename is explicitly set because TrueNAS does not perform usage checks.
+ */
+export function SaveDataset(input: $models.DatasetMutation): $CancellablePromise<void> {
+    return $Call.ByID(610650050, input);
+}
+
 export function SaveGroup(input: $models.GroupMutation): $CancellablePromise<void> {
     return $Call.ByID(2192222517, input);
 }
@@ -127,6 +151,10 @@ export function SaveNetworkInterface(input: $models.NetworkInterfaceMutation): $
 
 export function SaveRsyncTask(input: $models.RsyncTaskMutation): $CancellablePromise<void> {
     return $Call.ByID(1760596666, input);
+}
+
+export function SaveSMBShareACL(input: $models.SMBShareACL): $CancellablePromise<void> {
+    return $Call.ByID(3552956521, input);
 }
 
 export function SaveShare(input: $models.ShareMutation): $CancellablePromise<void> {
@@ -146,6 +174,10 @@ export function SaveUser(input: $models.UserMutation): $CancellablePromise<$mode
  */
 export function SavedServers(): $CancellablePromise<$models.SavedServer[] | null> {
     return $Call.ByID(1621806626);
+}
+
+export function SetDatasetLocked(id: string, secret: string, lock: boolean, recursive: boolean, force: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1344414149, id, secret, lock, recursive, force);
 }
 
 export function SetShareEnabled(protocol: string, id: number, enabled: boolean): $CancellablePromise<void> {

@@ -62,27 +62,63 @@ func (s SSHService) Call(c context.Context, m string, r SharingCall) (json.RawMe
 }
 
 type SMBShareEntry struct {
-	ID                          int      `json:"id"`
-	Name                        string   `json:"name"`
-	Path                        string   `json:"path"`
-	Purpose                     string   `json:"purpose"`
-	Comment                     string   `json:"comment"`
-	Enabled                     bool     `json:"enabled"`
-	Locked                      bool     `json:"locked"`
-	ReadOnly                    bool     `json:"readonly"`
-	LegacyReadOnly              bool     `json:"ro"`
-	Browsable                   bool     `json:"browsable"`
-	AccessBasedShareEnumeration bool     `json:"access_based_share_enumeration"`
-	RecycleBin                  bool     `json:"recyclebin"`
-	PathSuffix                  *string  `json:"path_suffix"`
-	HostsAllow                  []string `json:"hostsallow"`
-	HostsDeny                   []string `json:"hostsdeny"`
-	Home                        bool     `json:"home"`
+	ID                          int              `json:"id"`
+	Name                        string           `json:"name"`
+	Path                        string           `json:"path"`
+	Purpose                     string           `json:"purpose"`
+	Comment                     string           `json:"comment"`
+	Enabled                     bool             `json:"enabled"`
+	Locked                      bool             `json:"locked"`
+	ReadOnly                    bool             `json:"readonly"`
+	LegacyReadOnly              bool             `json:"ro"`
+	Browsable                   bool             `json:"browsable"`
+	AccessBasedShareEnumeration bool             `json:"access_based_share_enumeration"`
+	Audit                       SMBAuditConfig   `json:"audit"`
+	Options                     *SMBShareOptions `json:"options"`
+	// Legacy flat option fields are retained for compatibility with pre-25.10
+	// responses. TrueNAS 25.10 returns these fields under Options.
+	RecycleBin bool     `json:"recyclebin"`
+	PathSuffix *string  `json:"path_suffix"`
+	HostsAllow []string `json:"hostsallow"`
+	HostsDeny  []string `json:"hostsdeny"`
+	Home       bool     `json:"home"`
+}
+type SMBAuditConfig struct {
+	Enabled    bool     `json:"enable"`
+	WatchList  []string `json:"watch_list"`
+	IgnoreList []string `json:"ignore_list"`
+}
+type SMBShareOptions struct {
+	Purpose             string   `json:"purpose"`
+	RecycleBin          bool     `json:"recyclebin"`
+	PathSuffix          *string  `json:"path_suffix"`
+	HostsAllow          []string `json:"hostsallow"`
+	HostsDeny           []string `json:"hostsdeny"`
+	GuestOK             bool     `json:"guestok"`
+	Streams             bool     `json:"streams"`
+	DurableHandle       bool     `json:"durablehandle"`
+	ShadowCopy          bool     `json:"shadowcopy"`
+	FSRVP               bool     `json:"fsrvp"`
+	Home                bool     `json:"home"`
+	ACL                 bool     `json:"acl"`
+	AFP                 bool     `json:"afp"`
+	TimeMachine         bool     `json:"timemachine"`
+	TimeMachineQuota    uint64   `json:"timemachine_quota"`
+	AAPLNameMangling    bool     `json:"aapl_name_mangling"`
+	VUID                *string  `json:"vuid"`
+	AuxSMBConf          string   `json:"auxsmbconf"`
+	AutoSnapshot        bool     `json:"auto_snapshot"`
+	AutoDatasetCreation bool     `json:"auto_dataset_creation"`
+	DatasetNamingSchema *string  `json:"dataset_naming_schema"`
+	GracePeriod         int      `json:"grace_period"`
+	AutoQuota           uint64   `json:"auto_quota"`
+	RemotePath          []string `json:"remote_path"`
 }
 type NFSShareEntry struct {
 	ID              int      `json:"id"`
 	Path            string   `json:"path"`
 	LegacyPaths     []string `json:"paths"`
+	Aliases         []string `json:"aliases"`
 	Comment         string   `json:"comment"`
 	Enabled         bool     `json:"enabled"`
 	ReadOnly        bool     `json:"ro"`
@@ -94,6 +130,7 @@ type NFSShareEntry struct {
 	Hosts           []string `json:"hosts"`
 	Security        []string `json:"security"`
 	ExposeSnapshots bool     `json:"expose_snapshots"`
+	Locked          *bool    `json:"locked"`
 }
 type RsyncTaskEntry struct {
 	ID                  int                 `json:"id"`
@@ -121,6 +158,7 @@ type RsyncTaskEntry struct {
 	Enabled             bool                `json:"enabled"`
 	ValidateRemotePath  bool                `json:"validate_rpath"`
 	SSHKeyScan          bool                `json:"ssh_keyscan"`
+	Locked              bool                `json:"locked"`
 }
 type RsyncSSHCredential struct {
 	ID int `json:"id"`

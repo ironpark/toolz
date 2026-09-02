@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { Power, RefreshCw, RotateCw, SearchX } from '@lucide/svelte';
+    import { Power, RotateCw, SearchX } from '@lucide/svelte';
     import * as Alert from '$lib/components/ui/alert';
     import { Badge } from '$lib/components/ui/badge';
     import { Button } from '$lib/components/ui/button';
@@ -38,10 +38,6 @@
 </script>
 
 <section class="space-y-6">
-    <header class="flex items-end justify-between">
-        <div><h2 class="text-3xl font-semibold tracking-tight">시스템</h2><p class="mt-1 text-sm text-muted-foreground">서비스, 업데이트와 전원 작업을 관리합니다.</p></div>
-        <Button variant="outline" disabled={app.systemLoading} onclick={() => app.refreshSystem()}>{#if app.systemLoading}<Spinner aria-label="시스템 새로고침 중" />{:else}<RefreshCw />{/if}새로고침</Button>
-    </header>
     {#if app.systemError}<Alert.Root variant="destructive"><Alert.Title>조회 실패</Alert.Title><Alert.Description>{app.systemError}</Alert.Description></Alert.Root>{/if}
     <Card.Root>
         <Card.Header class="flex flex-row items-center justify-between gap-4"><div><Card.Title>시스템 서비스</Card.Title><Card.Description>{services.length}개 서비스</Card.Description></div><Input class="max-w-xs" bind:value={query} placeholder="서비스 검색" /></Card.Header>

@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { Check, Ellipsis, Pencil, Plus, RefreshCw, Route, Trash2, Undo2 } from '@lucide/svelte';
+    import { Check, Ellipsis, Pencil, Plus, Route, Trash2, Undo2 } from '@lucide/svelte';
     import * as Alert from '$lib/components/ui/alert';
     import { Badge } from '$lib/components/ui/badge';
     import { Button } from '$lib/components/ui/button';
@@ -172,11 +172,6 @@
 </script>
 
 <section class="space-y-6">
-    <header class="flex flex-wrap items-end justify-between gap-3">
-        <div><h2 class="text-3xl font-semibold tracking-tight">네트워크</h2><p class="mt-1 text-sm text-muted-foreground">인터페이스, 게이트웨이, DNS와 정적 라우트를 관리합니다.</p></div>
-        <Button variant="outline" disabled={app.networkLoading} onclick={() => app.refreshNetwork()}>{#if app.networkLoading}<Spinner aria-label="네트워크 새로고침 중" />{:else}<RefreshCw />{/if}새로고침</Button>
-    </header>
-
     {#if app.networkError}<Alert.Root variant="destructive"><Alert.Title>네트워크 작업 실패</Alert.Title><Alert.Description>{app.networkError}</Alert.Description></Alert.Root>{/if}
     {#if app.network?.checkinRemaining}
         <Alert.Root><Alert.Title>네트워크 연결 확인 필요</Alert.Title><Alert.Description><div class="flex flex-wrap items-center justify-between gap-3"><span>{app.network.checkinRemaining}초 안에 현재 연결을 확정하지 않으면 자동으로 롤백됩니다.</span><div class="flex gap-2"><Button size="sm" onclick={checkin} disabled={busy !== ''}>{#if busy === 'checkin'}<Spinner />{:else}<Check />{/if}연결 확정</Button><Button size="sm" variant="outline" onclick={() => ask('rollback')} disabled={busy !== ''}><Undo2 />즉시 롤백</Button></div></div></Alert.Description></Alert.Root>

@@ -1,6 +1,4 @@
 export type View = 'overview' | 'storage' | 'datasets' | 'services' | 'network' | 'identity' | 'system';
-export type AuthenticationMethod = 'api_key' | 'password';
-
 export interface NavigationItem {
     id: View;
     label: string;

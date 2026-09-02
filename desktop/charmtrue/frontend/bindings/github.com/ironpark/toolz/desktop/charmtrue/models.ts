@@ -37,6 +37,42 @@ export interface ConnectionInfo {
     "system": SystemInfo;
 }
 
+export interface DatasetDeleteOptions {
+    "id": string;
+    "recursive": boolean;
+    "force": boolean;
+}
+
+/**
+ * DatasetMutation contains the commonly managed pool.dataset properties.
+ * Sizes are expressed in bytes; zero clears an optional quota.
+ */
+export interface DatasetMutation {
+    "id": string;
+    "name": string;
+    "type": string;
+    "comments": string;
+    "compression": string;
+    "sync": string;
+    "atime": string;
+    "readonly": string;
+    "recordsize": string;
+    "quota": number;
+    "refquota": number;
+    "volsize": number;
+    "volblocksize": string;
+    "sparse": boolean;
+    "shareType": string;
+    "createAncestors": boolean;
+    "forceRename": boolean;
+}
+
+export interface DatasetSnapshotMutation {
+    "dataset": string;
+    "name": string;
+    "recursive": boolean;
+}
+
 export interface GroupInfo {
     "id": number;
     "gid": number;
@@ -191,6 +227,7 @@ export interface RsyncTaskInfo {
     "enabled": boolean;
     "validateRemotePath": boolean;
     "sshKeyScan": boolean;
+    "locked": boolean;
 }
 
 export interface RsyncTaskMutation {
@@ -225,6 +262,21 @@ export interface RsyncTaskMutation {
     "sshKeyScan": boolean;
 }
 
+export interface SMBShareACL {
+    "shareName": string;
+    "entries": SMBShareACLEntry[] | null;
+}
+
+export interface SMBShareACLEntry {
+    "permission": string;
+    "entryType": string;
+    "sid": string;
+    "idType": string;
+    "id": number;
+    "hasId": boolean;
+    "name": string;
+}
+
 /**
  * SavedServer is a reusable TrueNAS connection profile. Credentials are
  * deliberately excluded so passwords and API keys are never written to disk.
@@ -252,12 +304,34 @@ export interface ShareInfo {
     "locked": boolean;
     "browsable": boolean;
     "accessBasedShareEnumeration": boolean;
+    "auditEnabled": boolean;
+    "auditWatchList": string[] | null;
+    "auditIgnoreList": string[] | null;
     "recycleBin": boolean;
     "pathSuffix": string;
     "hostsAllow": string[] | null;
     "hostsDeny": string[] | null;
+    "guestOk": boolean;
+    "streams": boolean;
+    "durableHandle": boolean;
+    "shadowCopy": boolean;
+    "fsrvp": boolean;
     "home": boolean;
+    "acl": boolean;
+    "afp": boolean;
+    "timeMachine": boolean;
+    "timeMachineQuota": number;
+    "aaplNameMangling": boolean;
+    "vuid": string;
+    "auxSmbConf": string;
+    "autoSnapshot": boolean;
+    "autoDatasetCreation": boolean;
+    "datasetNamingSchema": string;
+    "gracePeriod": number;
+    "autoQuota": number;
+    "remotePath": string[] | null;
     "networks": string[] | null;
+    "aliases": string[] | null;
     "hosts": string[] | null;
     "mapRootUser": string;
     "mapRootGroup": string;
@@ -278,12 +352,34 @@ export interface ShareMutation {
     "readOnly": boolean;
     "browsable": boolean;
     "accessBasedShareEnumeration": boolean;
+    "auditEnabled": boolean;
+    "auditWatchList": string[] | null;
+    "auditIgnoreList": string[] | null;
     "recycleBin": boolean;
     "pathSuffix": string;
     "hostsAllow": string[] | null;
     "hostsDeny": string[] | null;
+    "guestOk": boolean;
+    "streams": boolean;
+    "durableHandle": boolean;
+    "shadowCopy": boolean;
+    "fsrvp": boolean;
     "home": boolean;
+    "acl": boolean;
+    "afp": boolean;
+    "timeMachine": boolean;
+    "timeMachineQuota": number;
+    "aaplNameMangling": boolean;
+    "vuid": string;
+    "auxSmbConf": string;
+    "autoSnapshot": boolean;
+    "autoDatasetCreation": boolean;
+    "datasetNamingSchema": string;
+    "gracePeriod": number;
+    "autoQuota": number;
+    "remotePath": string[] | null;
     "networks": string[] | null;
+    "aliases": string[] | null;
     "hosts": string[] | null;
     "mapRootUser": string;
     "mapRootGroup": string;
@@ -324,6 +420,15 @@ export interface StorageDataset {
     "locked": boolean;
     "used": number;
     "available": number;
+    "comments": string;
+    "compression": string;
+    "sync": string;
+    "atime": string;
+    "readonly": string;
+    "recordsize": string;
+    "quota": number;
+    "refquota": number;
+    "volsize": number;
 }
 
 export interface StorageDisk {

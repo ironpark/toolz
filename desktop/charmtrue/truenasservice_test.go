@@ -62,7 +62,8 @@ func TestTrueNASServiceConnect(t *testing.T) {
 				writeServiceResponse(t, conn, req.ID, []any{map[string]any{
 					"id": 10, "name": "media", "path": "/mnt/tank/media", "purpose": "DEFAULT_SHARE",
 					"comment": "Media library", "enabled": true, "readonly": true, "browsable": true,
-					"hostsallow": []string{"10.0.0.10"}, "path_suffix": "%U",
+					"audit":   map[string]any{"enable": true, "watch_list": []string{"editors"}, "ignore_list": []string{}},
+					"options": map[string]any{"purpose": "DEFAULT_SHARE", "aapl_name_mangling": true, "hostsallow": []string{"10.0.0.10"}, "hostsdeny": []string{}},
 				}})
 			case "sharing.nfs.query":
 				writeServiceResponse(t, conn, req.ID, []any{map[string]any{
@@ -124,7 +125,7 @@ func TestTrueNASServiceConnect(t *testing.T) {
 	if sharing.SMBCount != 1 || sharing.NFSCount != 1 || len(sharing.Shares) != 2 || len(sharing.RsyncTasks) != 1 {
 		t.Fatalf("SharingOverview() = %#v", sharing)
 	}
-	if !sharing.Shares[0].ReadOnly || sharing.Shares[0].Purpose != "DEFAULT_SHARE" || sharing.Shares[0].PathSuffix != "%U" || len(sharing.Shares[0].HostsAllow) != 1 {
+	if !sharing.Shares[0].ReadOnly || sharing.Shares[0].Purpose != "DEFAULT_SHARE" || !sharing.Shares[0].AuditEnabled || !sharing.Shares[0].AAPLNameMangling || len(sharing.Shares[0].HostsAllow) != 1 {
 		t.Fatalf("SharingOverview().Shares[0] = %#v", sharing.Shares[0])
 	}
 	if sharing.Shares[1].Path != "/mnt/tank/data" || sharing.Shares[1].MapRootUser != "root" || len(sharing.Shares[1].Security) != 1 {
@@ -266,9 +267,17 @@ func TestSharingMutations(t *testing.T) {
 				if req.Params[0] != float64(10) || data["name"] != "media" || data["path"] != "/mnt/tank/media" || data["readonly"] != true {
 					t.Errorf("sharing.smb.update params = %#v", req.Params)
 				}
-				hosts, _ := data["hostsallow"].([]any)
+				options, _ := data["options"].(map[string]any)
+				hosts, _ := options["hostsallow"].([]any)
 				if len(hosts) != 1 || hosts[0] != "10.0.0.10" {
-					t.Errorf("sharing.smb.update hostsallow = %#v", data["hostsallow"])
+					t.Errorf("sharing.smb.update options = %#v", options)
+				}
+				if options["purpose"] != "DEFAULT_SHARE" || options["aapl_name_mangling"] != true {
+					t.Errorf("sharing.smb.update options = %#v", options)
+				}
+				audit, _ := data["audit"].(map[string]any)
+				if audit["enable"] != true {
+					t.Errorf("sharing.smb.update audit = %#v", audit)
 				}
 			case "sharing.nfs.update":
 				if req.Params[0] != float64(11) || data["path"] != "/mnt/tank/data" || data["maproot_user"] != "root" || data["ro"] != true {
@@ -298,7 +307,8 @@ func TestSharingMutations(t *testing.T) {
 	}
 	if err := service.SaveShare(ShareMutation{
 		ID: 10, Protocol: "smb", Name: " media ", Path: "/mnt/tank/media", Purpose: "DEFAULT_SHARE",
-		Enabled: true, ReadOnly: true, Browsable: true, HostsAllow: []string{" 10.0.0.10 ", ""},
+		Enabled: true, ReadOnly: true, Browsable: true, AuditEnabled: true, AAPLNameMangling: true,
+		HostsAllow: []string{" 10.0.0.10 ", ""},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -318,6 +328,128 @@ func TestSharingMutations(t *testing.T) {
 	}
 	if err := service.Disconnect(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSharingCreateACLAndRsyncDelete(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.CloseNow()
+		auth := readServiceRequest(t, conn)
+		writeServiceResponse(t, conn, auth.ID, map[string]any{"response_type": "SUCCESS"})
+		info := readServiceRequest(t, conn)
+		writeServiceResponse(t, conn, info.ID, map[string]any{"hostname": "vault"})
+
+		for _, expected := range []string{
+			"sharing.smb.share_precheck", "sharing.smb.create", "sharing.nfs.create",
+			"rsynctask.create", "sharing.smb.getacl", "sharing.smb.setacl", "rsynctask.delete",
+		} {
+			req := readServiceRequest(t, conn)
+			if req.Method != expected {
+				t.Errorf("method = %q, want %q", req.Method, expected)
+			}
+			switch expected {
+			case "sharing.smb.share_precheck":
+				if len(req.Params) != 1 || req.Params[0].(map[string]any)["name"] != "archive" {
+					t.Errorf("sharing.smb.share_precheck params = %#v", req.Params)
+				}
+			case "sharing.smb.create":
+				if len(req.Params) != 1 {
+					t.Fatalf("sharing.smb.create params = %#v", req.Params)
+				}
+				data := req.Params[0].(map[string]any)
+				options := data["options"].(map[string]any)
+				remotePaths := options["remote_path"].([]any)
+				if data["path"] != "EXTERNAL" || data["purpose"] != "EXTERNAL_SHARE" || options["purpose"] != "EXTERNAL_SHARE" || len(remotePaths) != 1 || remotePaths[0] != `server.example.com\archive` {
+					t.Errorf("sharing.smb.create data = %#v", data)
+				}
+			case "sharing.nfs.create":
+				data := req.Params[0].(map[string]any)
+				aliases := data["aliases"].([]any)
+				if data["path"] != "/mnt/tank/export" || len(aliases) != 1 || aliases[0] != "/export" {
+					t.Errorf("sharing.nfs.create data = %#v", data)
+				}
+			case "rsynctask.create":
+				if len(req.Params) != 1 || req.Params[0].(map[string]any)["remotemodule"] != "backup" {
+					t.Errorf("rsynctask.create params = %#v", req.Params)
+				}
+			case "sharing.smb.getacl":
+				writeServiceResponse(t, conn, req.ID, map[string]any{
+					"share_name": "archive",
+					"share_acl": []any{map[string]any{
+						"ae_perm": "FULL", "ae_type": "ALLOWED", "ae_who_sid": "S-1-1-0",
+						"ae_who_id": nil, "ae_who_str": "Everyone",
+					}},
+				})
+				continue
+			case "sharing.smb.setacl":
+				data := req.Params[0].(map[string]any)
+				entries := data["share_acl"].([]any)
+				entry := entries[0].(map[string]any)
+				if data["share_name"] != "archive" || entry["ae_perm"] != "CHANGE" || entry["ae_who_str"] != "editors" {
+					t.Errorf("sharing.smb.setacl data = %#v", data)
+				}
+			case "rsynctask.delete":
+				if len(req.Params) != 1 || req.Params[0] != float64(9) {
+					t.Errorf("rsynctask.delete params = %#v", req.Params)
+				}
+			}
+			writeServiceResponse(t, conn, req.ID, nil)
+		}
+		_, _, _ = conn.Read(context.Background())
+	}))
+	defer server.Close()
+
+	service := &TrueNASService{profilesPath: t.TempDir() + "/servers.json"}
+	if _, err := service.Connect(strings.Replace(server.URL, "http://", "ws://", 1), "admin", "password", "password", false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SaveShare(ShareMutation{Protocol: "SMB", Name: "archive", Path: "EXTERNAL", Purpose: "EXTERNAL_SHARE", RemotePath: []string{`server.example.com\archive`}, Enabled: true, Browsable: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SaveShare(ShareMutation{Protocol: "NFS", Path: "/mnt/tank/export", Aliases: []string{"/export"}, Security: []string{"SYS"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SaveRsyncTask(RsyncTaskMutation{Path: "/mnt/tank/data", User: "backup", Mode: "MODULE", RemoteHost: "backup.local", RemoteModule: "backup", Direction: "PUSH", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	acl, err := service.GetSMBShareACL("archive")
+	if err != nil || acl.ShareName != "archive" || len(acl.Entries) != 1 || acl.Entries[0].SID != "S-1-1-0" {
+		t.Fatalf("GetSMBShareACL() = %#v, %v", acl, err)
+	}
+	if err := service.SaveSMBShareACL(SMBShareACL{ShareName: "archive", Entries: []SMBShareACLEntry{{Permission: "CHANGE", EntryType: "ALLOWED", Name: "editors"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DeleteRsyncTask(9); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Disconnect(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSMBShareOptionsPurposeConstraints(t *testing.T) {
+	fcp, err := smbShareOptions(ShareMutation{Purpose: "FCP_SHARE", AAPLNameMangling: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fcp["aapl_name_mangling"] != true {
+		t.Fatalf("FCP aapl_name_mangling = %#v, want true", fcp["aapl_name_mangling"])
+	}
+	external, err := smbShareOptions(ShareMutation{Purpose: "EXTERNAL_SHARE", RemotePath: []string{" server-a.example.com\\archive ", "server-b.example.com\\archive"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, ok := external["remote_path"].([]string)
+	if !ok || len(paths) != 2 || paths[0] != "server-a.example.com\\archive" {
+		t.Fatalf("EXTERNAL remote_path = %#v", external["remote_path"])
+	}
+	if _, err := smbShareOptions(ShareMutation{Purpose: "TIME_LOCKED_SHARE", GracePeriod: 59}); err == nil {
+		t.Fatal("TIME_LOCKED_SHARE accepted grace period below schema minimum")
 	}
 }
 

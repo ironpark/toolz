@@ -9,7 +9,6 @@
     import { Input } from '$lib/components/ui/input';
     import { Label } from '$lib/components/ui/label';
     import { Separator } from '$lib/components/ui/separator';
-    import type { AuthenticationMethod } from './types';
 
     let {
         loading,
@@ -30,7 +29,6 @@
             endpoint: string,
             username: string,
             secret: string,
-            authenticationMethod: AuthenticationMethod,
             allowPrivateCertificate: boolean,
             saveServer: boolean,
             saveCredential: boolean,
@@ -42,14 +40,14 @@
     let endpoint = $state('');
     let username = $state('');
     let secret = $state('');
-    let authenticationMethod = $state<AuthenticationMethod>('api_key');
     let allowPrivateCertificate = $state(true);
     let saveServer = $state(true);
     let saveCredential = $state(false);
     let revealSecret = $state(false);
     let selectedServerID = $state('');
     let deletingServerID = $state('');
-    const selectedServer = $derived(savedServers.find((server) => server.id === selectedServerID));
+    const passwordServers = $derived(savedServers.filter((server) => server.authenticationMethod === 'password'));
+    const selectedServer = $derived(passwordServers.find((server) => server.id === selectedServerID));
     const canUseStoredCredential = $derived(Boolean(
         selectedServer?.credentialStored
         && saveServer
@@ -57,7 +55,6 @@
         && !secret
         && endpoint === selectedServer.endpoint
         && username === selectedServer.username
-        && authenticationMethod === selectedServer.authenticationMethod
         && allowPrivateCertificate === selectedServer.allowPrivateCertificate,
     ));
 
@@ -65,7 +62,6 @@
         selectedServerID = server.id;
         endpoint = server.endpoint;
         username = server.username;
-        authenticationMethod = server.authenticationMethod === 'password' ? 'password' : 'api_key';
         allowPrivateCertificate = server.allowPrivateCertificate;
         saveServer = true;
         saveCredential = server.credentialStored;
@@ -78,7 +74,6 @@
         endpoint = '';
         username = '';
         secret = '';
-        authenticationMethod = 'api_key';
         allowPrivateCertificate = true;
         saveServer = true;
         saveCredential = false;
@@ -100,7 +95,7 @@
                 await onconnectsaved(selectedServerID);
                 return;
             }
-            await onconnect(endpoint, username, secret, authenticationMethod, allowPrivateCertificate, saveServer, saveCredential);
+            await onconnect(endpoint, username, secret, allowPrivateCertificate, saveServer, saveCredential);
         }
     }
 </script>
@@ -112,7 +107,7 @@
             <Dialog.Description>저장된 서버를 선택하거나 새 서버의 로그인 정보를 입력하세요.</Dialog.Description>
         </Dialog.Header>
 
-        {#if savedServers.length > 0 || savedServersError}
+        {#if passwordServers.length > 0 || savedServersError}
             <section class="grid gap-3" aria-labelledby="saved-servers-title">
                 <div class="flex items-center justify-between">
                     <div>
@@ -131,9 +126,9 @@
                     </Alert.Root>
                 {/if}
 
-                {#if savedServers.length > 0}
+                {#if passwordServers.length > 0}
                     <div class="grid max-h-48 gap-1 overflow-y-auto rounded-lg bg-muted/40 p-1">
-                        {#each savedServers as server (server.id)}
+                        {#each passwordServers as server (server.id)}
                             <div class="flex items-center gap-1 rounded-md {selectedServerID === server.id ? 'bg-background shadow-sm' : ''}">
                                 <Button
                                     type="button"
@@ -148,7 +143,7 @@
                                     <span class="min-w-0 flex-1">
                                         <span class="flex items-center gap-2">
                                             <span class="truncate font-medium">{server.name || server.endpoint}</span>
-                                            <Badge variant="secondary">{server.authenticationMethod === 'password' ? '비밀번호' : 'API 키'}</Badge>
+                                            <Badge variant="secondary">비밀번호</Badge>
                                             {#if server.credentialStored}<Badge variant="outline"><ShieldCheck /> 키체인</Badge>{/if}
                                         </span>
                                         <span class="block truncate text-xs font-normal text-muted-foreground">{server.username} · {server.endpoint}</span>
@@ -181,20 +176,12 @@
             </div>
 
             <div class="grid gap-2">
-                <Label>인증 방식</Label>
-                <div class="grid grid-cols-2 gap-2">
-                    <Button type="button" variant={authenticationMethod === 'api_key' ? 'default' : 'outline'} onclick={() => authenticationMethod = 'api_key'}>API 키</Button>
-                    <Button type="button" variant={authenticationMethod === 'password' ? 'default' : 'outline'} onclick={() => authenticationMethod = 'password'}>비밀번호</Button>
-                </div>
-            </div>
-
-            <div class="grid gap-2">
                 <Label for="username">사용자명</Label>
                 <Input id="username" name="username" bind:value={username} placeholder="admin" autocomplete="username" required />
             </div>
 
             <div class="grid gap-2">
-                <Label for="secret">{authenticationMethod === 'api_key' ? 'API 키' : '비밀번호'}</Label>
+                <Label for="secret">비밀번호</Label>
                 <div class="relative">
                     <Input
                         id="secret"
@@ -202,7 +189,7 @@
                         bind:value={secret}
                         type={revealSecret ? 'text' : 'password'}
                         class="pr-10"
-                        autocomplete={authenticationMethod === 'password' ? 'current-password' : 'off'}
+                        autocomplete="current-password"
                         required={!canUseStoredCredential}
                         autofocus={Boolean(selectedServerID)}
                         placeholder={canUseStoredCredential ? '키체인에 저장된 로그인 정보 사용' : ''}
@@ -232,7 +219,7 @@
                     />
                     <div class="grid gap-1">
                         <Label for="save-server">이 서버 저장</Label>
-                        <p class="text-xs text-muted-foreground">주소와 사용자명만 저장하며 비밀번호와 API 키는 저장하지 않습니다.</p>
+                        <p class="text-xs text-muted-foreground">주소와 사용자명만 저장하며 비밀번호는 저장하지 않습니다.</p>
                     </div>
                 </div>
                 <div class="flex items-start gap-3">
@@ -253,7 +240,7 @@
 
             <div class="flex items-center gap-2 text-xs text-muted-foreground">
                 <ShieldCheck class="size-4" />
-                비밀번호와 API 키는 프로필 파일이나 프런트엔드 저장소에 기록되지 않습니다.
+                비밀번호는 프로필 파일이나 프런트엔드 저장소에 기록되지 않습니다.
             </div>
 
             {#if message}

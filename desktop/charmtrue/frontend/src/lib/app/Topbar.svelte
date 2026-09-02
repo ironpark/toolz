@@ -1,7 +1,12 @@
 <script lang="ts">
-    import { Bell, Plus, Settings } from '@lucide/svelte';
+    import { RefreshCw } from '@lucide/svelte';
     import { Button } from '$lib/components/ui/button';
-    let { title, connected = false, onconnect }: { title: string; connected?: boolean; onconnect: () => void } = $props();
+    let { title, connected = false, refreshing = false, onrefresh }: { title: string; connected?: boolean; refreshing?: boolean; onrefresh: () => void } = $props();
 </script>
 
-<header class="mb-8 flex h-10 items-center justify-between"><div><p class="text-xs text-muted-foreground">TrueNAS Workspace</p><h1 class="text-lg font-semibold">{title}</h1></div><div class="flex items-center gap-2"><Button variant="ghost" size="icon" aria-label="알림" disabled><Bell /></Button><Button variant={connected ? 'outline' : 'default'} onclick={onconnect}>{#if connected}<Settings />연결 설정{:else}<Plus />시스템 추가{/if}</Button></div></header>
+<header class="flex h-16 shrink-0 items-center justify-between bg-sidebar px-6 text-sidebar-foreground max-sm:px-4">
+    <h1 class="text-lg font-semibold leading-tight">{title}</h1>
+    <Button variant="ghost" size="icon" aria-label={`${title} 새로고침`} title="새로고침" disabled={!connected || refreshing} onclick={onrefresh}>
+        <RefreshCw class={refreshing ? 'animate-spin' : ''} />
+    </Button>
+</header>

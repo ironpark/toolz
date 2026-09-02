@@ -95,15 +95,58 @@ type StorageDisk struct {
 	Pool       string `json:"pool"`
 }
 type StorageDataset struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Pool       string `json:"pool"`
-	Type       string `json:"type"`
-	Mountpoint string `json:"mountpoint"`
-	Encrypted  bool   `json:"encrypted"`
-	Locked     bool   `json:"locked"`
-	Used       uint64 `json:"used"`
-	Available  uint64 `json:"available"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Pool        string `json:"pool"`
+	Type        string `json:"type"`
+	Mountpoint  string `json:"mountpoint"`
+	Encrypted   bool   `json:"encrypted"`
+	Locked      bool   `json:"locked"`
+	Used        uint64 `json:"used"`
+	Available   uint64 `json:"available"`
+	Comments    string `json:"comments"`
+	Compression string `json:"compression"`
+	Sync        string `json:"sync"`
+	Atime       string `json:"atime"`
+	Readonly    string `json:"readonly"`
+	Recordsize  string `json:"recordsize"`
+	Quota       uint64 `json:"quota"`
+	Refquota    uint64 `json:"refquota"`
+	Volsize     uint64 `json:"volsize"`
+}
+
+// DatasetMutation contains the commonly managed pool.dataset properties.
+// Sizes are expressed in bytes; zero clears an optional quota.
+type DatasetMutation struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Type            string `json:"type"`
+	Comments        string `json:"comments"`
+	Compression     string `json:"compression"`
+	Sync            string `json:"sync"`
+	Atime           string `json:"atime"`
+	Readonly        string `json:"readonly"`
+	Recordsize      string `json:"recordsize"`
+	Quota           uint64 `json:"quota"`
+	Refquota        uint64 `json:"refquota"`
+	Volsize         uint64 `json:"volsize"`
+	Volblocksize    string `json:"volblocksize"`
+	Sparse          bool   `json:"sparse"`
+	ShareType       string `json:"shareType"`
+	CreateAncestors bool   `json:"createAncestors"`
+	ForceRename     bool   `json:"forceRename"`
+}
+
+type DatasetDeleteOptions struct {
+	ID        string `json:"id"`
+	Recursive bool   `json:"recursive"`
+	Force     bool   `json:"force"`
+}
+
+type DatasetSnapshotMutation struct {
+	Dataset   string `json:"dataset"`
+	Name      string `json:"name"`
+	Recursive bool   `json:"recursive"`
 }
 
 type apiStorageDataset struct {
@@ -120,6 +163,22 @@ type apiStorageDataset struct {
 	Available struct {
 		Parsed uint64 `json:"parsed"`
 	} `json:"available"`
+	Comments    datasetStringProperty `json:"comments"`
+	Compression datasetStringProperty `json:"compression"`
+	Sync        datasetStringProperty `json:"sync"`
+	Atime       datasetStringProperty `json:"atime"`
+	Readonly    datasetStringProperty `json:"readonly"`
+	Recordsize  datasetStringProperty `json:"recordsize"`
+	Quota       datasetSizeProperty   `json:"quota"`
+	Refquota    datasetSizeProperty   `json:"refquota"`
+	Volsize     datasetSizeProperty   `json:"volsize"`
+}
+
+type datasetStringProperty struct {
+	Value string `json:"value"`
+}
+type datasetSizeProperty struct {
+	Parsed uint64 `json:"parsed"`
 }
 
 type SharingOverview struct {
@@ -140,12 +199,34 @@ type ShareInfo struct {
 	Locked                      bool     `json:"locked"`
 	Browsable                   bool     `json:"browsable"`
 	AccessBasedShareEnumeration bool     `json:"accessBasedShareEnumeration"`
+	AuditEnabled                bool     `json:"auditEnabled"`
+	AuditWatchList              []string `json:"auditWatchList"`
+	AuditIgnoreList             []string `json:"auditIgnoreList"`
 	RecycleBin                  bool     `json:"recycleBin"`
 	PathSuffix                  string   `json:"pathSuffix"`
 	HostsAllow                  []string `json:"hostsAllow"`
 	HostsDeny                   []string `json:"hostsDeny"`
+	GuestOK                     bool     `json:"guestOk"`
+	Streams                     bool     `json:"streams"`
+	DurableHandle               bool     `json:"durableHandle"`
+	ShadowCopy                  bool     `json:"shadowCopy"`
+	FSRVP                       bool     `json:"fsrvp"`
 	Home                        bool     `json:"home"`
+	ACL                         bool     `json:"acl"`
+	AFP                         bool     `json:"afp"`
+	TimeMachine                 bool     `json:"timeMachine"`
+	TimeMachineQuota            uint64   `json:"timeMachineQuota"`
+	AAPLNameMangling            bool     `json:"aaplNameMangling"`
+	VUID                        string   `json:"vuid"`
+	AuxSMBConf                  string   `json:"auxSmbConf"`
+	AutoSnapshot                bool     `json:"autoSnapshot"`
+	AutoDatasetCreation         bool     `json:"autoDatasetCreation"`
+	DatasetNamingSchema         string   `json:"datasetNamingSchema"`
+	GracePeriod                 int      `json:"gracePeriod"`
+	AutoQuota                   uint64   `json:"autoQuota"`
+	RemotePath                  []string `json:"remotePath"`
 	Networks                    []string `json:"networks"`
+	Aliases                     []string `json:"aliases"`
 	Hosts                       []string `json:"hosts"`
 	MapRootUser                 string   `json:"mapRootUser"`
 	MapRootGroup                string   `json:"mapRootGroup"`
@@ -185,6 +266,7 @@ type RsyncTaskInfo struct {
 	Enabled             bool     `json:"enabled"`
 	ValidateRemotePath  bool     `json:"validateRemotePath"`
 	SSHKeyScan          bool     `json:"sshKeyScan"`
+	Locked              bool     `json:"locked"`
 }
 
 type ShareMutation struct {
@@ -198,12 +280,34 @@ type ShareMutation struct {
 	ReadOnly                    bool     `json:"readOnly"`
 	Browsable                   bool     `json:"browsable"`
 	AccessBasedShareEnumeration bool     `json:"accessBasedShareEnumeration"`
+	AuditEnabled                bool     `json:"auditEnabled"`
+	AuditWatchList              []string `json:"auditWatchList"`
+	AuditIgnoreList             []string `json:"auditIgnoreList"`
 	RecycleBin                  bool     `json:"recycleBin"`
 	PathSuffix                  string   `json:"pathSuffix"`
 	HostsAllow                  []string `json:"hostsAllow"`
 	HostsDeny                   []string `json:"hostsDeny"`
+	GuestOK                     bool     `json:"guestOk"`
+	Streams                     bool     `json:"streams"`
+	DurableHandle               bool     `json:"durableHandle"`
+	ShadowCopy                  bool     `json:"shadowCopy"`
+	FSRVP                       bool     `json:"fsrvp"`
 	Home                        bool     `json:"home"`
+	ACL                         bool     `json:"acl"`
+	AFP                         bool     `json:"afp"`
+	TimeMachine                 bool     `json:"timeMachine"`
+	TimeMachineQuota            uint64   `json:"timeMachineQuota"`
+	AAPLNameMangling            bool     `json:"aaplNameMangling"`
+	VUID                        string   `json:"vuid"`
+	AuxSMBConf                  string   `json:"auxSmbConf"`
+	AutoSnapshot                bool     `json:"autoSnapshot"`
+	AutoDatasetCreation         bool     `json:"autoDatasetCreation"`
+	DatasetNamingSchema         string   `json:"datasetNamingSchema"`
+	GracePeriod                 int      `json:"gracePeriod"`
+	AutoQuota                   uint64   `json:"autoQuota"`
+	RemotePath                  []string `json:"remotePath"`
 	Networks                    []string `json:"networks"`
+	Aliases                     []string `json:"aliases"`
 	Hosts                       []string `json:"hosts"`
 	MapRootUser                 string   `json:"mapRootUser"`
 	MapRootGroup                string   `json:"mapRootGroup"`
@@ -243,6 +347,21 @@ type RsyncTaskMutation struct {
 	Enabled             bool     `json:"enabled"`
 	ValidateRemotePath  bool     `json:"validateRemotePath"`
 	SSHKeyScan          bool     `json:"sshKeyScan"`
+}
+
+type SMBShareACL struct {
+	ShareName string             `json:"shareName"`
+	Entries   []SMBShareACLEntry `json:"entries"`
+}
+
+type SMBShareACLEntry struct {
+	Permission string `json:"permission"`
+	EntryType  string `json:"entryType"`
+	SID        string `json:"sid"`
+	IDType     string `json:"idType"`
+	ID         int    `json:"id"`
+	HasID      bool   `json:"hasId"`
+	Name       string `json:"name"`
 }
 
 type NetworkOverview struct {
@@ -848,12 +967,28 @@ func (s *TrueNASService) SharingOverview() (SharingOverview, error) {
 	}
 	result := SharingOverview{SMBCount: len(smb), NFSCount: len(nfs)}
 	for _, x := range smb {
+		options := truenas.SMBShareOptions{
+			RecycleBin: x.RecycleBin, PathSuffix: x.PathSuffix, HostsAllow: x.HostsAllow,
+			HostsDeny: x.HostsDeny, Home: x.Home,
+		}
+		if x.Options != nil {
+			options = *x.Options
+		}
 		result.Shares = append(result.Shares, ShareInfo{
 			ID: x.ID, Protocol: "SMB", Name: x.Name, Path: x.Path, Purpose: x.Purpose,
 			Comment: x.Comment, Enabled: x.Enabled, ReadOnly: x.ReadOnly || x.LegacyReadOnly,
 			Locked: x.Locked, Browsable: x.Browsable, AccessBasedShareEnumeration: x.AccessBasedShareEnumeration,
-			RecycleBin: x.RecycleBin, PathSuffix: optionalString(x.PathSuffix), HostsAllow: x.HostsAllow,
-			HostsDeny: x.HostsDeny, Home: x.Home,
+			AuditEnabled: x.Audit.Enabled, AuditWatchList: x.Audit.WatchList, AuditIgnoreList: x.Audit.IgnoreList,
+			RecycleBin: options.RecycleBin, PathSuffix: optionalString(options.PathSuffix),
+			HostsAllow: options.HostsAllow, HostsDeny: options.HostsDeny, GuestOK: options.GuestOK,
+			Streams: options.Streams, DurableHandle: options.DurableHandle, ShadowCopy: options.ShadowCopy,
+			FSRVP: options.FSRVP, Home: options.Home, ACL: options.ACL, AFP: options.AFP,
+			TimeMachine: options.TimeMachine, TimeMachineQuota: options.TimeMachineQuota,
+			AAPLNameMangling: options.AAPLNameMangling, VUID: optionalString(options.VUID),
+			AuxSMBConf: options.AuxSMBConf, AutoSnapshot: options.AutoSnapshot,
+			AutoDatasetCreation: options.AutoDatasetCreation,
+			DatasetNamingSchema: optionalString(options.DatasetNamingSchema),
+			GracePeriod:         options.GracePeriod, AutoQuota: options.AutoQuota, RemotePath: options.RemotePath,
 		})
 	}
 	for _, x := range nfs {
@@ -863,7 +998,8 @@ func (s *TrueNASService) SharingOverview() (SharingOverview, error) {
 		}
 		result.Shares = append(result.Shares, ShareInfo{
 			ID: x.ID, Protocol: "NFS", Name: path, Path: path, Comment: x.Comment, Enabled: x.Enabled,
-			ReadOnly: x.ReadOnly, Networks: x.Networks, Hosts: x.Hosts,
+			ReadOnly: x.ReadOnly, Locked: optionalBool(x.Locked), Networks: x.Networks, Hosts: x.Hosts,
+			Aliases:     x.Aliases,
 			MapRootUser: optionalString(x.MapRootUser), MapRootGroup: optionalString(x.MapRootGroup),
 			MapAllUser: optionalString(x.MapAllUser), MapAllGroup: optionalString(x.MapAllGroup),
 			Security: x.Security, ExposeSnapshots: x.ExposeSnapshots,
@@ -891,7 +1027,7 @@ func (s *TrueNASService) SharingOverview() (SharingOverview, error) {
 			Compress: x.Compress, Archive: x.Archive, Delete: x.Delete, Quiet: x.Quiet,
 			PreservePermissions: x.PreservePermissions, PreserveAttributes: x.PreserveAttributes,
 			DelayUpdates: x.DelayUpdates, Extra: x.Extra, Enabled: x.Enabled,
-			ValidateRemotePath: x.ValidateRemotePath, SSHKeyScan: x.SSHKeyScan,
+			ValidateRemotePath: x.ValidateRemotePath, SSHKeyScan: x.SSHKeyScan, Locked: x.Locked,
 		})
 	}
 	return result, nil
@@ -904,17 +1040,192 @@ func optionalString(value *string) string {
 	return *value
 }
 
+func optionalBool(value *bool) bool {
+	return value != nil && *value
+}
+
+type smbShareACLWire struct {
+	ShareName string `json:"share_name"`
+	Entries   []struct {
+		Permission string  `json:"ae_perm"`
+		EntryType  string  `json:"ae_type"`
+		SID        *string `json:"ae_who_sid"`
+		WhoID      *struct {
+			IDType string `json:"id_type"`
+			ID     int    `json:"id"`
+		} `json:"ae_who_id"`
+		Name *string `json:"ae_who_str"`
+	} `json:"share_acl"`
+}
+
+func shareACLFromWire(raw smbShareACLWire) SMBShareACL {
+	result := SMBShareACL{ShareName: raw.ShareName, Entries: make([]SMBShareACLEntry, 0, len(raw.Entries))}
+	for _, entry := range raw.Entries {
+		item := SMBShareACLEntry{Permission: entry.Permission, EntryType: entry.EntryType}
+		if entry.SID != nil {
+			item.SID = *entry.SID
+		}
+		if entry.WhoID != nil {
+			item.IDType, item.ID, item.HasID = entry.WhoID.IDType, entry.WhoID.ID, true
+		}
+		if entry.Name != nil {
+			item.Name = *entry.Name
+		}
+		result.Entries = append(result.Entries, item)
+	}
+	return result
+}
+
+func (s *TrueNASService) GetSMBShareACL(shareName string) (SMBShareACL, error) {
+	client, err := s.connectedClient()
+	if err != nil {
+		return SMBShareACL{}, err
+	}
+	shareName = strings.TrimSpace(shareName)
+	if shareName == "" {
+		return SMBShareACL{}, errors.New("SMB 공유 이름이 필요합니다")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
+	defer cancel()
+	var raw smbShareACLWire
+	if err := client.Call(ctx, "sharing.smb.getacl", []any{map[string]any{"share_name": shareName}}, &raw); err != nil {
+		return SMBShareACL{}, fmt.Errorf("SMB 공유 ACL 조회 실패: %w", err)
+	}
+	return shareACLFromWire(raw), nil
+}
+
+func (s *TrueNASService) SaveSMBShareACL(input SMBShareACL) error {
+	client, err := s.connectedClient()
+	if err != nil {
+		return err
+	}
+	input.ShareName = strings.TrimSpace(input.ShareName)
+	if input.ShareName == "" || len(input.Entries) == 0 {
+		return errors.New("SMB 공유 이름과 하나 이상의 ACL 항목이 필요합니다")
+	}
+	entries := make([]map[string]any, 0, len(input.Entries))
+	for _, entry := range input.Entries {
+		entry.Permission = strings.ToUpper(strings.TrimSpace(entry.Permission))
+		entry.EntryType = strings.ToUpper(strings.TrimSpace(entry.EntryType))
+		if entry.Permission != "FULL" && entry.Permission != "CHANGE" && entry.Permission != "READ" {
+			return errors.New("SMB ACL 권한은 FULL, CHANGE 또는 READ여야 합니다")
+		}
+		if entry.EntryType != "ALLOWED" && entry.EntryType != "DENIED" {
+			return errors.New("SMB ACL 유형은 ALLOWED 또는 DENIED여야 합니다")
+		}
+		item := map[string]any{"ae_perm": entry.Permission, "ae_type": entry.EntryType,
+			"ae_who_sid": nil, "ae_who_id": nil, "ae_who_str": nil}
+		switch {
+		case strings.TrimSpace(entry.SID) != "":
+			item["ae_who_sid"] = strings.TrimSpace(entry.SID)
+		case entry.HasID:
+			idType := strings.ToUpper(strings.TrimSpace(entry.IDType))
+			if idType != "USER" && idType != "GROUP" {
+				return errors.New("SMB ACL ID 유형은 USER 또는 GROUP이어야 합니다")
+			}
+			if entry.ID < 0 || entry.ID > 2147483647 {
+				return errors.New("SMB ACL 사용자 또는 그룹 ID 범위가 올바르지 않습니다")
+			}
+			item["ae_who_id"] = map[string]any{"id_type": idType, "id": entry.ID}
+		case strings.TrimSpace(entry.Name) != "":
+			item["ae_who_str"] = strings.TrimSpace(entry.Name)
+		default:
+			return errors.New("각 SMB ACL 항목에 사용자, 그룹 또는 SID가 필요합니다")
+		}
+		entries = append(entries, item)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
+	defer cancel()
+	return client.Call(ctx, "sharing.smb.setacl", []any{map[string]any{
+		"share_name": input.ShareName, "share_acl": entries,
+	}}, nil)
+}
+
+func smbShareOptions(input ShareMutation) (map[string]any, error) {
+	input.Purpose = strings.ToUpper(strings.TrimSpace(input.Purpose))
+	options := map[string]any{"purpose": input.Purpose}
+	hostOptions := func() {
+		options["hostsallow"] = cleanStringList(input.HostsAllow)
+		options["hostsdeny"] = cleanStringList(input.HostsDeny)
+	}
+	aaplHostOptions := func() {
+		options["aapl_name_mangling"] = input.AAPLNameMangling
+		hostOptions()
+	}
+	switch input.Purpose {
+	case "LEGACY_SHARE":
+		if input.TimeMachineQuota > 109951162777600 {
+			return nil, errors.New("Time Machine 할당량은 100 TiB 이하여야 합니다")
+		}
+		options["recyclebin"] = input.RecycleBin
+		options["path_suffix"] = nullableString(strings.TrimSpace(input.PathSuffix))
+		options["hostsallow"] = cleanStringList(input.HostsAllow)
+		options["hostsdeny"] = cleanStringList(input.HostsDeny)
+		options["guestok"] = input.GuestOK
+		options["streams"] = input.Streams
+		options["durablehandle"] = input.DurableHandle
+		options["shadowcopy"] = input.ShadowCopy
+		options["fsrvp"] = input.FSRVP
+		options["home"] = input.Home
+		options["acl"] = input.ACL
+		options["afp"] = input.AFP
+		options["timemachine"] = input.TimeMachine
+		options["timemachine_quota"] = input.TimeMachineQuota
+		options["aapl_name_mangling"] = input.AAPLNameMangling
+		options["vuid"] = nullableString(strings.TrimSpace(input.VUID))
+		options["auxsmbconf"] = strings.TrimSpace(input.AuxSMBConf)
+	case "DEFAULT_SHARE", "MULTIPROTOCOL_SHARE":
+		aaplHostOptions()
+	case "FCP_SHARE":
+		options["aapl_name_mangling"] = true
+		hostOptions()
+	case "VEEAM_REPOSITORY_SHARE":
+		hostOptions()
+	case "TIMEMACHINE_SHARE":
+		if input.TimeMachineQuota > 109951162777600 {
+			return nil, errors.New("Time Machine 할당량은 100 TiB 이하여야 합니다")
+		}
+		options["timemachine_quota"] = input.TimeMachineQuota
+		options["auto_snapshot"] = input.AutoSnapshot
+		options["auto_dataset_creation"] = input.AutoDatasetCreation
+		options["dataset_naming_schema"] = nullableString(strings.TrimSpace(input.DatasetNamingSchema))
+		options["vuid"] = nullableString(strings.TrimSpace(input.VUID))
+		options["hostsallow"] = cleanStringList(input.HostsAllow)
+		options["hostsdeny"] = cleanStringList(input.HostsDeny)
+	case "TIME_LOCKED_SHARE":
+		if input.GracePeriod < 60 || input.GracePeriod > 15552000 {
+			return nil, errors.New("시간 잠금 유예 시간은 60초에서 15552000초 사이여야 합니다")
+		}
+		options["grace_period"] = input.GracePeriod
+		aaplHostOptions()
+	case "PRIVATE_DATASETS_SHARE":
+		options["dataset_naming_schema"] = nullableString(strings.TrimSpace(input.DatasetNamingSchema))
+		options["auto_quota"] = input.AutoQuota
+		aaplHostOptions()
+	case "EXTERNAL_SHARE":
+		remotePaths := cleanStringList(input.RemotePath)
+		if len(remotePaths) == 0 {
+			return nil, errors.New("외부 DFS 공유에는 원격 공유 경로가 필요합니다")
+		}
+		options["remote_path"] = remotePaths
+	default:
+		return nil, errors.New("지원하지 않는 SMB 공유 용도입니다")
+	}
+	return options, nil
+}
+
 func (s *TrueNASService) SaveShare(input ShareMutation) error {
 	client, err := s.connectedClient()
 	if err != nil {
 		return err
 	}
-	if input.ID < 1 {
+	if input.ID < 0 {
 		return errors.New("올바른 공유 ID가 필요합니다")
 	}
 	input.Protocol = strings.ToUpper(strings.TrimSpace(input.Protocol))
 	input.Name = strings.TrimSpace(input.Name)
 	input.Path = strings.TrimSpace(input.Path)
+	input.Purpose = strings.ToUpper(strings.TrimSpace(input.Purpose))
 	input.Comment = strings.TrimSpace(input.Comment)
 	var method string
 	var data map[string]any
@@ -926,22 +1237,34 @@ func (s *TrueNASService) SaveShare(input ShareMutation) error {
 		if input.Path != "EXTERNAL" && !strings.HasPrefix(input.Path, "/mnt/") {
 			return errors.New("SMB 공유 경로는 /mnt/ 아래여야 합니다")
 		}
+		options, err := smbShareOptions(input)
+		if err != nil {
+			return err
+		}
 		method = "sharing.smb.update"
+		if input.ID == 0 {
+			method = "sharing.smb.create"
+		}
 		data = map[string]any{
 			"name": input.Name, "path": input.Path, "purpose": input.Purpose, "comment": input.Comment,
 			"enabled": input.Enabled, "readonly": input.ReadOnly, "browsable": input.Browsable,
 			"access_based_share_enumeration": input.AccessBasedShareEnumeration,
-			"recyclebin":                     input.RecycleBin, "path_suffix": nullableString(strings.TrimSpace(input.PathSuffix)),
-			"hostsallow": cleanStringList(input.HostsAllow), "hostsdeny": cleanStringList(input.HostsDeny),
-			"home": input.Home,
+			"audit": map[string]any{
+				"enable": input.AuditEnabled, "watch_list": cleanStringList(input.AuditWatchList),
+				"ignore_list": cleanStringList(input.AuditIgnoreList),
+			},
+			"options": options,
 		}
 	case "NFS":
 		if input.Path == "" || !strings.HasPrefix(input.Path, "/mnt/") {
 			return errors.New("NFS 공유 경로는 /mnt/ 아래여야 합니다")
 		}
 		method = "sharing.nfs.update"
+		if input.ID == 0 {
+			method = "sharing.nfs.create"
+		}
 		data = map[string]any{
-			"path": input.Path, "comment": input.Comment, "networks": cleanStringList(input.Networks),
+			"path": input.Path, "aliases": cleanStringList(input.Aliases), "comment": input.Comment, "networks": cleanStringList(input.Networks),
 			"hosts": cleanStringList(input.Hosts), "ro": input.ReadOnly,
 			"maproot_user":  nullableString(strings.TrimSpace(input.MapRootUser)),
 			"maproot_group": nullableString(strings.TrimSpace(input.MapRootGroup)),
@@ -955,8 +1278,17 @@ func (s *TrueNASService) SaveShare(input ShareMutation) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
 	defer cancel()
-	if err := client.Call(ctx, method, []any{input.ID, data}, nil); err != nil {
-		return fmt.Errorf("%s 공유 수정 실패: %w", input.Protocol, err)
+	if input.Protocol == "SMB" && input.ID == 0 {
+		if err := client.Call(ctx, "sharing.smb.share_precheck", []any{map[string]any{"name": input.Name}}, nil); err != nil {
+			return fmt.Errorf("SMB 공유 사전 검사 실패: %w", err)
+		}
+	}
+	params := []any{input.ID, data}
+	if input.ID == 0 {
+		params = []any{data}
+	}
+	if err := client.Call(ctx, method, params, nil); err != nil {
+		return fmt.Errorf("%s 공유 저장 실패: %w", input.Protocol, err)
 	}
 	return nil
 }
@@ -971,7 +1303,7 @@ func (s *TrueNASService) SaveRsyncTask(input RsyncTaskMutation) error {
 	input.Mode = strings.ToUpper(strings.TrimSpace(input.Mode))
 	input.RemoteHost = strings.TrimSpace(input.RemoteHost)
 	input.Direction = strings.ToUpper(strings.TrimSpace(input.Direction))
-	if input.ID < 1 || input.Path == "" || input.User == "" || input.RemoteHost == "" {
+	if input.ID < 0 || input.Path == "" || input.User == "" || input.RemoteHost == "" {
 		return errors.New("Rsync 작업의 경로, 실행 사용자와 원격 호스트를 입력하세요")
 	}
 	if input.Mode != "MODULE" && input.Mode != "SSH" {
@@ -979,6 +1311,9 @@ func (s *TrueNASService) SaveRsyncTask(input RsyncTaskMutation) error {
 	}
 	if input.Direction != "PULL" && input.Direction != "PUSH" {
 		return errors.New("Rsync 전송 방향은 PULL 또는 PUSH여야 합니다")
+	}
+	if input.RemotePort < 0 || input.RemotePort > 65535 {
+		return errors.New("Rsync 원격 포트는 1에서 65535 사이여야 합니다")
 	}
 	if input.Mode == "MODULE" && strings.TrimSpace(input.RemoteModule) == "" {
 		return errors.New("MODULE 방식에는 원격 모듈 이름이 필요합니다")
@@ -1005,8 +1340,14 @@ func (s *TrueNASService) SaveRsyncTask(input RsyncTaskMutation) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
 	defer cancel()
-	if err := client.Call(ctx, "rsynctask.update", []any{input.ID, data}, nil); err != nil {
-		return fmt.Errorf("Rsync 작업 수정 실패: %w", err)
+	method := "rsynctask.update"
+	params := []any{input.ID, data}
+	if input.ID == 0 {
+		method = "rsynctask.create"
+		params = []any{data}
+	}
+	if err := client.Call(ctx, method, params, nil); err != nil {
+		return fmt.Errorf("Rsync 작업 저장 실패: %w", err)
 	}
 	return nil
 }
@@ -1352,6 +1693,9 @@ func (s *TrueNASService) DeleteShare(protocol string, id int) error {
 	if err != nil {
 		return err
 	}
+	if id < 1 {
+		return errors.New("올바른 공유 ID가 필요합니다")
+	}
 	var method string
 	switch strings.ToUpper(protocol) {
 	case "SMB":
@@ -1365,10 +1709,25 @@ func (s *TrueNASService) DeleteShare(protocol string, id int) error {
 	defer cancel()
 	return client.Call(ctx, method, []any{id}, nil)
 }
+func (s *TrueNASService) DeleteRsyncTask(id int) error {
+	client, err := s.connectedClient()
+	if err != nil {
+		return err
+	}
+	if id < 1 {
+		return errors.New("올바른 Rsync 작업 ID가 필요합니다")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
+	defer cancel()
+	return client.Call(ctx, "rsynctask.delete", []any{id}, nil)
+}
 func (s *TrueNASService) RunRsyncTask(id int) error {
 	client, err := s.connectedClient()
 	if err != nil {
 		return err
+	}
+	if id < 1 {
+		return errors.New("올바른 Rsync 작업 ID가 필요합니다")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
 	defer cancel()
@@ -1444,10 +1803,172 @@ func (s *TrueNASService) StorageOverview() (StorageOverview, error) {
 		}
 	}
 	for _, d := range datasets {
-		result.Datasets = append(result.Datasets, StorageDataset{d.ID, d.Name, d.Pool, d.Type, d.Mountpoint, d.Encrypted, d.Locked, d.Used.Parsed, d.Available.Parsed})
+		result.Datasets = append(result.Datasets, StorageDataset{
+			ID: d.ID, Name: d.Name, Pool: d.Pool, Type: d.Type, Mountpoint: d.Mountpoint,
+			Encrypted: d.Encrypted, Locked: d.Locked, Used: d.Used.Parsed, Available: d.Available.Parsed,
+			Comments: d.Comments.Value, Compression: d.Compression.Value, Sync: d.Sync.Value,
+			Atime: d.Atime.Value, Readonly: d.Readonly.Value, Recordsize: d.Recordsize.Value,
+			Quota: d.Quota.Parsed, Refquota: d.Refquota.Parsed, Volsize: d.Volsize.Parsed,
+		})
 	}
 	result.TotalSize, result.TotalAllocated, result.TotalFree = summarizePoolCapacity(result.Pools)
 	return result, nil
+}
+
+// SaveDataset creates or updates a dataset. A changed ID is renamed only when
+// ForceRename is explicitly set because TrueNAS does not perform usage checks.
+func (s *TrueNASService) SaveDataset(input DatasetMutation) error {
+	client, err := s.connectedClient()
+	if err != nil {
+		return err
+	}
+	input.ID, input.Name = strings.TrimSpace(input.ID), strings.TrimSpace(input.Name)
+	if input.Name == "" {
+		return errors.New("데이터셋 이름을 입력하세요")
+	}
+	typ := strings.ToUpper(strings.TrimSpace(input.Type))
+	if typ == "" {
+		typ = "FILESYSTEM"
+	}
+	if typ != "FILESYSTEM" && typ != "VOLUME" {
+		return errors.New("지원하지 않는 데이터셋 유형입니다")
+	}
+	if input.ID == "" && !strings.Contains(input.Name, "/") {
+		return errors.New("풀을 포함한 전체 데이터셋 이름이 필요합니다")
+	}
+	if typ == "VOLUME" && input.ID == "" && input.Volsize == 0 {
+		return errors.New("zvol 용량을 입력하세요")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
+	defer cancel()
+	if input.ID != "" && input.Name != input.ID {
+		if !input.ForceRename {
+			return errors.New("이름 변경에 따른 서비스 중단 위험을 확인하세요")
+		}
+		if err := client.Call(ctx, "pool.dataset.rename", []any{input.ID, map[string]any{"new_name": input.Name, "recursive": false, "force": true}}, nil); err != nil {
+			return fmt.Errorf("데이터셋 이름 변경 실패: %w", err)
+		}
+		input.ID = input.Name
+	}
+	data := map[string]any{
+		"comments":    input.Comments,
+		"compression": datasetChoice(input.Compression),
+		"sync":        datasetChoice(input.Sync),
+		"readonly":    datasetChoice(input.Readonly),
+	}
+	if typ == "FILESYSTEM" {
+		data["atime"] = datasetChoice(input.Atime)
+		data["quota"], data["refquota"] = input.Quota, input.Refquota
+		if v := strings.TrimSpace(input.Recordsize); v != "" {
+			data["recordsize"] = v
+		}
+	} else if input.Volsize > 0 {
+		data["volsize"] = input.Volsize
+	}
+	method, params := "pool.dataset.update", []any{input.ID, data}
+	if input.ID == "" {
+		method = "pool.dataset.create"
+		data["name"], data["type"] = input.Name, typ
+		data["create_ancestors"] = input.CreateAncestors
+		data["share_type"] = datasetShareType(input.ShareType)
+		if typ == "VOLUME" {
+			data["volsize"], data["sparse"] = input.Volsize, input.Sparse
+			if v := strings.TrimSpace(input.Volblocksize); v != "" {
+				data["volblocksize"] = v
+			}
+		}
+		params = []any{data}
+	}
+	if err := client.Call(ctx, method, params, nil); err != nil {
+		return fmt.Errorf("데이터셋 저장 실패: %w", err)
+	}
+	return nil
+}
+
+func datasetChoice(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	if value == "" {
+		return "INHERIT"
+	}
+	return value
+}
+
+func datasetShareType(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	if value == "" {
+		return "GENERIC"
+	}
+	return value
+}
+
+func (s *TrueNASService) DeleteDataset(input DatasetDeleteOptions) error {
+	client, err := s.connectedClient()
+	if err != nil {
+		return err
+	}
+	input.ID = strings.TrimSpace(input.ID)
+	if input.ID == "" || !strings.Contains(input.ID, "/") {
+		return errors.New("루트 풀은 삭제할 수 없습니다")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
+	defer cancel()
+	if err := client.Call(ctx, "pool.dataset.delete", []any{input.ID, map[string]any{"recursive": input.Recursive, "force": input.Force}}, nil); err != nil {
+		return fmt.Errorf("데이터셋 삭제 실패: %w", err)
+	}
+	return nil
+}
+
+func (s *TrueNASService) CreateDatasetSnapshot(input DatasetSnapshotMutation) error {
+	client, err := s.connectedClient()
+	if err != nil {
+		return err
+	}
+	input.Dataset, input.Name = strings.TrimSpace(input.Dataset), strings.TrimSpace(input.Name)
+	if input.Dataset == "" || input.Name == "" {
+		return errors.New("데이터셋과 스냅샷 이름을 입력하세요")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
+	defer cancel()
+	if err := client.Call(ctx, "pool.snapshot.create", []any{map[string]any{"dataset": input.Dataset, "name": input.Name, "recursive": input.Recursive, "exclude": []string{}, "vmware_sync": false, "properties": map[string]any{}}}, nil); err != nil {
+		return fmt.Errorf("스냅샷 생성 실패: %w", err)
+	}
+	return nil
+}
+
+func (s *TrueNASService) SetDatasetLocked(id, secret string, lock, recursive, force bool) error {
+	client, err := s.connectedClient()
+	if err != nil {
+		return err
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("데이터셋을 선택하세요")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	var jobID int
+	if lock {
+		err = client.Call(ctx, "pool.dataset.lock", []any{id, map[string]any{"force_umount": force}}, &jobID)
+	} else {
+		secret = strings.TrimSpace(secret)
+		if secret == "" {
+			return errors.New("암호화 키 또는 암호를 입력하세요")
+		}
+		credential := map[string]any{"name": id, "recursive": recursive, "force": force}
+		if len(secret) == 64 {
+			credential["key"] = secret
+		} else {
+			credential["passphrase"] = secret
+		}
+		err = client.Call(ctx, "pool.dataset.unlock", []any{id, map[string]any{"force": force, "key_file": false, "recursive": recursive, "toggle_attachments": true, "datasets": []any{credential}}}, &jobID)
+	}
+	if err != nil {
+		return fmt.Errorf("데이터셋 잠금 상태 변경 실패: %w", err)
+	}
+	if err := client.WaitJob(ctx, jobID, nil); err != nil {
+		return fmt.Errorf("데이터셋 잠금 작업 실패: %w", err)
+	}
+	return nil
 }
 
 // summarizePoolCapacity prevents aliases or duplicate pool.query rows from

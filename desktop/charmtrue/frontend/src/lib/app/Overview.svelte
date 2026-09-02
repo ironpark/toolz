@@ -1,6 +1,5 @@
 <script lang="ts">
     import { Activity, Database, HardDrive, Server } from '@lucide/svelte';
-    import { Badge } from '$lib/components/ui/badge';
     import { Button } from '$lib/components/ui/button';
     import * as Card from '$lib/components/ui/card';
     import { Progress } from '$lib/components/ui/progress';
@@ -13,7 +12,6 @@
 </script>
 
 <section class="space-y-6">
-    <div class="flex items-start justify-between gap-4"><div><h2 class="text-3xl font-semibold tracking-tight">TrueNAS를 한곳에서 관리하세요</h2><p class="mt-2 text-sm text-muted-foreground">스토리지, 서비스와 주요 시스템 상태를 확인합니다.</p></div><Badge variant={connected ? 'default' : 'outline'}>{connected ? '연결됨' : '연결 대기'}</Badge></div>
     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="시스템 요약">
         <Card.Root><Card.Header class="flex flex-row items-center justify-between pb-2"><Card.Description>시스템</Card.Description><Server /></Card.Header><Card.Content><div class="text-2xl font-semibold">{system?.hostname || '연결되지 않음'}</div><p class="text-xs text-muted-foreground">{system?.version || '인스턴스를 추가하세요'}</p></Card.Content></Card.Root>
         <Card.Root><Card.Header class="flex flex-row items-center justify-between pb-2"><Card.Description>스토리지</Card.Description><Database /></Card.Header><Card.Content><div class="text-2xl font-semibold">{total ? formatBytes(total) : '—'}</div><p class="text-xs text-muted-foreground">{total ? `${pools.length}개 풀` : '풀 사용량'}</p></Card.Content></Card.Root>

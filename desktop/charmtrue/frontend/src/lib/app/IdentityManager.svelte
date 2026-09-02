@@ -219,20 +219,6 @@
 </script>
 
 <section class="space-y-6">
-    <header class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-            <h2 class="text-3xl font-semibold tracking-tight">계정 및 권한</h2>
-            <p class="mt-1 text-sm text-muted-foreground">TrueNAS에 접근할 사용자, 그룹과 API 키를 관리합니다.</p>
-        </div>
-        <div class="flex gap-2">
-            <Button variant="outline" onclick={() => app.refreshIdentity()} disabled={app.identityLoading}>
-                <RefreshCw class={app.identityLoading ? 'animate-spin' : ''} />
-                {app.identityLoading ? '불러오는 중' : '새로고침'}
-            </Button>
-            <Button onclick={openCreate}><Plus />{tab === 'users' ? '사용자 추가' : tab === 'groups' ? '그룹 추가' : 'API 키 추가'}</Button>
-        </div>
-    </header>
-
     {#if app.identityError}
         <Alert.Root variant="destructive">
             <Alert.Title>계정 정보를 불러오지 못했습니다</Alert.Title>
@@ -242,9 +228,14 @@
 
     <Card.Root>
         <Card.Header class="gap-4 border-b">
-            <div>
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
                 <Card.Title>접근 주체</Card.Title>
                 <Card.Description>시스템 계정은 기본적으로 숨겨지며 일반 계정만 편집할 수 있습니다.</Card.Description>
+                </div>
+                <div class="flex gap-2">
+                    <Button size="sm" onclick={openCreate}><Plus />{tab === 'users' ? '사용자 추가' : tab === 'groups' ? '그룹 추가' : 'API 키 추가'}</Button>
+                </div>
             </div>
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <Tabs.Root bind:value={tab} class="w-full lg:w-auto">
