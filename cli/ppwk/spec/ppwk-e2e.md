@@ -618,52 +618,26 @@ ref 와 파일 내용이 일치
 
 ## 6. 알림
 
-### E2E-18: hook 알림
+### E2E-18: git hook 경로는 없다
 
 ```
-watch --hook 시작
-다른 worktree 에서 claim
-```
-
-검증:
-
-```
-이벤트가 1초 이내 수신
-old/new OID 가 실제 ref 변경과 일치
-kind 가 정확
-```
-
-### E2E-19: hook 이 쓰기를 막지 않음
-
-```
-hook 설치, listener 없음
-claim 실행
+--help 전체를 훑는다
 ```
 
 검증:
 
 ```
-claim 이 정상 완료 (블로킹 없음)
-실행 시간이 EMIT_TIMEOUT 이내
+--git / --hooks / --hook 플래그가 없음
+socket 항목이 없음
+$GIT_COMMON_DIR/hooks/reference-transaction 이 만들어지지 않음
 ```
 
-```
-listener 가 소켓을 열고 응답하지 않음 (accept 후 read 안 함)
-claim 실행
-```
+채택하지 않은 이유는 §6.3 에 있다. 되살리고 싶어지는 종류라 회귀로 둔다.
 
-검증:
+### E2E-20: polling 만으로 완결
 
 ```
-timeout 후 claim 완료
-```
-
-**알림 실패가 쓰기 경로를 막으면 안 된다** (§1.2 설계 원칙).
-
-### E2E-20: hook 없이 동작
-
-```
-hook 미설치 상태로 전체 워크플로우 (E2E-1, E2E-5)
+전체 워크플로우 (E2E-1, E2E-5)
 watch (polling) 로 변경 감지
 ```
 
@@ -672,20 +646,8 @@ watch (polling) 로 변경 감지
 ```
 모든 기능 정상
 polling 이 변경을 놓치지 않음
-```
-
-### E2E-21: 무관한 ref 는 무시
-
-```
-hook 설치 상태에서
-일반 git commit, git branch, git tag, git fetch 수행
-```
-
-검증:
-
-```
-소켓에 이벤트 없음
-git 명령의 실행 시간이 hook 미설치 대비 유의미하게 늘지 않음
+일반 git commit / branch / tag / fetch 가 느려지지 않음
+    (훅이 없으므로 자명하지만, 훅을 다시 넣으면 여기가 무너진다)
 ```
 
 ### E2E-22: pack-refs 후 감지
@@ -848,10 +810,10 @@ git init --object-format=sha256 로 생성 후 전체 워크플로우
 
 ```
 모든 기능 정상
-hook 의 created/deleted 판정 정확 (64자리 zero OID)
+watch 의 created/deleted 판정 정확
 ```
 
-**40자리 zero OID 만 비교하는 hook 이면 전부 틀린다** (§6.3).
+zero OID 를 문자열로 비교하지 않는 것이 여기서 값을 한다. `watch` 는 ref 목록을 비교하므로 해시 길이에 무관하다 (§6.2).
 
 ### E2E-26: reftable backend
 
@@ -866,18 +828,20 @@ git init --ref-format=reftable 로 생성 후 전체 워크플로우
 watch 가 변경 감지 (ref 파일이 없는 환경)
 ```
 
-### E2E-27: core.hooksPath 충돌
+### E2E-27: 도구 훅 설정 병합
 
 ```
-git config core.hooksPath /some/other/dir 설정 후 init --hooks
+기존 .claude/settings.json 에 남의 훅과 모르는 키를 둔 뒤
+hook install --agent-tools
 ```
 
 검증:
 
 ```
-경고 출력
-hook 이 올바른 위치에 설치되거나 설치 거부
-doctor 가 충돌 보고
+남의 훅이 남아 있음
+모르는 설정 키가 보존됨
+SubagentStart / SubagentStop 에는 등록되지 않음
+두 번 설치해도 항목이 늘지 않음
 ```
 
 ### E2E-28: 최소 git 버전
@@ -931,8 +895,8 @@ git fsck 통과
 ```
 list 응답 시간이 실용 범위
 next 응답 시간이 실용 범위
-gc --pack-refs 후 성능 개선 확인
-디스크 사용량 보고
+git pack-refs --all 후 성능 개선 확인
+doctor 의 refs 항목이 loose ref 증가를 보고
 ```
 
 ---
@@ -1000,9 +964,9 @@ fsck 출력
 | §4.4 | 다중 ref 트랜잭션 | E2E-12 |
 | §4.5 | 게으른 확인으로 충분 | E2E-9 |
 | §4.5 | 데몬 없음 | E2E-29 |
-| §6.1 | 알림은 부가 기능 | E2E-19, 20 |
+| §6.1 | polling 하나뿐 | E2E-18, 20 |
 | §6.2 | polling, mtime 금지 | E2E-22 |
-| §6.3 | git hook 제약 | E2E-19, 21, 25 |
+| §6.3 | git hook 채택 안 함 | E2E-18 |
 | §3.8 | 층 2 환경변수 감지 | E2E-22b |
 | §3.8 | 감지 실패 폴백 | E2E-22c |
 | §3.8 | 훅은 최적화일 뿐 | E2E-22e |

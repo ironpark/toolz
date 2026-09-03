@@ -84,20 +84,20 @@ func TestInitIdempotent(t *testing.T) {
 	}
 }
 
-// T1.9 core.hooksPath 가 설정된 상태에서 init → 경고
-func TestInitWarnsOnHooksPath(t *testing.T) {
+// T1.9 core.hooksPath 는 init 이 신경 쓰지 않는다.
+//
+// git 훅을 설치하지 않으므로 (§6.3) 이 설정은 우리와 무관하다. 경고하면
+// 설치하지도 않는 훅을 걱정하게 만든다.
+func TestInitIgnoresHooksPath(t *testing.T) {
 	b, dir := newBoard(t)
 	runGit(t, dir, "config", "core.hooksPath", "/custom/hooks")
 
-	result, err := b.Init(InitOptions{})
+	result, err := b.Init(InitOptions{NoAgentsMD: true})
 	if err != nil {
 		t.Fatalf("Init() = %v", err)
 	}
-	if len(result.Warnings) == 0 {
-		t.Fatal("경고가 없습니다")
-	}
-	if !strings.Contains(strings.Join(result.Warnings, "\n"), "core.hooksPath") {
-		t.Fatalf("경고 = %v", result.Warnings)
+	if joined := strings.Join(result.Warnings, " "); strings.Contains(joined, "hooksPath") {
+		t.Fatalf("경고 = %q", joined)
 	}
 }
 

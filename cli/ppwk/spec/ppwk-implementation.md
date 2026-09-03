@@ -155,7 +155,7 @@ type RefStore interface {
 [T1.6] git CLI 로 만든 commit 을 go-git 이 정상으로 읽음
 [T1.7] init 이 log.excludeDecoration, core.filesRefLockTimeout 설정
 [T1.8] init 두 번 실행해도 안전 (멱등)
-[T1.9] core.hooksPath 설정된 상태에서 init → 경고 출력
+[T1.9] core.hooksPath 가 설정돼 있어도 init 이 경고하지 않음 (git 훅 없음)
 [T1.12] init 이 AGENTS.md + docs/ppwk/*.md 전부 생성
 [T1.13] 기존 파일은 덮어쓰지 않음 (파일 단위 판단)
             일부만 존재하면 없는 것만 생성
@@ -680,44 +680,21 @@ F5.2 는 겉보기에 사소하지만, 비일관 비교자는 **정렬 결과가
 
 ---
 
-## 단계 10 — hook
+## 단계 10 — hook — 채택하지 않음
 
-### 목표
+`reference-transaction` hook + socket 수신 (§6.3) 을 검토했으나 v1 에서 만들지 않는다.
 
-`reference-transaction` hook 설치 + socket 수신 (§6.3). **선택 기능**이다.
+얻는 것은 알림 지연 1~2초를 없애는 것뿐인데 (§6.1), `socat` 의존, 훅과 listener 를 잇는 unix socket 의 수명 관리, SHA-1/SHA-256 zero OID 양쪽 처리, 그리고 **그 저장소의 모든 git 작업이 이 스크립트를 거치게 되는** 위험을 함께 사야 한다. 훅이 git 프로세스 안에서 동기 실행되므로 잘못 만들면 모든 ref 쓰기가 멈춘다.
 
-### 테스트
+`watch` 는 polling 만으로 완결된다 (단계 7).
+
+이름이 겹치는 **도구 훅은 단계 11 에서 만든다.** 그쪽은 socket 도 listener 도 필요 없고 얻는 것이 크다.
+
+### 회귀
 
 ```
-[T10.1] hook 설치 후 ref 변경 → socket 에 이벤트
-[T10.2] 우리 namespace 밖 ref 변경 → 이벤트 없음
-[T10.3] 일반 git commit → 이벤트 없음, 성능 영향 없음
-[T10.4] listener 없음 → git 명령이 정상 완료 (블로킹 안 됨)
-[T10.5] listener 가 응답 안 함 → timeout 후 git 명령 완료
-[T10.6] hook 미설치 → polling 만으로 정상 동작
-[T10.7] SHA-256 저장소에서 created/deleted 판정 정확
-[T10.8] preparing/prepared 단계에서는 이벤트 없음
-[T10.9] core.hooksPath 설정 시 install 이 경고하고 올바른 위치 사용
-[T10.10] 기존 reference-transaction hook 존재 → 덮어쓰지 않고 중단
+[T10.1] --help 에 --git / --hooks / --hook 플래그와 socket 항목이 없음
 ```
-
-**T10.4 와 T10.5 가 가장 중요하다.** 알림 실패가 쓰기 경로를 막으면 안 된다. 알림은 부가 기능이라는 설계 원칙(§1.2)의 실증이다.
-
-### 엣지 케이스
-
-| 상황 | 요구 동작 |
-|---|---|
-| hook 이 ref 를 쓰려 함 | 코드에 없어야 함. 리뷰로 확인 (재귀) |
-| socket 파일이 stale | listener 시작 시 정리 |
-| 여러 listener | 하나만. 중복 시 오류 |
-| socat 없음 | polling 으로 자동 폴백 |
-| hook 실행 권한 없음 | install 시 chmod, 실패 시 오류 |
-| git fetch 로 수천 ref 갱신 | prefix 필터가 먼저 → 성능 영향 없음 |
-
-### Exit criteria
-
-- T10.1~T10.10 통과
-- hook 을 삭제해도 전체 통합 테스트가 통과 (선택 기능 확인)
 
 ---
 
@@ -832,13 +809,14 @@ F5.2 는 겉보기에 사소하지만, 비일관 비교자는 **정렬 결과가
 [T11.3]  stdin JSON 에서 session_id / cwd 정확히 파싱
 [T11.4]  알 수 없는 stdin → 조용히 exit 0 (세션을 막지 않음)
 [T11.5]  빈 stdin → exit 0
-[T11.6]  SessionStart 가 ref 쓰기 1회로 완료 (속도)
+[T11.6]  SessionStart 가 ref 를 쓰지 않음 (속도)
+             lease ref 를 없앤 뒤로(D13) 세션 등록은 잠금 파일만 건드린다
 [T11.7]  훅 미설치 상태에서 전체 워크플로우 정상 (선택 기능 확인)
 [T11.8]  SessionEnd 가 오지 않아도 잠금 확인으로 회수됨
 [T11.9]  claude-code 와 codex 에 같은 스크립트가 등록됨
 [T11.10] 기존 .claude/settings.json 이 있으면 병합, 충돌 시 중단
 [T11.11] SubagentStart/Stop 에 훅이 등록되지 않음
-[T11.12] hook status 가 두 종류 훅을 구분해 표시
+[T11.12] hook status 가 도구별·이벤트별 등록 여부를 구분해 표시
 ```
 
 **T11.8 이 이 단계의 핵심이다.** 훅은 최적화이지 정합성의 근거가 아니다. `SessionEnd` 를 강제로 건너뛰어도 층 1이 처리해야 한다.
@@ -856,6 +834,8 @@ F5.2 는 겉보기에 사소하지만, 비일관 비교자는 **정렬 결과가
 | SessionEnd 가 두 번 옴 | 멱등 |
 | 훅 실행 중 저장소 없음 | exit 0 |
 | Codex 훅이 신뢰 검토 대기 중 | install 이 안내, 동작은 층 1로 |
+| 기존 설정에 남의 훅이 있음 | 나란히 병합. 모르는 키는 원본 보존 |
+| 훅이 남긴 hook_pid 를 평범한 명령이 덮어씀 | 보존해야 함. 지우면 즉시 감지가 8시간으로 되돌아감 |
 | Windows (Codex 훅 미지원) | install 이 명확히 안내 |
 | 훅 스크립트 실행 권한 없음 | install 시 chmod |
 

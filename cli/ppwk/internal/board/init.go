@@ -3,7 +3,6 @@ package board
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -154,14 +153,9 @@ func (b *Board) ensureConfigContains(key, value string) error {
 
 // initAdvice 는 사용자가 알아야 할 것을 모은다 (features §1.1).
 func (b *Board) initAdvice() (warnings, notes []string, err error) {
-	hooksPath, err := b.git.ConfigGet("core.hooksPath")
-	if err != nil {
-		return nil, nil, err
-	}
-	if hooksPath != "" {
-		warnings = append(warnings, fmt.Sprintf(
-			"core.hooksPath 가 %q 로 설정되어 있습니다. hook 은 저장소 기본 위치가 아니라 그쪽에 설치됩니다.", hooksPath))
-	}
+	// core.hooksPath 경고는 두지 않는다. git 훅을 설치하지 않으므로 (§6.3)
+	// 이 설정은 우리와 무관하고, 경고하면 설치하지도 않는 훅을 걱정하게 만든다.
+	// 도구 훅은 .claude/settings.json 에 들어가므로 이 설정의 영향을 받지 않는다.
 	notes = append(notes,
 		`git log --all 에 이슈 커밋이 섞입니다. 별칭을 권합니다:`+
 			"\n    git config alias.la \"log --exclude=refs/ppwk/* --all\"",

@@ -165,6 +165,16 @@ func runShow(x *ctx) error {
 	}
 	fmt.Fprintf(w, "Created\t%s  by %s\n", issue.CreatedAt, issue.UpdatedBy)
 	fmt.Fprintf(w, "Updated\t%s  by %s\n", issue.UpdatedAt, issue.UpdatedBy)
+	// 연결된 결정을 함께 낸다. 에이전트가 작업 시작 전에 관련 결정을
+	// 자연스럽게 보게 되어, 세션을 넘기며 같은 논의를 반복하지 않는다 —
+	// 이것이 결정 기록의 실질적 효과다 (§3.9).
+	decisions, err := b.DecisionsForIssue(issue.ID)
+	if err != nil {
+		return err
+	}
+	for _, decision := range decisions {
+		fmt.Fprintf(w, "Decision\t%s %s\n", decision.ID, decision.Title)
+	}
 	if err := w.Flush(); err != nil {
 		return err
 	}

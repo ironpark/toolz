@@ -85,7 +85,7 @@
 보드를 초기화한다. 저장소당 한 번.
 
 ```
-ppwk init [--hooks] [--force] [--no-agents-md]
+ppwk init [--no-agents-md]
 ```
 
 수행 내용:
@@ -93,9 +93,8 @@ ppwk init [--hooks] [--force] [--no-agents-md]
 1. `meta/schema` ref 생성 (없으면)
 2. `git config --add log.excludeDecoration refs/ppwk/`
 3. `git config core.filesRefLockTimeout 1000`
-4. `--hooks` 이면 `reference-transaction` hook 설치
-5. `git` 버전 확인 (최소 2.28)
-6. 에이전트 문서 생성 (§1.1)
+4. `git` 버전 확인 (최소 2.28)
+5. 에이전트 문서 생성 (§1.1)
 
 ### 1.1 생성되는 에이전트 문서
 
@@ -137,7 +136,6 @@ docs/ppwk/
 
 **경고 출력:**
 
-- `core.hooksPath` 가 설정되어 있으면 hook 설치 위치가 다름을 알린다
 - `git log --all` 에 이슈 커밋이 섞임 → 별칭 제안
 - `git push --mirror` 가 이슈 내용을 원격에 노출함
 
@@ -156,9 +154,7 @@ git 바이너리 및 버전
 $GIT_COMMON_DIR 접근 가능 여부
 linked worktree 목록과 각각의 가시성
 schema 버전 일치
-hook 설치 상태 및 실행 권한
-socket 존재 여부 / listener 생존
-core.hooksPath 충돌
+도구 훅 설치 상태
 현재 에이전트 신원과 lease 상태
 stale .lock 파일 존재 여부
 도구 감지 결과와 감지 근거
@@ -560,7 +556,6 @@ ppwk export --decisions [-o docs/decisions/]
 ```
 ppwk watch
     [--interval <dur>]     polling 주기, 기본 2s
-    [--hook]               hook socket 우선, 실패 시 polling 폴백
     [--filter <prefix>]    특정 ref prefix 만
     [--json]               줄당 JSON (기본)
 ```
@@ -575,42 +570,48 @@ ppwk watch
 
 **첫 실행 시 기존 ref 를 전부 created 로 쏟지 않는다.** 베이스라인만 잡고 이후 변경부터 보고한다.
 
-polling 이 기본이고 hook 은 최적화다. hook 이 없거나 죽어도 정상 동작한다 (§6.1).
+polling 만 쓴다. git 의 `reference-transaction` 훅 경로는 채택하지 않았다 — 아래 참조.
 
 ### `ppwk hook install / uninstall / status`
 
 ```
-ppwk hook install [--git] [--agent-tools] [--claude-code] [--codex] [--force]
-ppwk hook uninstall [--git] [--agent-tools]
-ppwk hook status
+ppwk hook install [--agent-tools] [--claude-code] [--codex] [--force]
+ppwk hook uninstall [--agent-tools] [--claude-code] [--codex]
+ppwk hook status [--json]
 ```
 
-두 종류의 훅을 관리한다. 이름이 겹치므로 구분한다.
+도구의 대화 세션 훅만 다룬다 (§3.8 층 3).
 
 | 플래그 | 대상 | 설치 위치 | 목적 |
 |---|---|---|---|
-| `--git` | `reference-transaction` | `$GIT_COMMON_DIR/hooks/` | ref 변경 알림 (§6.3) |
-| `--claude-code` | `SessionStart`/`SessionEnd` | `.claude/settings.json` | 세션 신원·정리 (§3.8) |
+| `--claude-code` | `SessionStart`/`SessionEnd` | `.claude/settings.json` | 세션 신원·정리 |
 | `--codex` | `SessionStart`/`SessionEnd` | `.codex/hooks.json` | 동일 |
-| `--agent-tools` | 위 둘 | 감지된 도구에만 | |
+| `--agent-tools` | 위 둘 | | |
 
-두 도구의 훅 표면이 대칭이므로 **같은 스크립트가 양쪽에 등록된다.** 서브에이전트 이벤트에는 등록하지 않는다 (§3.8).
+두 도구의 훅 표면이 대칭이므로 **같은 명령이 양쪽에 등록된다.** 서브에이전트 이벤트에는 등록하지 않는다 (§3.8).
 
-기존 설정이 있으면 병합하고, 충돌하면 중단한다. `--force` 는 덮어쓸 때만 필요하다.
+기존 설정은 **병합**한다. 남의 훅과 나란히 서고, 우리가 모르는 설정 키는 원본 그대로 보존한다 — 사람이 손대는 파일이기 때문이다. 충돌은 "우리 것으로 보이는데 내용이 다른 항목"(예: 옛 경로의 `ppwk`)이며 그때만 중단한다. `--force` 는 그 경우에만 필요하다.
 
 `status` 출력:
 
 ```
-git hooks
-  reference-transaction    installed  /repo/.git/hooks/  executable
-  socket                   /repo/.git/ppwk.sock  no listener
-
-agent tool hooks
-  claude-code              SessionStart ✓  SessionEnd ✓
-  codex                    not configured
+claude-code  SessionStart ✓  SessionEnd ✓  .claude/settings.json
+codex        not configured                .codex/hooks.json
 ```
 
 **Codex 훅 주의사항** — 실험적 기능이라 기본 비활성이며 Windows 를 지원하지 않는다. 프로젝트 로컬 훅은 `/hooks` 에서 신뢰 검토를 거쳐야 실행된다. `install --codex` 가 이를 안내한다.
+
+### git `reference-transaction` 훅은 두지 않는다
+
+`watch` 는 polling 만으로 동작한다 (§6.2). git 훅 경로가 사 오는 것은 알림 지연 1~2초를 없애는 것뿐인데 (§6.1 의 표), 함께 사 와야 하는 것이 크다.
+
+- `socat` 외부 의존. 훅과 listener 사이를 이어 줄 unix socket 이 필요하다
+- 공용 hooks 디렉터리에 설치되므로 **그 저장소의 모든 git 작업**이 훅을 거친다
+- socket 수명 관리 — stale 파일 정리, listener 하나만 허용
+- SHA-1 / SHA-256 zero OID 양쪽 처리. 틀리면 created/deleted 판정이 전부 뒤집힌다
+- 훅이 git 프로세스 안에서 동기 실행되므로, 잘못 만들면 그 저장소의 모든 ref 쓰기가 멈춘다
+
+에이전트는 대화 턴마다 `next --claim` 을 한 번 부르고 (§8.2), `watch` 를 소비하는 쪽은 사람이 보는 대시보드나 오케스트레이터다. 거기서 2초는 보이지 않는다.
 
 ---
 
@@ -629,15 +630,19 @@ ppwk export
 
 **단방향 파생물이다.** 생성된 파일을 편집해도 반영되지 않는다. md/csv 헤더에 생성 시각과 경고를 넣는다.
 
-### `ppwk import`
+### import 는 두지 않는다
 
-```
-ppwk import <file> [--dry-run] [--format json]
-```
+`export --format json` 은 **현재 문서만** 담고 commit chain 을 담지 않는다. 그런데 §3.3 은 그 parent 체인 자체가 이력이라고 정의한다. 되돌려 넣으면 반드시 import commit 하나짜리 가짜 이력이 생기고, 감사 추적이 사라진다. 단방향 파생물의 역방향은 손실이 있을 수밖에 없다.
 
-`export --format json` 출력을 다시 넣는다. 백업 복원과 초기 이관용이다.
+용도별로 더 나은 답이 이미 있다.
 
-기존 ID 와 충돌하면 기본 거부. `--dry-run` 으로 미리 확인한다. 각 이슈를 개별 CAS 로 넣으므로 부분 실패가 가능하며, 그 경우 어디까지 성공했는지 보고한다.
+| 하려던 것 | 대신 쓸 것 |
+|---|---|
+| 백업·복원 | `git bundle create ppwk.bundle refs/ppwk/*` — 이력까지 그대로 보존한다 |
+| 다른 저장소로 옮기기 | `git push --mirror` 또는 명시적 refspec push (§12) |
+| 외부 트래커에서 초기 이관 | `ppwk add` 셸 루프 — 이슈마다 제대로 된 create commit 이 남는다 |
+
+추가로, import 는 `owner`/`session` 을 임의로 써넣을 수 있어 잠금 모델(§3.6)을 우회한다.
 
 ### `ppwk fsck`
 
@@ -669,13 +674,17 @@ stale .lock 파일 (경고, 자동 삭제 안 함)
 
 `--fix` 는 **trailer 재생성과 archive 이동만** 자동 처리한다. 나머지는 보고만 한다. 판단이 필요한 수정을 도구가 임의로 하지 않는다.
 
-### `ppwk gc`
+### gc 는 두지 않는다
+
+정리는 git 이 이미 한다. `git gc` 가 `pack-refs` 와 dangling commit 정리(CAS 에서 밀려 버려진 commit)를 함께 처리하므로, 얇게 감싸 봐야 우리가 더하는 것이 없다.
+
+우리가 아는 것은 **지금 얼마나 쌓였는지** 뿐이고 그것은 `doctor` 의 `refs` 항목이 보고한다.
 
 ```
-ppwk gc [--pack-refs] [--dry-run]
+refs   OK   issues 42, archive 318   via loose 12
 ```
 
-`git pack-refs --all` 을 실행하고, archive 크기와 loose ref 개수를 보고한다. 이슈가 수천 개일 때 필요하다 (§9.2).
+loose ref 가 임계값을 넘으면 WARN 하고 `git gc` 를 안내한다. ppwk 는 ref 를 `update-ref` 로만 쓰는데 그것은 auto-gc 를 유발하지 않으므로, 사람이 커밋을 하지 않는 저장소에서는 저절로 정리되지 않는다 — 그래서 안내가 필요하다 (§9.2).
 
 ### `ppwk archive`
 
@@ -821,12 +830,10 @@ next --claim 이 exit 0 + 빈 결과  → 할 일 없음
 | 변수 | 용도 |
 |---|---|
 | `PPWK_AGENT` | 에이전트 ID |
-| `PPWK_SOCK` | hook socket 경로 override |
 | `PPWK_POLL_INTERVAL` | watch 기본 주기 |
 | `PPWK_LOCK_DIR` | 잠금 디렉터리 override |
 | `PPWK_ACTIVITY_TTL` | `last_activity` 임계값 (기본 8h) |
 | `PPWK_SESSION` | 세션 ID 명시 지정 |
-| `PPWK_EMIT_TIMEOUT` | hook 알림 timeout |
 | `NO_COLOR` | 색상 비활성화 (표준 관례) |
 
 ---

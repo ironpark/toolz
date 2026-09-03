@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"context"
-
 	"github.com/urfave/cli/v3"
 )
 
@@ -23,9 +21,7 @@ func decideCommand() *cli.Command {
 			&cli.StringFlag{Name: "supersedes", Usage: "대체하는 이전 결정 ID"},
 			&cli.StringFlag{Name: "body-file", Usage: "긴 근거 파일"},
 		},
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("decide")
-		},
+		Action: action(runDecide),
 	}
 }
 
@@ -40,25 +36,19 @@ func decisionsCommand() *cli.Command {
 			&cli.StringFlag{Name: "plan", Usage: "plan 과 연결된 결정"},
 			&cli.StringFlag{Name: "search", Usage: "제목·본문 검색"},
 		},
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("decisions")
-		},
+		Action: action(runDecisions),
 		Commands: []*cli.Command{
 			{
 				Name:      "show",
 				Usage:     "결정 하나를 출력한다",
 				ArgsUsage: "<id>",
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("decisions show")
-				},
+				Action:    action(runDecisionShow),
 			},
 			{
 				Name:      "history",
 				Usage:     "supersedes 체인을 출력한다",
 				ArgsUsage: "<id>",
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("decisions history")
-				},
+				Action:    action(runDecisionHistory),
 			},
 		},
 	}

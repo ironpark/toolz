@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"github.com/ironpark/toolz/cli/ppwk/internal/board"
 	"github.com/ironpark/toolz/cli/ppwk/internal/model"
 	"github.com/urfave/cli/v3"
@@ -126,9 +125,7 @@ func internalCommand() *cli.Command {
 				Name:  "session-event",
 				Usage: "stdin 의 훅 JSON 을 처리한다",
 				// 훅에서 실행되므로 알 수 없는 입력이나 오류에는 조용히 exit 0 한다.
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("internal session-event")
-				},
+				Action: action(runSessionEvent),
 			},
 		},
 	}

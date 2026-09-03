@@ -1,8 +1,7 @@
 package cmd
 
 import (
-	"context"
-
+	"github.com/ironpark/toolz/cli/ppwk/internal/model"
 	"github.com/urfave/cli/v3"
 )
 
@@ -20,9 +19,7 @@ func planCommand() *cli.Command {
 					&cli.StringFlag{Name: "priority", Usage: "high|med|low|none"},
 					&cli.StringFlag{Name: "id", Usage: "plan ID 직접 지정"},
 				},
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("plan new")
-				},
+				Action: action(runPlanNew),
 			},
 			{
 				Name:  "list",
@@ -30,41 +27,31 @@ func planCommand() *cli.Command {
 				Flags: []cli.Flag{
 					&cli.StringFlag{Name: "status", Usage: "active|closed|cancelled"},
 				},
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("plan list")
-				},
+				Action: action(runPlanList),
 			},
 			{
 				Name:      "show",
 				Usage:     "진행률과 현재 phase 를 파생 계산해 출력한다",
 				ArgsUsage: "<plan>",
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("plan show")
-				},
+				Action:    action(runPlanShow),
 			},
 			{
 				Name:      "advance",
 				Usage:     "manual gate 를 개방한다",
 				ArgsUsage: "<plan> <phase>",
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("plan advance")
-				},
+				Action:    action(runPlanAdvance),
 			},
 			{
 				Name:      "close",
 				Usage:     "plan 을 닫는다",
 				ArgsUsage: "<plan>",
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("plan close")
-				},
+				Action:    action(planStatusRunner(model.PlanClosed)),
 			},
 			{
 				Name:      "cancel",
 				Usage:     "plan 을 취소한다",
 				ArgsUsage: "<plan>",
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("plan cancel")
-				},
+				Action:    action(planStatusRunner(model.PlanCancelled)),
 			},
 			{
 				Name:      "edit",
@@ -74,9 +61,7 @@ func planCommand() *cli.Command {
 					&cli.StringFlag{Name: "title"},
 					&cli.StringFlag{Name: "priority", Usage: "high|med|low|none"},
 				},
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("plan edit")
-				},
+				Action: action(runPlanEdit),
 			},
 			planPhaseCommand(),
 		},
@@ -99,9 +84,7 @@ func planPhaseCommand() *cli.Command {
 					&cli.StringFlag{Name: "before", Usage: "이 phase 앞에 삽입"},
 					&cli.StringFlag{Name: "after", Usage: "이 phase 뒤에 삽입"},
 				},
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("plan phase add")
-				},
+				Action: action(runPhaseAdd),
 			},
 			{
 				Name:      "edit",
@@ -111,17 +94,13 @@ func planPhaseCommand() *cli.Command {
 					&cli.StringFlag{Name: "title"},
 					&cli.StringFlag{Name: "gate", Usage: "all_done|any_done|manual"},
 				},
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("plan phase edit")
-				},
+				Action: action(runPhaseEdit),
 			},
 			{
 				Name:      "remove",
 				Usage:     "phase 를 제거한다. 소속 task 가 있으면 거부",
 				ArgsUsage: "<plan> <phase>",
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("plan phase remove")
-				},
+				Action:    action(runPhaseRemove),
 			},
 		},
 	}

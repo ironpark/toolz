@@ -3,12 +3,9 @@ package board
 import (
 	"cmp"
 	"errors"
-	"fmt"
 	"slices"
 
-	"github.com/ironpark/toolz/cli/ppwk/internal/gitobj"
 	"github.com/ironpark/toolz/cli/ppwk/internal/model"
-	"github.com/ironpark/toolz/cli/ppwk/internal/refstore"
 )
 
 // NextOptions 는 스케줄링 한 번의 입력이다 (features §4).
@@ -104,9 +101,12 @@ func (b *Board) Candidates(opts NextOptions) ([]*Issue, error) {
 		open = append(open, issue)
 	}
 
+	plans := newPlanIndex(b)
 	sel := selector{
 		label:        opts.Label,
-		planPriority: b.planPriority(),
+		planPriority: plans.priority,
+		planEligible: plans.eligible,
+		phaseIndex:   plans.phaseIndex,
 		status: func(id string) (model.Status, bool) {
 			if issue, ok := loaded[id]; ok {
 				if issue == nil {
@@ -139,6 +139,11 @@ type selector struct {
 	status func(id string) (model.Status, bool)
 	// planPriority 는 소속 plan 의 우선순위다. plan 이 없으면 med 다.
 	planPriority func(planID string) model.Priority
+	// planEligible 은 소속 plan 과 phase gate 가 이 이슈를 허용하는지다
+	// (§7.2 4단계, §3.7.5).
+	planEligible func(planID, phaseID string) bool
+	// phaseIndex 는 plan 안에서 phase 가 몇 번째인지다. 모르면 0 이다.
+	phaseIndex func(planID, phaseID string) int
 	// label 은 capability 필터다. 빈 문자열이면 거르지 않는다.
 	label string
 }
@@ -170,6 +175,11 @@ func (s selector) eligible(i *model.Issue) bool {
 	if s.label != "" && !slices.Contains(i.Labels, s.label) {
 		return false
 	}
+	// gate 는 여기서만 본다. 저장된 상태를 바꾸지 않으므로, 막힌 task 의
+	// status 는 blocked 가 아니라 open 그대로다 (T9.10).
+	if s.planEligible != nil && !s.planEligible(i.Plan, i.Phase) {
+		return false
+	}
 	for _, dep := range i.DependsOn {
 		status, ok := s.status(dep)
 		// 없는 의존 대상은 충족이 아니다. cancelled 도 마찬가지다 — 취소는
@@ -191,7 +201,17 @@ func (s selector) compare(a, b *model.Issue) int {
 	if c := cmp.Compare(rank(s.planPriority(b.Plan)), rank(s.planPriority(a.Plan))); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.Seq, b.Seq); c != 0 {
+	// phase 는 순서가 있고 seq 는 phase 안에서만 의미가 있다 (§3.7.3 은 seq
+	// 기본값을 "해당 phase 최대값 + 10" 으로 정한다). 그래서 자리는 seq
+	// 하나가 아니라 (phase 순번, seq) 쌍이다 — seq 만 비교하면 any_done 처럼
+	// 두 phase 가 동시에 열렸을 때 뒤 phase 의 seq 10 이 앞 phase 의 seq 20 을
+	// 앞지른다.
+	aPhase, aSeq := s.place(a)
+	bPhase, bSeq := s.place(b)
+	if c := cmp.Compare(aPhase, bPhase); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(aSeq, bSeq); c != 0 {
 		return c
 	}
 	if c := cmp.Compare(rank(b.Priority), rank(a.Priority)); c != 0 {
@@ -203,6 +223,41 @@ func (s selector) compare(a, b *model.Issue) int {
 	// ID 로 마무리해 전순서를 만든다. 여기가 없으면 동순위 후보들의 순서가
 	// 실행마다 달라져 재현이 불가능한 스케줄링이 된다 (F5.2).
 	return cmp.Compare(a.ID, b.ID)
+}
+
+// place 는 정렬에서 이 이슈가 앉을 자리다: (phase 순번, seq).
+//
+// plan 에 속한 이슈는 소속 phase 의 순번과 저자가 매긴 seq 를 그대로 쓴다.
+// plan 에 속하지 않은 이슈는 seq 가 없으므로(§3.4 가 금지한다) 첫 phase 자리에
+// 놓고 자기 priority 로 위치를 잡는다.
+//
+// seq 를 0 으로 두면 plan 없는 이슈가 계획된 작업을 항상 앞지르고, 큰 값을
+// 쓰면 항상 뒤로 밀린다. 어느 쪽도 §7.2 의 "계획된 작업들 사이에 자연스럽게
+// 섞이게 한다" 가 아니다.
+//
+// "같은 plan 안에서만 seq 를 본다" 는 규칙은 쓸 수 없다. 비교가 쌍에 따라
+// 달라져 전순서가 깨지기 때문이다 — seq 10/low, seq 20/high, plan 없는 med
+// 세 개가 순환을 만든다. 자리는 반드시 이슈 하나만 보고 정해져야 한다
+// (F5.2 가 이 성질을 지킨다).
+//
+// 값은 §3.7.3 의 seq 규약(10, 20, 30 …)에 맞춰 그 격자 사이에 끼운다.
+func (s selector) place(i *model.Issue) (phase, seq int) {
+	if i.Plan == "" {
+		switch i.Priority {
+		case model.PriorityHigh:
+			return 0, 5
+		case model.PriorityMed:
+			return 0, 15
+		case model.PriorityLow:
+			return 0, 25
+		}
+		// none 은 후보가 아니지만, 비교 함수는 어떤 입력에도 답이 있어야 한다.
+		return 0, 35
+	}
+	if s.phaseIndex == nil {
+		return 0, i.Seq
+	}
+	return s.phaseIndex(i.Plan, i.Phase), i.Seq
 }
 
 // rank 는 우선순위의 크기다. 모르는 값은 가장 낮게 본다 — 비교가 흔들리는
@@ -218,42 +273,4 @@ func rank(p model.Priority) int {
 	default:
 		return 0
 	}
-}
-
-// planPriority 는 plan 우선순위를 읽는 함수를 만든다. 호출당 한 번만 읽도록
-// 캐시한다 — 같은 plan 에 속한 이슈가 많은 것이 정상이기 때문이다.
-func (b *Board) planPriority() func(string) model.Priority {
-	cache := map[string]model.Priority{}
-	return func(id string) model.Priority {
-		// plan 에 속하지 않은 이슈는 med 로 본다. 계획된 작업들 사이에
-		// 자연스럽게 섞이게 하기 위함이다 (§7.2).
-		if id == "" {
-			return model.PriorityMed
-		}
-		if p, ok := cache[id]; ok {
-			return p
-		}
-		p := model.PriorityMed
-		if plan, err := b.ShowPlan(id); err == nil && plan.Priority.Valid() {
-			p = plan.Priority
-		}
-		cache[id] = p
-		return p
-	}
-}
-
-// ShowPlan 은 plan 문서를 읽는다.
-func (b *Board) ShowPlan(id string) (model.Plan, error) {
-	hash, err := b.store.Get(refstore.Plans + id)
-	if isNotFound(err) {
-		return model.Plan{}, fmt.Errorf("%s: %w", id, ErrNotFound)
-	}
-	if err != nil {
-		return model.Plan{}, err
-	}
-	var plan model.Plan
-	if _, _, _, err := gitobj.Read(b.repo, hash, gitobj.FilePlan, &plan); err != nil {
-		return model.Plan{}, err
-	}
-	return plan, nil
 }

@@ -47,6 +47,16 @@ type OpenOptions struct {
 	AllowSharedWorktree bool
 }
 
+// RegisterHookSession 은 SessionStart 훅이 세션을 등록하며 hook_pid 를 남긴다
+// (§3.8 층 3).
+//
+// 이 값이 있으면 생존 판정이 last_activity 임계값(8시간)까지 내려가지 않고
+// 2단계에서 끝난다 — 감지가 즉시가 된다 (D11).
+func (b *Board) RegisterHookSession(pid int) error {
+	_, err := b.leases.RegisterHook(pid, b.allowSharedWorktree)
+	return err
+}
+
 // OpenFor 는 신원까지 함께 결정해 보드를 연다.
 //
 // §0.2 의 마지막 단계인 git config 는 저장소를 연 뒤에야 읽을 수 있다. 그래서

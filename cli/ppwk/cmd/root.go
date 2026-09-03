@@ -67,10 +67,12 @@ func New(v Version, stdout, stderr io.Writer) *cli.Command {
 			hookCommand(),
 
 			// 7. 운영
+			//
+			// import 와 gc 는 두지 않는다. 백업·복원은 git bundle 이 이력까지
+			// 보존하며 정확히 하고, 정리는 git gc 가 이미 한다. 얇게 감싸면
+			// 우리가 더하는 것 없이 표면만 늘어난다.
 			exportCommand(),
-			importCommand(),
 			fsckCommand(),
-			gcCommand(),
 			archiveCommand(),
 			unarchiveCommand(),
 		},

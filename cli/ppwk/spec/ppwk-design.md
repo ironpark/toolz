@@ -56,7 +56,7 @@ B: show T001 → claim T001 → start → done
 
 ### 1.4 전제 조건
 
-- Git 2.28 이상 (`reference-transaction` hook)
+- Git 2.28 이상
 - 모든 에이전트가 **동일한 `$GIT_COMMON_DIR`** 을 공유 (같은 파일시스템)
 - POSIX 셸 환경
 - `flock` 을 지원하는 로컬 파일시스템 (§3.6)
@@ -516,8 +516,9 @@ SessionStart 훅이 잠금 파일에 기록:
 | 설치 위치 | `$GIT_COMMON_DIR/hooks/` | `.claude/settings.json`, `.codex/hooks.json` |
 | 트리거 | git ref 변경 | 대화 세션 시작·종료 |
 | 목적 | 변경 알림 | 세션 신원·정리 |
+| v1 채택 | **안 함** — socket·socat 이 필요하고 얻는 것이 지연 1~2초뿐 | 함 |
 
-둘은 독립적이며 각각 선택 사항이다.
+둘은 독립적이다. 도구 훅만 채택한 이유는 얻는 것의 크기가 다르기 때문이다 — 이쪽은 죽은 에이전트 회수를 8시간에서 즉시로 바꾼다.
 
 #### 스펙 안정성
 
@@ -767,15 +768,17 @@ ppwk export --format=md   > BOARD.md
 
 ## 6. 알림
 
-### 6.1 두 경로
+### 6.1 polling 하나뿐이다
 
-| | 기본: polling | 선택: hook |
+| | polling | (검토했으나 채택 안 함) git hook |
 |---|---|---|
 | 지연 | 1~2초 | 즉시 |
-| 의존성 | 없음 | socat, hook 설치 권한 |
-| 실패 모드 | 없음 | 조용히 유실 |
+| 의존성 | 없음 | socat, 공용 hooks 디렉터리 설치 권한 |
+| 실패 모드 | 없음 | 조용히 유실. 잘못 만들면 모든 ref 쓰기가 멈춤 |
 
-**polling이 기본이고 hook은 최적화다.** hook이 없거나 죽어도 시스템은 정상 동작한다.
+훅이 사 오는 것은 지연 1~2초를 없애는 것뿐이다. 에이전트는 대화 턴마다 `next --claim` 을 한 번 부르고(§8.2), `watch` 를 소비하는 쪽은 사람이 보는 대시보드나 오케스트레이터다 — 거기서 2초는 보이지 않는다. 반면 훅은 git 프로세스 안에서 동기 실행되므로 실패 모드가 저장소 전체에 걸린다.
+
+**따라서 v1은 polling만 쓴다.**
 
 ### 6.2 polling
 
@@ -785,25 +788,20 @@ git for-each-ref --format='%(refname) %(objectname)' refs/ppwk/
 
 결과를 이전 스냅샷과 ref 단위로 비교한다. 파일 mtime이나 inotify를 쓰면 안 된다 — `pack-refs`가 loose 파일을 없애고, reftable backend에는 애초에 ref별 파일이 없다.
 
-### 6.3 reference-transaction hook
+### 6.3 reference-transaction hook — 채택하지 않음
 
-`$GIT_COMMON_DIR/hooks/reference-transaction` 에 설치한다. hook은 공용이므로 한 번 설치하면 모든 worktree에 적용된다.
+`$GIT_COMMON_DIR/hooks/reference-transaction` 에 설치해 ref 변경을 즉시 알리는 안을 검토했다. 훅은 git 프로세스 안에서 동기 실행되는 짧은 스크립트라 스스로 아무것도 들고 있을 수 없고, 오래 사는 listener 에게 이벤트를 넘길 unix socket 이 필요하다.
 
-제약:
-
-- **`committed` 단계만 처리한다.** `preparing`/`prepared`는 아직 확정 전이고, `prepared`에서 non-zero exit은 트랜잭션을 abort시킨다.
-- **prefix 필터를 가장 먼저 한다.** 이 hook은 일반 commit, fetch, rebase, checkout 등 모든 ref 갱신마다 호출된다. 우리 namespace가 아니면 즉시 종료한다.
-- **절대 ref를 쓰지 않는다.** 재귀가 된다.
-- **절대 블로킹하지 않는다.** git 프로세스 안에서 동기 실행되므로 listener가 죽으면 `ppwk done`이 영영 안 끝난다. `timeout`으로 감싸고 실패는 무시한다.
-- **SHA-1과 SHA-256 zero OID를 모두 비교한다.** 40자리만 보면 SHA-256 저장소에서 created/deleted 판정이 전부 틀린다.
-
-출력은 줄당 JSON 하나:
-
-```json
-{"ref":"refs/ppwk/issues/T001","old":"abc...","new":"def...","kind":"updated"}
+```
+git update-ref → 훅 (수 ms) → $GIT_COMMON_DIR/ppwk.sock → watch listener
 ```
 
-`core.hooksPath`가 전역으로 설정되어 있으면 `$GIT_COMMON_DIR/hooks`의 hook이 무시된다. `init`이 이를 감지해 경고한다.
+socket 이 필요한 이유는 **절대 블로킹하면 안 되기** 때문이다. listener 가 죽었거나 멈춰 있으면 `ppwk done` 이 영영 끝나지 않는다. socket 은 그 실패 모드가 공짜다 — 파일이 없으면 건너뛰고, 아무도 accept 하지 않으면 즉시 실패하며, 남는 경우는 짧은 timeout 이 자른다.
+
+**그럼에도 채택하지 않았다.** 얻는 것은 §6.1 의 지연 1~2초뿐인 반면, `socat` 의존과 socket 수명 관리(stale 파일, listener 단일성), SHA-1/SHA-256 zero OID 양쪽 처리, 그리고 저장소의 모든 git 작업이 이 스크립트를 거치게 되는 위험을 함께 사야 한다.
+
+이름이 겹치는 **도구 훅(§3.8 층 3)은 별개이며 채택했다.** 그쪽은 socket 도 listener 도 필요 없고, 얻는 것이 훨씬 크다 — 죽은 에이전트 회수가 8시간에서 즉시로 바뀐다.
+
 
 ---
 
@@ -812,7 +810,7 @@ git for-each-ref --format='%(refname) %(objectname)' refs/ppwk/
 ### 7.1 명령
 
 ```
-ppwk init [--hooks]
+ppwk init
 ppwk add <title> [--priority P] [--label L] [--depends-on ID]
                         [--plan P01 --phase p2 [--seq N]]
 ppwk list [--status S] [--owner A] [--plan P] [--json]
@@ -932,11 +930,7 @@ GIT_COMMITTER_NAME / GIT_COMMITTER_EMAIL 동일
 1. meta/schema ref 생성 (없으면)
 2. git config --add log.excludeDecoration refs/ppwk/
 3. git config core.filesRefLockTimeout 1000
-4. --hooks 이면:
-     core.hooksPath 확인 → 설정돼 있으면 경고하고 그쪽에 설치
-     기존 reference-transaction 있으면 중단 (덮어쓰지 않음)
-     hook 복사 + chmod +x
-5. 안내 출력:
+4. 안내 출력:
      git log --all 에 이슈 커밋이 섞임 → 별칭 제안
      git push --mirror 하면 원격에 노출됨
 ```
@@ -968,6 +962,7 @@ git config alias.la "log --exclude=refs/ppwk/* --all"
 - CAS 실패로 버려진 commit은 dangling이 되어 gc가 정리한다 — 무시해도 된다
 - 이슈가 수천 개면 loose ref 파일이 쌓인다. 주기적으로 `git pack-refs --all` 권장
 - `git gc --prune=now`를 CAS 진행 중에 돌리면 이론적으로 경쟁 가능하나, `gc.pruneExpire` 기본값(2주)이면 문제없다
+- **전용 `gc` 명령을 두지 않는다.** `git gc`가 packing과 dangling 정리를 이미 함께 한다. 다만 ppwk는 ref를 `update-ref`로만 쓰고 그것은 auto-gc를 유발하지 않으므로, 사람이 커밋하지 않는 저장소에서는 저절로 정리되지 않는다. `doctor`의 `refs` 항목이 loose ref 수를 보고하고 임계값을 넘으면 WARN한다
 
 ### 9.3 fsck
 
@@ -1060,7 +1055,6 @@ git config alias.la "log --exclude=refs/ppwk/* --all"
 - pack-refs 실행 후에도 정상 동작
 - worktree 3개에서 교차 가시성
 - hook 미설치 상태에서 polling만으로 동작
-- core.hooksPath 설정된 상태에서 init 경고
 ```
 
 ### 11.5 오염 검사
@@ -1140,7 +1134,6 @@ go-git의 `CheckAndSetReference(new, old)` 는 CAS 처럼 보이지만 실제 �
 | 프로세스 간 원자적 CAS | 4.1 | 없음 |
 | lock 실패 / CAS 실패 구분 | 4.2 | 구분 불가 |
 | 다중 ref 원자적 트랜잭션 | 4.4 | 없음 |
-| `reference-transaction` hook 실행 | 6.3 | 훅을 실행하지 않음 |
 | git 호환 `.lock` 프로토콜 | — | 미보장 |
 
 훅 미실행이 특히 치명적이다. go-git으로 ref를 쓰면 훅이 돌지 않아 알림이 조용히 사라진다. 그리고 사람이 같은 저장소를 진짜 `git`으로 만지는 순간, 서로를 모르는 두 락 프로토콜이 공존하게 된다.
@@ -1264,7 +1257,8 @@ internal/refstore/   RefStore 인터페이스 + ExecRefStore
 internal/model/      Issue, Plan, Decision 스키마 + JSON
 internal/gitobj/     go-git 객체 생성/읽기 래퍼
 internal/session/    잠금 파일, 생존 판정, 도구 감지
-internal/watch/      polling + hook socket 수신
+internal/watch/      polling
+internal/toolhook/   도구 세션 훅 설정 (§3.8 층 3)
 internal/faultstore/ RefStore 결함 주입 (테스트용, D2.1)
 ```
 

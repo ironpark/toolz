@@ -5,12 +5,15 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/ironpark/toolz/cli/ppwk/internal/model"
 )
 
+// T4.8/T4.9 — 살아 있는 다른 세션이 쥔 worktree 는 거부하고,
+// allowShared 는 그 거부를 우회한다. board 계층 확인은 T4.8 쪽에 있다.
 func TestRegisterIsExclusiveAndRefreshesActivity(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 9, 3, 1, 0, 0, 0, time.UTC)
@@ -44,6 +47,7 @@ func TestRegisterIsExclusiveAndRefreshesActivity(t *testing.T) {
 	}
 }
 
+// T4.1c — 잠금 파일 read-modify-write 가 원자적이다.
 func TestConcurrentRegisterExactlyOneWinner(t *testing.T) {
 	dir := t.TempDir()
 	worktree := filepath.Join(dir, "wt")
@@ -75,6 +79,7 @@ func TestConcurrentRegisterExactlyOneWinner(t *testing.T) {
 	}
 }
 
+// T4.15/T4.16 — 생존 판정 5단계 순서와 last_activity 임계값 (§3.6 표).
 func TestAliveDecisionOrderAndTTL(t *testing.T) {
 	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
 	r := &Registry{TTL: 8 * time.Hour, Now: func() time.Time { return now }, AlivePID: func(pid int, start string) bool { return pid == 7 && start == "same" }}
@@ -103,6 +108,7 @@ func TestAliveDecisionOrderAndTTL(t *testing.T) {
 	}
 }
 
+// T4.17 — 손상된 JSON 기록은 사망으로 보고 panic 하지 않는다.
 func TestCorruptRecordIsDead(t *testing.T) {
 	r := NewRegistry(t.TempDir(), t.TempDir(), Identity{})
 	if err := os.MkdirAll(r.Dir, 0o700); err != nil {
@@ -116,6 +122,7 @@ func TestCorruptRecordIsDead(t *testing.T) {
 	}
 }
 
+// T4.13 — PPWK_ACTIVITY_TTL 로 임계값을 조정할 수 있다.
 func TestActivityTTLFromEnvironment(t *testing.T) {
 	t.Setenv("PPWK_ACTIVITY_TTL", "90m")
 	r := NewRegistry(t.TempDir(), t.TempDir(), Identity{})
@@ -147,4 +154,48 @@ func TestCanonicalWorktreeResolvesSymlink(t *testing.T) {
 // leaseAt 은 마지막 활동 시각만 다른 정상 기록을 만든다.
 func leaseAt(when time.Time) model.Lease {
 	return model.Lease{Agent: "a", Session: "s", LastActivity: model.NewTimestamp(when)}
+}
+
+// T4.2 — flock 은 JSON 기록을 바꾸는 순간에만 잡힌다 (§3.6).
+//
+// 세션 수명 동안 잠금을 쥐면 멈춘 프로세스가 worktree 를 영구히 붙잡는다
+// (T4.1b 가 막는 것과 같은 실패다). 양쪽을 다 본다 — 갱신 중에는 실제로
+// 배타이고, 반환된 뒤에는 남아 있지 않다.
+func TestLockHeldOnlyDuringUpdate(t *testing.T) {
+	dir := t.TempDir()
+	r := NewRegistry(dir, filepath.Join(dir, "wt"), Identity{Agent: "a", Session: "s1"})
+	if _, err := r.Register(false); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. 반환된 뒤에는 잠금이 남아 있지 않다.
+	f, err := os.OpenFile(r.worktreePath(), os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("Register 가 반환된 뒤에도 잠금이 남아 있다: %v", err)
+	}
+
+	// 2. 그 구간에서는 배타다. 잠금을 쥔 채로는 Register 가 진행하지 못한다.
+	done := make(chan error, 1)
+	go func() { _, err := r.Register(false); done <- err }()
+	select {
+	case err := <-done:
+		t.Fatalf("잠금을 쥐고 있는데 Register 가 끝났다: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("잠금을 푼 뒤 Register = %v", err)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("잠금을 풀었는데 Register 가 끝나지 않았다")
+	}
 }

@@ -28,12 +28,15 @@ const (
 	CheckMissingPhase    = "missing_phase"
 	CheckPartialPlan     = "partial_plan_fields"
 	CheckClosedPlanOpen  = "closed_plan_open_task"
+	CheckPlanNoPhases    = "plan_without_phases"
 	CheckEmptyPhase      = "empty_phase"
 	CheckDuplicateSeq    = "duplicate_seq"
 	CheckAdvancedPhase   = "unknown_advanced_phase"
 	CheckCancelledDep    = "cancelled_dependency"
 	CheckBacklogDep      = "backlog_dependency"
 	CheckStaleLock       = "stale_lock"
+	CheckDecisionRef     = "decision_dangling_ref"
+	CheckSupersedesCycle = "supersedes_cycle"
 )
 
 // 심각도.
@@ -98,6 +101,8 @@ func (b *Board) Fsck(opts FsckOptions) ([]Finding, error) {
 		checkPlanFields,
 		checkPlanDocs,
 		checkPhases,
+		checkDecisions,
+		checkSupersedes,
 	} {
 		findings = append(findings, check(scan)...)
 	}
@@ -144,6 +149,9 @@ type fsckScan struct {
 	issues map[string]*issueRecord
 	order  []string
 	plans  map[string]model.Plan
+	// decisions 는 결정 문서다. 불변이라 목록만 있으면 검사가 끝난다.
+	decisions     map[string]model.Decision
+	decisionOrder []string
 	// leaseAgents 는 잠금 기록이 있는 에이전트다. 생존 여부는 보지 않는다 —
 	// 죽은 기록이 남아 있는 것은 정상이고, 아예 없는 것이 이상하다.
 	leaseAgents map[string]bool
@@ -154,6 +162,7 @@ func (b *Board) scan() (*fsckScan, error) {
 	scan := &fsckScan{
 		issues:      map[string]*issueRecord{},
 		plans:       map[string]model.Plan{},
+		decisions:   map[string]model.Decision{},
 		leaseAgents: map[string]bool{},
 	}
 	version, err := b.SchemaVersion()
@@ -192,9 +201,22 @@ func (b *Board) scan() (*fsckScan, error) {
 	for _, ref := range planRefs {
 		id := strings.TrimPrefix(ref.Ref, refstore.Plans)
 		if plan, err := b.ShowPlan(id); err == nil {
-			scan.plans[id] = plan
+			scan.plans[id] = plan.Plan
 		}
 	}
+	decisionRefs, err := b.store.List(refstore.Decisions)
+	if err != nil {
+		return nil, err
+	}
+	for _, ref := range decisionRefs {
+		id := strings.TrimPrefix(ref.Ref, refstore.Decisions)
+		if decision, err := b.ShowDecision(id); err == nil {
+			scan.decisions[id] = decision.Decision
+			scan.decisionOrder = append(scan.decisionOrder, id)
+		}
+	}
+	slices.Sort(scan.decisionOrder)
+
 	for _, lease := range b.leases.List() {
 		scan.leaseAgents[lease.Agent] = true
 	}
@@ -416,9 +438,16 @@ func checkPhases(s *fsckScan) []Finding {
 				openTasks++
 			}
 		}
-		if plan.Status == model.PlanClosed && openTasks > 0 {
+		// closed 든 cancelled 든 미완 task 가 남으면 그 일감은 영원히 후보가
+		// 아니다. 두 경우 모두 사람이 알아야 한다 (§7.2 4단계).
+		if plan.Status != model.PlanActive && openTasks > 0 {
 			findings = append(findings, finding(CheckClosedPlanOpen, LevelError, planID,
-				"closed 인데 미완 task 가 "+strconv.Itoa(openTasks)+"개 남았습니다"))
+				string(plan.Status)+" 인데 미완 task 가 "+strconv.Itoa(openTasks)+"개 남았습니다"))
+		}
+		if len(plan.Phases) == 0 {
+			// phase 가 없으면 소속 task 는 전부 gate 판정에서 걸린다.
+			findings = append(findings, finding(CheckPlanNoPhases, LevelWarn, planID,
+				"phase 가 없습니다. 소속 task 가 후보에 오르지 못합니다"))
 		}
 
 		for _, phase := range plan.Phases {
@@ -438,6 +467,76 @@ func checkPhases(s *fsckScan) []Finding {
 				}
 				seen[r.Issue.Seq] = r.ID
 			}
+		}
+	}
+	return findings
+}
+
+// checkDecisions 는 결정이 가리키는 이슈·plan·이전 결정이 실재하는지 본다
+// (T12.10).
+//
+// 결정은 불변이므로 --fix 가 손댈 수 없다. 보고만 한다.
+func checkDecisions(s *fsckScan) []Finding {
+	var findings []Finding
+	for _, id := range s.decisionOrder {
+		decision := s.decisions[id]
+		for _, issueID := range decision.Issues {
+			if _, ok := s.issues[issueID]; !ok {
+				findings = append(findings, finding(CheckDecisionRef, LevelError, id,
+					"없는 이슈 "+issueID+" 를 가리킵니다"))
+			}
+		}
+		if decision.Plan != "" {
+			if _, ok := s.plans[decision.Plan]; !ok {
+				findings = append(findings, finding(CheckDecisionRef, LevelError, id,
+					"없는 plan "+decision.Plan+" 을 가리킵니다"))
+			}
+		}
+		if decision.Supersedes != "" {
+			if _, ok := s.decisions[decision.Supersedes]; !ok {
+				findings = append(findings, finding(CheckDecisionRef, LevelError, id,
+					"없는 결정 "+decision.Supersedes+" 를 대체한다고 합니다"))
+			}
+		}
+	}
+	return findings
+}
+
+// checkSupersedes 는 supersedes 순환을 찾는다 (T12.11).
+//
+// 만들어질 수 없는 상태다 — Decide 가 대상의 실재를 확인하고 결정은 불변이다.
+// 그래도 검사하는 이유는, 순환이 생기면 history 조회가 영원히 돌기 때문이다.
+// 만들 수 없다는 전제가 언젠가 틀릴 수 있고, 그때 조용히 매달리는 것보다
+// 보고되는 편이 낫다.
+func checkSupersedes(s *fsckScan) []Finding {
+	const (
+		unvisited = 0
+		inStack   = 1
+	)
+	state := map[string]int{}
+	var findings []Finding
+
+	var walk func(id string)
+	walk = func(id string) {
+		decision, ok := s.decisions[id]
+		if !ok {
+			return
+		}
+		state[id] = inStack
+		if next := decision.Supersedes; next != "" {
+			switch state[next] {
+			case unvisited:
+				walk(next)
+			case inStack:
+				findings = append(findings, finding(CheckSupersedesCycle, LevelError, id,
+					"supersedes 순환: "+id+" → "+next))
+			}
+		}
+		state[id] = 2
+	}
+	for _, id := range s.decisionOrder {
+		if state[id] == unvisited {
+			walk(id)
 		}
 	}
 	return findings

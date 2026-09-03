@@ -417,3 +417,14 @@ func TestHistoryShowsEventSubjects(t *testing.T) {
 		t.Fatalf("-n 1 = %v", short)
 	}
 }
+
+// T9.x — phase 가 없는 plan 은 경고다.
+//
+// 오류가 아니다. 방금 만든 plan 은 정상적으로 이 상태를 거친다. 다만 이
+// 상태로 task 를 붙이면 gate 판정에서 전부 걸려 next 가 영원히 비므로,
+// 조용히 두지 않는다.
+func TestFsckWarnsOnPlanWithoutPhases(t *testing.T) {
+	b := initBoard(t)
+	plan := makePlan(t, b, "phase 없는 plan", model.PriorityMed)
+	expectFinding(t, b, CheckPlanNoPhases, plan.ID, LevelWarn)
+}

@@ -52,22 +52,46 @@ func NewRegistry(commonDir, worktree string, identity Identity) *Registry {
 // Register atomically acquires the worktree for this session and updates activity.
 // The advisory lock is held only while the JSON record is replaced.
 func (r *Registry) Register(allowShared bool) (model.Lease, error) {
+	return r.register(allowShared, nil)
+}
+
+// RegisterHook 은 Register 에 hook_pid 기록을 더한다 (§3.8 층 3).
+//
+// 훅의 부모는 구조적으로 도구 프로세스다. 그래서 프로세스 트리를 뒤지지 않고
+// $PPID 하나만 본다 — 임의 위치에서 거슬러 올라가는 것(D10 기각)과는 다르다.
+func (r *Registry) RegisterHook(pid int, allowShared bool) (model.Lease, error) {
+	return r.register(allowShared, &pid)
+}
+
+func (r *Registry) register(allowShared bool, hookPID *int) (model.Lease, error) {
 	if err := os.MkdirAll(r.Dir, 0o700); err != nil {
 		return model.Lease{}, fmt.Errorf("잠금 디렉터리 생성: %w", err)
 	}
 	var lease model.Lease
 	err := r.withLocked(r.worktreePath(), func(f *os.File) error {
 		previous, readErr := readLeaseFile(f)
+		same := readErr == nil && previous.Agent == r.Identity.Agent && previous.Session == r.Identity.Session
 		if readErr == nil && previous.Session != r.Identity.Session && r.Alive(previous) && !allowShared {
 			return &WorktreeBusyError{Lease: previous}
 		}
 		now := model.NewTimestamp(r.Now())
 		since := now
-		if readErr == nil && previous.Agent == r.Identity.Agent && previous.Session == r.Identity.Session {
+		if same {
 			since = previous.Since
 		}
 		lease = model.Lease{Agent: r.Identity.Agent, Session: r.Identity.Session, Worktree: r.Worktree,
 			Since: since, LastActivity: now}
+		switch {
+		case hookPID != nil:
+			lease.HookPID = hookPID
+			if start := ProcessStarttime(*hookPID); start != "" {
+				lease.HookStarttime = &start
+			}
+		case same:
+			// 훅이 남긴 hook_pid 를 평범한 명령이 지우면 안 된다. 지우면
+			// 첫 claim 한 번으로 즉시 감지가 8시간 임계값으로 되돌아간다.
+			lease.HookPID, lease.HookStarttime = previous.HookPID, previous.HookStarttime
+		}
 		return writeLease(f, lease)
 	})
 	if err != nil {
@@ -166,8 +190,17 @@ func readLeaseAt(path string) (model.Lease, bool) {
 	return l, err == nil
 }
 
+// flockTimeout 은 잠금을 기다리는 상한이다.
+//
+// 이 잠금은 기록 하나를 읽고 쓰는 동안만 잡히므로 (§3.6) 정상적으로는
+// 마이크로초 단위다. 그래도 넉넉히 두는 이유는, 프로세스 수십 개가 동시에
+// git 을 fork 하는 순간의 스케줄링 지연 때문이다 — 거기서 포기하면
+// 사용자에게는 아무 이유 없이 실패한 claim 으로 보인다. 잠금을 쥔
+// 프로세스가 죽으면 커널이 즉시 풀어 주므로 오래 기다려도 매달리지 않는다.
+const flockTimeout = 5 * time.Second
+
 func flock(f *os.File) error {
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(flockTimeout)
 	for {
 		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
 			return nil
@@ -232,6 +265,20 @@ func short(s string) string {
 	return s
 }
 
+// ProcessStarttime 은 pid 의 시작 시각이다. 못 읽으면 빈 문자열이다.
+//
+// pid 재사용을 걸러내기 위한 값이다. 이름이나 트리는 보지 않는다 (D10).
+func ProcessStarttime(pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+	out, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func processAlive(pid int, starttime string) bool {
 	if pid <= 0 {
 		return false
@@ -245,7 +292,5 @@ func processAlive(pid int, starttime string) bool {
 	}
 	// Only the process start time is queried. Process names and process-tree
 	// scanning are deliberately excluded (D10); the value detects PID reuse.
-	cmd := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
-	out, err := cmd.Output()
-	return err == nil && strings.TrimSpace(string(out)) == starttime
+	return ProcessStarttime(pid) == starttime
 }

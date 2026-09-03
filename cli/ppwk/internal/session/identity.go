@@ -23,6 +23,10 @@ type Identity struct {
 type Options struct {
 	Flag     string // --agent
 	Worktree string // 현재 worktree 경로
+	// Session 은 세션 ID 를 직접 지정한다. 도구 훅이 stdin 으로 받은
+	// session_id 를 넣는 자리다 — 훅은 도구 프로세스가 아니라 그 자식으로
+	// 실행되므로 환경변수 감지가 닿지 않는다 (§3.8 층 3).
+	Session string
 	// GitConfig 는 ppwk.agent 값을 돌려준다. nil 이면 건너뛴다.
 	GitConfig func() string
 	// Detect 는 도구 감지를 수행한다. nil 이면 runby.Current 다.
@@ -35,7 +39,7 @@ type Options struct {
 // Resolve 는 §0.2 와 §0.2.1 의 결정 순서를 그대로 따른다.
 //
 //	agent:   --agent → PPWK_AGENT → 도구 감지 → git config ppwk.agent → <hostname>:<worktree>
-//	session: PPWK_SESSION → 도구 세션 ID → 생성한 nonce
+//	session: 훅 session_id → PPWK_SESSION → 도구 세션 ID → 생성한 nonce
 func Resolve(opts Options) Identity {
 	detect := opts.Detect
 	if detect == nil {
@@ -71,6 +75,8 @@ func Resolve(opts Options) Identity {
 	}
 
 	switch {
+	case opts.Session != "":
+		id.Session, id.SessionSource = opts.Session, "hook session_id"
 	case os.Getenv("PPWK_SESSION") != "":
 		id.Session, id.SessionSource = os.Getenv("PPWK_SESSION"), "PPWK_SESSION"
 	default:

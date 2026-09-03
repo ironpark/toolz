@@ -76,10 +76,44 @@ func TestNextSortOrder(t *testing.T) {
 	lowNoPlan := mustAdd(t, b, AddOptions{Title: "plan 없음 low", Priority: model.PriorityLow})
 	highNoPlan := mustAdd(t, b, AddOptions{Title: "plan 없음 high", Priority: model.PriorityHigh})
 
+	// plan 없는 이슈는 자기 priority 에 해당하는 자리에 끼어든다: high 는
+	// seq 10 앞(5), low 는 seq 20 뒤(25)다.
 	got := ids(mustNext(t, b, NextOptions{}).Candidates)
-	want := []string{highNoPlan.ID, lowNoPlan.ID, first.ID, second.ID}
+	want := []string{highNoPlan.ID, first.ID, second.ID, lowNoPlan.ID}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("순서 = %v, want %v", got, want)
+	}
+}
+
+// plan 없는 이슈가 계획된 작업들 사이에 섞인다 (§7.2).
+//
+// seq 를 0 으로 두면 plan 없는 이슈가 계획을 항상 앞지르고, 큰 값으로 두면
+// 항상 뒤로 밀린다. 둘 다 이 테스트가 잡는다.
+func TestPlanlessIssuesInterleave(t *testing.T) {
+	b := initBoard(t)
+	planned10 := mustAdd(t, b, AddOptions{Title: "계획 seq 10", Plan: "P01", Phase: "p1", Seq: 10})
+	planned20 := mustAdd(t, b, AddOptions{Title: "계획 seq 20", Plan: "P01", Phase: "p1", Seq: 20})
+	loose := mustAdd(t, b, AddOptions{Title: "plan 없는 med", Priority: model.PriorityMed})
+
+	got := ids(mustNext(t, b, NextOptions{}).Candidates)
+	want := []string{planned10.ID, loose.ID, planned20.ID}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("순서 = %v, want %v", got, want)
+	}
+}
+
+// 같은 plan 안에서는 여전히 seq 가 priority 를 앞선다. 자리 규칙이 이 성질을
+// 깨뜨리지 않아야 한다 (§7.2).
+func TestSeqStillBeatsPriorityWithinPlan(t *testing.T) {
+	b := initBoard(t)
+	early := mustAdd(t, b, AddOptions{Title: "seq 10 low", Plan: "P01", Phase: "p1", Seq: 10,
+		Priority: model.PriorityLow})
+	late := mustAdd(t, b, AddOptions{Title: "seq 30 high", Plan: "P01", Phase: "p1", Seq: 30,
+		Priority: model.PriorityHigh})
+
+	got := ids(mustNext(t, b, NextOptions{}).Candidates)
+	if fmt.Sprint(got) != fmt.Sprint([]string{early.ID, late.ID}) {
+		t.Fatalf("순서 = %v, want [%s %s]", got, early.ID, late.ID)
 	}
 }
 
@@ -89,9 +123,9 @@ func TestPlanPriorityLeadsSort(t *testing.T) {
 	high := mustAdd(t, b, AddOptions{Title: "높은 plan", Plan: "P01", Phase: "p1", Seq: 90})
 	low := mustAdd(t, b, AddOptions{Title: "낮은 plan", Plan: "P02", Phase: "p1", Seq: 10})
 	writePlan(t, b, model.Plan{Schema: 1, ID: "P01", Title: "P01", Status: model.PlanActive,
-		Priority: model.PriorityHigh})
+		Priority: model.PriorityHigh, Phases: []model.Phase{{ID: "p1", Title: "하나", Gate: model.GateAllDone}}})
 	writePlan(t, b, model.Plan{Schema: 1, ID: "P02", Title: "P02", Status: model.PlanActive,
-		Priority: model.PriorityLow})
+		Priority: model.PriorityLow, Phases: []model.Phase{{ID: "p1", Title: "하나", Gate: model.GateAllDone}}})
 
 	got := ids(mustNext(t, b, NextOptions{}).Candidates)
 	if fmt.Sprint(got) != fmt.Sprint([]string{high.ID, low.ID}) {
@@ -167,7 +201,7 @@ func TestBacklogBecomesCandidateAfterEdit(t *testing.T) {
 	}
 }
 
-// T5.4 의존 대상이 archive 에 있어도 done 으로 인식한다.
+// T5.4/T6.5 의존 대상이 archive 에 있어도 done 으로 인식한다.
 //
 // issues/ 만 보면 실패한다 — 완료된 이슈는 archive 로 옮겨지므로 후속 작업이
 // 영원히 후보에서 빠지는 형태로 나타난다.
@@ -385,10 +419,30 @@ func FuzzCandidates(f *testing.F) {
 	f.Add(uint64(1))
 	f.Add(uint64(20260903))
 	f.Fuzz(func(t *testing.T, seed uint64) {
-		issues, lookup := generateBoard(seed)
+		issues, lookup, plans := generateBoard(seed)
+		counts := phaseCountsOf(issues)
 		sel := selector{
 			status:       lookup,
 			planPriority: func(string) model.Priority { return model.PriorityMed },
+			planEligible: func(planID, phaseID string) bool {
+				plan, ok := plans[planID]
+				if !ok {
+					return true
+				}
+				return plan.Status == model.PlanActive && gateOpen(plan, phaseID, counts[planID])
+			},
+			phaseIndex: func(planID, phaseID string) int {
+				plan, ok := plans[planID]
+				if !ok {
+					return 0
+				}
+				for i, phase := range plan.Phases {
+					if phase.ID == phaseID {
+						return i
+					}
+				}
+				return 0
+			},
 		}
 		got := sel.pick(issues)
 		for _, c := range got {
@@ -404,8 +458,41 @@ func FuzzCandidates(f *testing.F) {
 					t.Fatalf("%s 의 의존 %s 가 %q(있음=%v) 입니다", c.ID, dep, status, ok)
 				}
 			}
+			// F9.2 gate 불변식. 후보는 활성 plan 의 열린 phase 에만 있다.
+			if plan, ok := plans[c.Plan]; ok {
+				if plan.Status != model.PlanActive {
+					t.Fatalf("%s 가 %s plan %s 에 속했는데 후보입니다", c.ID, plan.Status, plan.ID)
+				}
+				if !gateOpen(plan, c.Phase, counts[plan.ID]) {
+					t.Fatalf("%s 의 phase %s 가 닫혔는데 후보입니다", c.ID, c.Phase)
+				}
+			}
 		}
 	})
+}
+
+// phaseCountsOf 는 생성된 이슈에서 plan/phase 별 집계를 만든다.
+func phaseCountsOf(issues []*Issue) map[string]map[string]phaseCounts {
+	out := map[string]map[string]phaseCounts{}
+	for _, issue := range issues {
+		if issue.Plan == "" {
+			continue
+		}
+		if out[issue.Plan] == nil {
+			out[issue.Plan] = map[string]phaseCounts{}
+		}
+		c := out[issue.Plan][issue.Phase]
+		c.total++
+		switch issue.Status {
+		case model.StatusDone:
+			c.done++
+			c.terminal++
+		case model.StatusCancelled:
+			c.terminal++
+		}
+		out[issue.Plan][issue.Phase] = c
+	}
+	return out
 }
 
 // F5.2 비교 함수가 전순서인가.
@@ -415,15 +502,30 @@ func FuzzCandidates(f *testing.F) {
 func FuzzSortOrder(f *testing.F) {
 	f.Add(uint64(7))
 	f.Add(uint64(99))
+	// 196 은 "seq 는 같은 plan 안에서만 비교한다" 규칙이 만드는 순환을 담은
+	// 보드다. 그 규칙은 그럴듯해 보이므로 누군가 다시 시도할 수 있다 —
+	// 고정 seed 로 남겨 두면 fuzz 를 돌리지 않아도 즉시 걸린다.
+	f.Add(uint64(196))
 	f.Fuzz(func(t *testing.T, seed uint64) {
-		issues, _ := generateBoard(seed)
+		issues, _, plans := generateBoard(seed)
 		if len(issues) < 3 {
 			return
 		}
-		planPriority := planPriorityBySuffix
 		sel := selector{
 			status:       func(string) (model.Status, bool) { return model.StatusDone, true },
-			planPriority: planPriority,
+			planPriority: planPriorityBySuffix,
+			phaseIndex: func(planID, phaseID string) int {
+				plan, ok := plans[planID]
+				if !ok {
+					return 0
+				}
+				for i, phase := range plan.Phases {
+					if phase.ID == phaseID {
+						return i
+					}
+				}
+				return 0
+			},
 		}
 		rng := rand.New(rand.NewPCG(seed, ^seed))
 		for range 200 {
@@ -470,13 +572,34 @@ func planPriorityBySuffix(id string) model.Priority {
 	return model.PriorityLow
 }
 
-// generateBoard 는 seed 로 이슈 집합을 결정적으로 만든다. 순환 의존도 나온다.
-func generateBoard(seed uint64) ([]*Issue, func(string) (model.Status, bool)) {
+// generateBoard 는 seed 로 보드 하나를 결정적으로 만든다.
+//
+// 임의 바이트가 아니라 seed 로 구조를 만든다. 무작위 바이트를 넣으면 파서만
+// 흔들고 후보 선정 규칙은 한 번도 밟지 않는다. 순환 의존, 닫힌 plan, 막힌
+// phase 가 전부 자연스럽게 섞여 나온다.
+func generateBoard(seed uint64) ([]*Issue, func(string) (model.Status, bool), map[string]model.Plan) {
 	rng := rand.New(rand.NewPCG(seed, seed^0x5deece66d))
 	statuses := []model.Status{model.StatusOpen, model.StatusClaimed, model.StatusWorking,
 		model.StatusBlocked, model.StatusDone, model.StatusCancelled}
 	priorities := []model.Priority{model.PriorityHigh, model.PriorityMed, model.PriorityLow, model.PriorityNone}
-	plans := []string{"", "P01", "P02", "P03"}
+	planIDs := []string{"", "P01", "P02", "P03"}
+	planStatuses := []model.PlanStatus{model.PlanActive, model.PlanActive, model.PlanClosed, model.PlanCancelled}
+	gates := []model.Gate{model.GateAllDone, model.GateAnyDone, model.GateManual}
+
+	plans := map[string]model.Plan{}
+	for _, id := range planIDs[1:] {
+		plan := model.Plan{Schema: 1, ID: id, Title: id,
+			Status: planStatuses[rng.IntN(len(planStatuses))], Priority: model.PriorityMed}
+		for i := range 1 + rng.IntN(3) {
+			phaseID := fmt.Sprintf("p%d", i+1)
+			plan.Phases = append(plan.Phases, model.Phase{ID: phaseID, Title: phaseID,
+				Gate: gates[rng.IntN(len(gates))]})
+			if rng.IntN(3) == 0 {
+				plan.AdvancedPhases = append(plan.AdvancedPhases, phaseID)
+			}
+		}
+		plans[id] = plan
+	}
 
 	n := 1 + rng.IntN(24)
 	all := make([]*Issue, 0, n)
@@ -489,11 +612,12 @@ func generateBoard(seed uint64) ([]*Issue, func(string) (model.Status, bool)) {
 			Title:     "t",
 			Status:    statuses[rng.IntN(len(statuses))],
 			Priority:  priorities[rng.IntN(len(priorities))],
-			Plan:      plans[rng.IntN(len(plans))],
+			Plan:      planIDs[rng.IntN(len(planIDs))],
 			CreatedAt: model.NewTimestamp(base.Add(time.Duration(rng.IntN(5)) * time.Second)),
 		}}
 		if issue.Plan != "" {
-			issue.Phase = "p1"
+			// 없는 phase 도 섞는다. 매달린 참조에서 멈추지 않아야 한다.
+			issue.Phase = fmt.Sprintf("p%d", 1+rng.IntN(4))
 			issue.Seq = 10 * rng.IntN(4)
 		}
 		all = append(all, issue)
@@ -514,5 +638,5 @@ func generateBoard(seed uint64) ([]*Issue, func(string) (model.Status, bool)) {
 			return "", false
 		}
 		return issue.Status, true
-	}
+	}, plans
 }

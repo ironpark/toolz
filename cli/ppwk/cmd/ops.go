@@ -26,12 +26,12 @@ func exportCommand() *cli.Command {
 
 // runExport 는 보드를 단방향 파생물로 내보낸다 (§7).
 func runExport(x *ctx) error {
-	if x.cmd.Bool("decisions") {
-		return notImplemented("export --decisions")
-	}
 	b, err := x.board()
 	if err != nil {
 		return err
+	}
+	if x.cmd.Bool("decisions") {
+		return exportDecisions(x, b)
 	}
 	data, err := b.Export(board.ExportOptions{
 		All:  x.cmd.Bool("all"),
@@ -58,22 +58,6 @@ func runExport(x *ctx) error {
 	return err
 }
 
-// importCommand — export --format json 출력을 다시 넣는다 (§7).
-func importCommand() *cli.Command {
-	return &cli.Command{
-		Name:      "import",
-		Usage:     "내보낸 JSON 을 되돌려 넣는다",
-		ArgsUsage: "<file>",
-		Flags: []cli.Flag{
-			&cli.BoolFlag{Name: "dry-run", Usage: "적용하지 않고 확인만"},
-			&cli.StringFlag{Name: "format", Value: "json", Usage: "입력 형식"},
-		},
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("import")
-		},
-	}
-}
-
 // fsckCommand — 무결성을 검사한다 (§7).
 // --fix 는 trailer 재생성과 archive 이동만 자동 처리한다.
 func fsckCommand() *cli.Command {
@@ -85,6 +69,25 @@ func fsckCommand() *cli.Command {
 		},
 		Action: action(runFsck),
 	}
+}
+
+// exportDecisions 는 결정마다 ADR 파일 하나를 쓴다 (§5.5).
+//
+// 다른 형식과 달리 파일이 여러 개라 stdout 으로 낼 수 없다. -o 를 필수로
+// 요구하는 이유가 그것이다.
+func exportDecisions(x *ctx, b *board.Board) error {
+	dir := x.cmd.String("output")
+	if dir == "" {
+		return UsageError("--decisions 는 출력 디렉터리가 필요합니다 (-o)")
+	}
+	written, err := b.ExportDecisions(dir)
+	if err != nil {
+		return err
+	}
+	for _, path := range written {
+		x.printf("%s\n", path)
+	}
+	return nil
 }
 
 // runFsck 는 무결성을 검사한다 (§9.3).
@@ -129,21 +132,6 @@ func fixNote(f board.Finding) string {
 		return "fix failed: " + f.FixError
 	}
 	return ""
-}
-
-// gcCommand — ref 를 packing 하고 크기를 보고한다 (§7).
-func gcCommand() *cli.Command {
-	return &cli.Command{
-		Name:  "gc",
-		Usage: "ref 를 정리하고 크기를 보고한다",
-		Flags: []cli.Flag{
-			&cli.BoolFlag{Name: "pack-refs", Usage: "git pack-refs --all 실행"},
-			&cli.BoolFlag{Name: "dry-run", Usage: "변경 없이 보고만"},
-		},
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("gc")
-		},
-	}
 }
 
 // archiveCommand — 종료 상태 이슈를 archive 로 옮긴다 (§7).

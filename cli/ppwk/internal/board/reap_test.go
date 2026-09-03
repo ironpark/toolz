@@ -11,6 +11,8 @@ import (
 	"github.com/ironpark/toolz/cli/ppwk/internal/session"
 )
 
+// T4.3/T4.4/T4.6 — 죽은 소유자의 claimed·working 은 open 으로 회수되고,
+// blocked 는 소유자만 풀린다. 막힌 이유는 소유자가 죽었다고 사라지지 않는다.
 func TestReapByStateAndSession(t *testing.T) {
 	b := initBoard(t)
 	claimed := issueIn(t, b, model.StatusClaimed)
@@ -38,6 +40,8 @@ func TestReapByStateAndSession(t *testing.T) {
 	}
 }
 
+// T4.5/T4.12 — 살아 있는 소유자의 이슈는 건드리지 않고, 회수 대상이 없으면
+// ref 쓰기가 0회다.
 func TestReapLiveOwnerAndNoTargetsDoNotWrite(t *testing.T) {
 	b := initBoard(t)
 	issue := issueIn(t, b, model.StatusClaimed)
@@ -58,6 +62,7 @@ func TestReapLiveOwnerAndNoTargetsDoNotWrite(t *testing.T) {
 	}
 }
 
+// T4.7 — 같은 이름으로 재시작하면 이전 session 의 claim 이 회수된다.
 func TestSameAgentDifferentSessionIsReaped(t *testing.T) {
 	b := initBoard(t)
 	old := issueIn(t, b, model.StatusClaimed)

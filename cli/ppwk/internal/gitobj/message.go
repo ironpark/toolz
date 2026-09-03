@@ -31,6 +31,8 @@ const (
 	KeySeq          = "Seq"
 	KeyDependsOn    = "Depends-On"
 	KeyPhases       = "Phases"
+	KeyIssues       = "Issues"
+	KeySupersedes   = "Supersedes"
 	KeyAgentSession = "Agent-Session"
 )
 

@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -27,7 +26,6 @@ func watchCommand() *cli.Command {
 				Usage:   "polling 주기",
 				Sources: cli.EnvVars("PPWK_POLL_INTERVAL"),
 			},
-			&cli.BoolFlag{Name: "hook", Usage: "hook socket 우선, 실패 시 polling 폴백"},
 			&cli.StringFlag{Name: "filter", Usage: "특정 ref prefix 만"},
 		},
 		Action: func(ctx context.Context, c *cli.Command) error {
@@ -45,12 +43,6 @@ func runWatch(ctx context.Context, x *ctx) error {
 	if err != nil {
 		return err
 	}
-	if x.cmd.Bool("hook") {
-		// hook 은 최적화이고 polling 이 기본이다. hook 경로가 없어도 감지는
-		// 정상 동작해야 하므로, 미구현을 오류로 만들지 않고 폴백한다 (§6.1).
-		fmt.Fprintln(x.stderr, "hook 경로가 아직 없습니다. polling 으로 진행합니다")
-	}
-
 	signalCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -66,44 +58,41 @@ func runWatch(ctx context.Context, x *ctx) error {
 	})
 }
 
-// hookCommand — git hook 과 에이전트 도구 hook 을 관리한다 (§6).
+// hookCommand — 코딩 에이전트 도구의 세션 훅을 관리한다 (§6, §3.8 층 3).
+//
+// git 의 reference-transaction 훅은 두지 않는다. 그것이 사 오는 것은 알림
+// 지연 1~2초를 없애는 것뿐인데, socat 의존과 공용 hooks 디렉터리 설치,
+// socket 수명 관리, 그리고 잘못하면 저장소의 모든 ref 쓰기가 멈추는 실패
+// 모드를 함께 사 와야 한다. polling 이 기본이라는 §6.1 의 결론을 그대로
+// 따른다.
 func hookCommand() *cli.Command {
 	targetFlags := func() []cli.Flag {
 		return []cli.Flag{
-			&cli.BoolFlag{Name: "git", Usage: "reference-transaction hook"},
-			&cli.BoolFlag{Name: "agent-tools", Usage: "감지된 에이전트 도구 전부"},
+			&cli.BoolFlag{Name: "claude-code", Usage: "SessionStart/SessionEnd 를 .claude/settings.json 에"},
+			&cli.BoolFlag{Name: "codex", Usage: "SessionStart/SessionEnd 를 .codex/hooks.json 에"},
+			&cli.BoolFlag{Name: "agent-tools", Usage: "지원하는 도구 전부"},
 		}
 	}
 	return &cli.Command{
 		Name:  "hook",
-		Usage: "hook 을 설치·제거·점검한다",
+		Usage: "도구 세션 훅을 설치·제거·점검한다",
 		Commands: []*cli.Command{
 			{
-				Name:  "install",
-				Usage: "hook 을 설치한다",
-				Flags: append(targetFlags(),
-					&cli.BoolFlag{Name: "claude-code", Usage: "SessionStart/SessionEnd 를 .claude/settings.json 에"},
-					&cli.BoolFlag{Name: "codex", Usage: "SessionStart/SessionEnd 를 .codex/hooks.json 에"},
-					&cli.BoolFlag{Name: "force", Usage: "충돌하는 기존 설정을 덮어씀"},
-				),
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("hook install")
-				},
+				Name:   "install",
+				Usage:  "훅을 설치한다",
+				Flags:  append(targetFlags(), &cli.BoolFlag{Name: "force", Usage: "충돌하는 기존 ppwk 설정을 덮어씀"}),
+				Action: action(runHookInstall),
 			},
 			{
-				Name:  "uninstall",
-				Usage: "hook 을 제거한다",
-				Flags: targetFlags(),
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("hook uninstall")
-				},
+				Name:   "uninstall",
+				Usage:  "ppwk 가 등록한 훅만 제거한다",
+				Flags:  targetFlags(),
+				Action: action(runHookUninstall),
 			},
 			{
-				Name:  "status",
-				Usage: "hook 설치 상태를 출력한다",
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return notImplemented("hook status")
-				},
+				Name:   "status",
+				Usage:  "훅 설치 상태를 출력한다",
+				Action: action(runHookStatus),
 			},
 		},
 	}

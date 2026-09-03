@@ -37,6 +37,9 @@ func TestMain(m *testing.M) {
 	if dir := os.Getenv(actionChildDir); dir != "" {
 		os.Exit(runActionChild(dir))
 	}
+	if dir := os.Getenv(decideChildDir); dir != "" {
+		os.Exit(runDecideChild(dir))
+	}
 	os.Exit(m.Run())
 }
 

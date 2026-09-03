@@ -14,9 +14,10 @@ import (
 
 // tree 안의 파일 이름 (§3.3).
 const (
-	FileIssue = "issue.json"
-	FilePlan  = "plan.json"
-	FileBody  = "body.md"
+	FileIssue    = "issue.json"
+	FilePlan     = "plan.json"
+	FileDecision = "decision.json"
+	FileBody     = "body.md"
 )
 
 // Commit 은 만들 commit 하나를 서술한다.

@@ -16,8 +16,8 @@ func initCommand() *cli.Command {
 		Name:  "init",
 		Usage: "보드를 초기화한다",
 		Flags: []cli.Flag{
-			&cli.BoolFlag{Name: "hooks", Usage: "reference-transaction hook 설치"},
-			&cli.BoolFlag{Name: "force", Usage: "기존 hook 덮어쓰기"},
+			// --hooks 는 없다. reference-transaction 훅을 두지 않기 때문이다.
+			// 도구 세션 훅은 ppwk hook install 이 따로 다룬다 (§3.8 층 3).
 			&cli.BoolFlag{Name: "no-agents-md", Usage: "에이전트 문서 생성 건너뛰기"},
 		},
 		Action: action(runInit),
@@ -97,8 +97,41 @@ func doctorChecks(b *board.Board) []check {
 		{Name: "agent id", Status: statusOK, Value: id.Agent, Via: id.AgentSource},
 		{Name: "session id", Status: statusOK, Value: id.Session, Via: id.SessionSource},
 	}
-	checks = append(checks, lockingCheck(b), worktreeCheck(b), livenessCheck(b), holdingCheck(b))
+	checks = append(checks, lockingCheck(b), worktreeCheck(b), livenessCheck(b),
+		holdingCheck(b), refStatsCheck(b))
 	return checks
+}
+
+// looseRefWarn 은 이 개수를 넘으면 정리를 권하는 임계값이다.
+//
+// 정확한 수는 중요하지 않다. loose ref 가 수천 개면 ref 조회가 느려진다는
+// 것이 §9.2 의 요지이고, 여기서는 사람이 알아차릴 계기만 만들면 된다.
+const looseRefWarn = 1000
+
+// refStatsCheck 는 refs/ppwk/ 가 얼마나 쌓였는지 본다 (§9.2).
+//
+// 별도 gc 명령을 두지 않는다. 정리는 git 이 이미 하는 일이고 (`git gc` 가
+// pack-refs 와 dangling commit 정리를 함께 한다), 얇게 감싸 봐야 우리가
+// 더하는 것이 없다. 우리가 아는 것은 "지금 얼마나 쌓였는지" 뿐이므로
+// 그것만 보고한다.
+func refStatsCheck(b *board.Board) check {
+	stats, err := b.RefStats()
+	if err != nil {
+		return check{Name: "refs", Status: statusWarn, Value: err.Error()}
+	}
+	c := check{
+		Name:  "refs",
+		Value: fmt.Sprintf("issues %d, archive %d", stats.Issues, stats.Archive),
+		Via:   fmt.Sprintf("loose %d", stats.Loose),
+	}
+	c.Status = statusOK
+	if stats.Loose > looseRefWarn {
+		// ppwk 는 ref 를 update-ref 로만 쓰는데 그것은 auto-gc 를 유발하지
+		// 않는다. 사람이 커밋을 하지 않는 저장소에서는 저절로 정리되지 않는다.
+		c.Status = statusWarn
+		c.Hint = "loose ref 가 많습니다. git gc 또는 git pack-refs --all 을 실행하세요."
+	}
+	return c
 }
 
 // lockingCheck 는 flock 이 실제로 동작하는지 시도해 본다 (design §719).
