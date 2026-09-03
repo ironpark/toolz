@@ -323,7 +323,7 @@ CAS 를 거친다. 다른 에이전트가 동시에 상태를 바꾸면 exit 4.
 | `done <id>` | working → done | archive 로 이동 |
 | `block <id> [--on <id>] [--message T]` | working → blocked | `--on` 은 차단 원인 이슈, `--message` 는 사유 |
 | `unblock <id>` | blocked → working | |
-| `release <id>` | claimed → open | 소유권 반납 |
+| `release <id>` | claimed → open | 소유권 반납. `--force` 면 working 도 (§4.5) |
 | `cancel <id>` | any → cancelled | archive 로 이동 |
 
 공통 플래그:

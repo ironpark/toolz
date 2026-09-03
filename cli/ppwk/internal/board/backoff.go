@@ -19,10 +19,11 @@ type Backoff struct {
 	// 잠금 실패는 상태가 안 바뀌었다는 뜻이므로 (§4.2) 같은 commit 으로 다시
 	// 시도하면 된다. 재계산이 필요 없어 상한을 넉넉히 둔다.
 	LockAttempts int
-	// CASAttempts 는 경쟁 패배에 대한 재시도 상한이다.
+	// CASAttempts 는 경쟁 패배에 대한 시도 상한이다 (1 이면 재시도 없음).
 	//
-	// 매번 상태를 다시 읽고 전이 규칙을 다시 검사해야 하므로 (§4.1 1단계 복귀)
-	// 비용이 크다. 상한에 닿으면 exit 4 로 명시적으로 실패한다 (§7.3).
+	// 기본은 1 이다. 경쟁에서 진 것은 재시도할 일이 아니라 다른 작업을 찾을
+	// 신호이기 때문이다 (features §3). 상한에 닿으면 exit 4 로 명시적으로
+	// 실패하고, 재시도할지는 호출하는 쪽이 --retry 로 정한다.
 	CASAttempts int
 	// Sleep 은 대기 구현이다. nil 이면 time.Sleep. 테스트가 여기를 가로챈다.
 	Sleep func(time.Duration)
@@ -39,7 +40,7 @@ func DefaultBackoff() Backoff {
 		Base:         5 * time.Millisecond,
 		Max:          200 * time.Millisecond,
 		LockAttempts: 12,
-		CASAttempts:  8,
+		CASAttempts:  1,
 	}
 }
 

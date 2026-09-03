@@ -27,15 +27,32 @@ func isNotFound(err error) bool {
 //
 // ref 는 건드리지 않는다 — 호출자가 CAS 한다.
 func (b *Board) writeIssueCommit(issue model.Issue, body []byte, event string, parent plumbing.Hash) (plumbing.Hash, error) {
+	return b.writeIssueCommitWithMessage(issue, body, event, "", parent)
+}
+
+// writeIssueCommitWithMessage 는 subject 에 사유를 덧붙인다 (--message).
+func (b *Board) writeIssueCommitWithMessage(issue model.Issue, body []byte, event, message string, parent plumbing.Hash) (plumbing.Hash, error) {
 	return gitobj.Write(b.repo, gitobj.Commit{
 		Doc:      issue,
 		DocName:  gitobj.FileIssue,
 		Body:     body,
-		Subject:  event + ": " + issue.Title,
+		Subject:  eventSubject(event, issue.Title, message),
 		Trailers: issueTrailers(issue, b.identity.Session),
 		Author:   b.signature(issue.UpdatedAt),
 		Parent:   parent,
 	})
+}
+
+// eventSubject 는 commit subject 한 줄을 만든다.
+//
+// 제목은 Title trailer 가 진실이므로 (§3.3) subject 는 사람이 읽을 이벤트
+// 줄로 자유롭게 쓸 수 있다. 목록이 여기를 파싱하지 않는다.
+func eventSubject(event, title, message string) string {
+	subject := event + ": " + title
+	if message != "" {
+		subject += " — " + message
+	}
+	return subject
 }
 
 // issueTrailers 는 조회용 인덱스를 만든다 (§3.3, §5.1).
@@ -43,6 +60,7 @@ func (b *Board) writeIssueCommit(issue model.Issue, body []byte, event string, p
 // issue.json 이 진실이고 이것은 비정규화된 사본이다.
 func issueTrailers(issue model.Issue, session string) []gitobj.Trailer {
 	trailers := []gitobj.Trailer{
+		{Key: gitobj.KeyTitle, Value: issue.Title},
 		{Key: gitobj.KeyStatus, Value: string(issue.Status)},
 		{Key: gitobj.KeyPriority, Value: string(issue.Priority)},
 	}

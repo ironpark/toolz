@@ -69,9 +69,7 @@ func historyCommand() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.IntFlag{Name: "count", Aliases: []string{"n"}, Usage: "출력 개수"},
 		},
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("history")
-		},
+		Action: action(runHistory),
 	}
 }
 

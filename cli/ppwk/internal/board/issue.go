@@ -64,7 +64,6 @@ func (b *Board) Add(opts AddOptions) (*Issue, error) {
 		Phase:     opts.Phase,
 		Seq:       opts.Seq,
 		DependsOn: opts.DependsOn,
-		Session:   b.identity.Session,
 		CreatedAt: now,
 		UpdatedAt: now,
 		UpdatedBy: b.identity.Agent,
@@ -213,10 +212,15 @@ func (b *Board) readEntry(ref string, hash plumbing.Hash) (ListEntry, error) {
 	}
 	subject, trailers := gitobj.ParseMessage(commit.Message)
 
-	// subject 는 "이벤트: 제목" 형태다. 제목만 떼어낸다.
-	title := subject
-	if _, rest, found := strings.Cut(subject, ": "); found {
-		title = rest
+	// 제목은 trailer 가 진실이다. 사유가 붙은 subject 를 파싱하면 사유가
+	// 제목으로 새어 나온다. Title trailer 이전에 만들어진 commit 을 위해
+	// subject 파싱을 남겨 두지만, 그것은 fallback 이다.
+	title := gitobj.TrailerValue(trailers, gitobj.KeyTitle)
+	if title == "" {
+		title = subject
+		if _, rest, found := strings.Cut(subject, ": "); found {
+			title = rest
+		}
 	}
 
 	seq, _ := strconv.Atoi(gitobj.TrailerValue(trailers, gitobj.KeySeq))

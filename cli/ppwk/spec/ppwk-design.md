@@ -146,7 +146,8 @@ committer:            동일
 message:
   claim: SQLite storage 구현          ← subject = 이벤트 한 줄
                                       ← 빈 줄
-  Status: working                     ← trailer 블록
+  Title: SQLite storage 구현          ← trailer 블록
+  Status: working
   Owner: agent-b
   Priority: high
   Depends-On: T000
@@ -156,6 +157,8 @@ message:
 **subject를 이벤트로 쓴다.** `git log refs/ppwk/issues/T001` 이 그대로 `ppwk history T001` 이 된다. 별도 이력 자료구조가 필요 없다.
 
 **trailer에 상태를 복제한다.** 목록 조회를 `for-each-ref` 한 번으로 끝내기 위한 비정규화다. `issue.json`이 진실이고 trailer는 인덱스다. 둘이 어긋나면 `issue.json`을 신뢰하고, `ppwk fsck`가 검출한다.
+
+**제목도 trailer 에 둔다.** subject 를 `"이벤트: 제목"` 으로만 두면 목록이 제목을 얻으려고 subject 를 파싱해야 하는데, `--message` 로 사유가 붙는 순간 그 규칙이 깨져 사유가 제목으로 새어 나온다. `Title` trailer 를 두면 subject 는 사람이 읽을 이벤트 줄로 자유로워진다.
 
 ### 3.4 issue.json 스키마
 
@@ -198,6 +201,10 @@ message:
 ```
 
 전이 규칙은 CLI에서 강제한다. `done`과 `cancelled`는 종료 상태이며 `archive/`로 이동 대상이다.
+
+`block <id> --on <cause>` 는 차단 원인을 `depends_on` 에 기록한다. 별도 필드를 두지 않는 이유는 그것이 의존 관계 그 자체이기 때문이다 — `next` 의 후보 판정(§6)과 `fsck` 의 순환 검출이 이미 `depends_on` 을 본다. 필드를 나누면 같은 관계에 대해 같은 기계를 두 벌 만들게 된다. 순환은 `block` 시점에 거부한다. 생기고 나서 `fsck` 로 찾는 것보다 낫다 — 순환이 있으면 `next` 가 영원히 후보를 찾지 못한다.
+
+`session` 필드는 소유권과 함께 움직인다. "누가 마지막에 손댔나" 는 `updated_by` 가 갖는다. 소유권을 놓을 때 `session` 을 같이 비우지 않으면 `--mine` 이 반납된 이슈를 계속 붙잡는다.
 
 `start` 는 `open` 에서도 허용된다 — claim 과 start 를 한 CAS 로 수행한다 (D16). 배정 모델에서 에이전트는 `show → start → done` 세 단계로 끝난다. `claim` 은 "예약만 하고 시작은 나중에" 가 필요할 때 쓴다.
 
@@ -721,7 +728,7 @@ ppwk release T009 --force
 
 ```bash
 git for-each-ref \
-  --format='%(refname:lstrip=3)%09%(trailers:key=Status,valueonly,unfold)%09%(trailers:key=Owner,valueonly,unfold)%09%(trailers:key=Plan,valueonly,unfold)%09%(trailers:key=Phase,valueonly,unfold)%09%(trailers:key=Seq,valueonly,unfold)%09%(subject)' \
+  --format='%(refname:lstrip=3)%09%(trailers:key=Status,valueonly,unfold)%09%(trailers:key=Owner,valueonly,unfold)%09%(trailers:key=Plan,valueonly,unfold)%09%(trailers:key=Phase,valueonly,unfold)%09%(trailers:key=Seq,valueonly,unfold)%09%(trailers:key=Title,valueonly,unfold)' \
   refs/ppwk/issues/
 ```
 

@@ -17,7 +17,13 @@ type Trailer struct {
 
 // trailer 키. list 가 이 이름으로 읽는다 (§5.1).
 const (
-	KeyStatus       = "Status"
+	KeyStatus = "Status"
+	// KeyTitle 은 제목을 trailer 에도 복제한다.
+	//
+	// subject 는 "이벤트: 제목" 이지만 사유(--message)가 붙으면 그 규칙이
+	// 깨진다. 목록이 subject 를 파싱해 제목을 얻으면 사유가 제목으로 새어
+	// 나온다. §3.3 의 비정규화 원칙대로 제목도 trailer 에 둔다.
+	KeyTitle        = "Title"
 	KeyOwner        = "Owner"
 	KeyPriority     = "Priority"
 	KeyPlan         = "Plan"

@@ -50,6 +50,8 @@ type Mutation struct {
 	ID string
 	// Event 는 commit subject 의 앞머리다. git log 가 곧 history 다 (§3.3).
 	Event string
+	// Message 는 subject 에 덧붙일 사유다 (--message).
+	Message string
 	// Apply 는 현재 상태를 받아 다음 상태로 바꾼다.
 	//
 	// 전이 규칙 검사도 여기서 한다 (§4.1 3단계). CAS 에 밀리면 다시 읽은
@@ -96,13 +98,15 @@ func (b *Board) Mutate(m Mutation) (*Issue, error) {
 		}
 		next.UpdatedAt = model.Now()
 		next.UpdatedBy = b.identity.Agent
-		next.Session = b.identity.Session
+		// session 은 여기서 건드리지 않는다. 그것은 "누가 마지막에 손댔나"
+		// (updated_by) 가 아니라 "어느 세션이 이 이슈를 쥐고 있나" 이며,
+		// 소유권과 함께 움직여야 --mine 필터가 반납된 이슈를 놓아준다.
 		if err := next.Validate(); err != nil {
 			return nil, err
 		}
 
 		// 4. 객체 생성. parent 는 방금 읽은 old 다.
-		hash, err := b.writeIssueCommit(next, body, m.Event, old)
+		hash, err := b.writeIssueCommitWithMessage(next, body, m.Event, m.Message, old)
 		if err != nil {
 			return nil, err
 		}

@@ -1,8 +1,7 @@
 package cmd
 
 import (
-	"context"
-
+	"github.com/ironpark/toolz/cli/ppwk/internal/board"
 	"github.com/urfave/cli/v3"
 )
 
@@ -23,9 +22,7 @@ func claimCommand() *cli.Command {
 		Usage:     "이슈를 예약한다 (open → claimed)",
 		ArgsUsage: "<id>",
 		Flags:     transitionFlags(),
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("claim")
-		},
+		Action:    action(runTransition(board.ActionClaim)),
 	}
 }
 
@@ -36,9 +33,7 @@ func startCommand() *cli.Command {
 		Usage:     "작업을 시작한다 (open|claimed → working)",
 		ArgsUsage: "<id>",
 		Flags:     transitionFlags(),
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("start")
-		},
+		Action:    action(runTransition(board.ActionStart)),
 	}
 }
 
@@ -49,9 +44,7 @@ func doneCommand() *cli.Command {
 		Usage:     "작업을 완료한다 (working → done)",
 		ArgsUsage: "<id>",
 		Flags:     transitionFlags(),
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("done")
-		},
+		Action:    action(runTransition(board.ActionDone)),
 	}
 }
 
@@ -64,9 +57,7 @@ func blockCommand() *cli.Command {
 		Flags: transitionFlags(
 			&cli.StringFlag{Name: "on", Usage: "차단 원인 이슈 ID"},
 		),
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("block")
-		},
+		Action: action(runTransition(board.ActionBlock)),
 	}
 }
 
@@ -77,9 +68,7 @@ func unblockCommand() *cli.Command {
 		Usage:     "차단을 해제한다 (blocked → working)",
 		ArgsUsage: "<id>",
 		Flags:     transitionFlags(),
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("unblock")
-		},
+		Action:    action(runTransition(board.ActionUnblock)),
 	}
 }
 
@@ -93,9 +82,7 @@ func releaseCommand() *cli.Command {
 			&cli.BoolFlag{Name: "force", Usage: "소유자가 아니어도 강제"},
 			&cli.BoolFlag{Name: "mine", Usage: "현재 세션이 보유한 이슈 전체에 적용"},
 		),
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("release")
-		},
+		Action: action(runTransition(board.ActionRelease)),
 	}
 }
 
@@ -108,8 +95,6 @@ func cancelCommand() *cli.Command {
 		Flags: transitionFlags(
 			&cli.BoolFlag{Name: "force", Usage: "소유자가 아니어도 강제"},
 		),
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("cancel")
-		},
+		Action: action(runTransition(board.ActionCancel)),
 	}
 }
