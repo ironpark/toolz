@@ -23,8 +23,8 @@ func addCommand() *cli.Command {
 			&cli.StringFlag{Name: "phase", Usage: "소속 phase ID"},
 			&cli.IntFlag{Name: "seq", Usage: "phase 내 순번. 생략 시 최대값 + 10"},
 		},
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("add")
+		Action: func(_ context.Context, c *cli.Command) error {
+			return runAdd(newCtx(c))
 		},
 	}
 }
@@ -48,8 +48,8 @@ func listCommand() *cli.Command {
 			&cli.StringFlag{Name: "sort", Usage: "next|id|updated|priority"},
 			&cli.IntFlag{Name: "limit", Usage: "출력 개수 상한"},
 		},
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("list")
+		Action: func(_ context.Context, c *cli.Command) error {
+			return runList(newCtx(c))
 		},
 	}
 }
@@ -60,8 +60,8 @@ func showCommand() *cli.Command {
 		Name:      "show",
 		Usage:     "이슈 하나를 출력한다",
 		ArgsUsage: "<id>",
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("show")
+		Action: func(_ context.Context, c *cli.Command) error {
+			return runShow(newCtx(c))
 		},
 	}
 }

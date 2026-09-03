@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,11 +30,38 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err == nil {
 		return cmd.ExitOK
 	}
-	fmt.Fprintln(stderr, err)
 
+	code := cmd.ExitGeneral
 	var coder cli.ExitCoder
 	if errors.As(err, &coder) {
-		return coder.ExitCode()
+		code = coder.ExitCode()
 	}
-	return cmd.ExitGeneral
+
+	// --json 이면 오류도 같은 봉투에 담는다 (features §0.4).
+	if root.Bool("json") {
+		writeJSONError(stdout, err, code)
+		return code
+	}
+	fmt.Fprintln(stderr, err)
+	return code
+}
+
+// writeJSONError 는 {"ok":false,"error":{...}} 를 낸다.
+func writeJSONError(stdout io.Writer, err error, code int) {
+	kind := "error"
+	var typed *cmd.Error
+	if errors.As(err, &typed) {
+		kind = typed.Kind
+	}
+	payload := map[string]any{
+		"ok": false,
+		"error": map[string]any{
+			"code":    code,
+			"kind":    kind,
+			"message": err.Error(),
+		},
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(payload)
 }

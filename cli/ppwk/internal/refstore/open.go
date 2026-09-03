@@ -97,6 +97,19 @@ func commonDir(dir string) (string, error) {
 	return filepath.Clean(path), nil
 }
 
+// WorktreeRoot 는 작업 트리 최상단의 절대 경로다.
+//
+// 에이전트 문서는 보드 데이터와 달리 tracked 파일이므로 여기에 놓인다.
+func WorktreeRoot(dir string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("작업 트리 최상단을 찾을 수 없습니다 (%s): %w", dir, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // checkDir 은 cmd.Dir 로 쓸 경로가 실제 디렉터리인지 본다.
 func checkDir(dir string) error {
 	info, err := os.Stat(dir)
