@@ -1,10 +1,10 @@
-# paperwork 기능 명세
+# ppwk 기능 명세
 
 완성 시점에 지원해야 하는 명령어와 기능 / v1 범위
 
 버전 5.2 / 2026-09-02
 
-설계: `paperwork-design.md` v5.2 · 구현 계획: `paperwork-implementation.md` v5.2 · E2E: `paperwork-e2e.md` v5.2 · 결정 기록: `paperwork-decisions.md`
+설계: `ppwk-design.md` v5.2 · 구현 계획: `ppwk-implementation.md` v5.2 · E2E: `ppwk-e2e.md` v5.2 · 결정 기록: `ppwk-decisions.md`
 
 ---
 
@@ -28,16 +28,16 @@
 
 ```
 1. --agent 플래그
-2. PAPERWORK_AGENT 환경변수
+2. PPWK_AGENT 환경변수
 3. 도구 감지 (§3.8 층 2)      claude-code:<worktree> / codex:<worktree>
-4. git config paperwork.agent
+4. git config ppwk.agent
 5. <hostname>:<worktree basename>
 ```
 
 ### 0.2.1 세션 ID 결정 순서
 
 ```
-1. PAPERWORK_SESSION 환경변수
+1. PPWK_SESSION 환경변수
 2. CLAUDE_CODE_SESSION_ID 등 도구 세션 ID (§3.8 층 2)
 3. SessionStart 훅이 등록한 세션 (§3.8 층 3)
 4. 현재 프로세스 (단발 실행)
@@ -80,18 +80,18 @@
 
 ## 1. 저장소 관리
 
-### `paperwork init`
+### `ppwk init`
 
 보드를 초기화한다. 저장소당 한 번.
 
 ```
-paperwork init [--hooks] [--force] [--no-agents-md]
+ppwk init [--hooks] [--force] [--no-agents-md]
 ```
 
 수행 내용:
 
 1. `meta/schema` ref 생성 (없으면)
-2. `git config --add log.excludeDecoration refs/paperwork/`
+2. `git config --add log.excludeDecoration refs/ppwk/`
 3. `git config core.filesRefLockTimeout 1000`
 4. `--hooks` 이면 `reference-transaction` hook 설치
 5. `git` 버전 확인 (최소 2.28)
@@ -101,7 +101,7 @@ paperwork init [--hooks] [--force] [--no-agents-md]
 
 ```
 AGENTS.md                              항상 로드되는 진입점 (~50줄)
-docs/paperwork/
+docs/ppwk/
 ├─ query.md            조회 명령
 ├─ authoring.md        이슈 생성·수정
 ├─ states.md           상태와 전이 규칙
@@ -141,12 +141,12 @@ docs/paperwork/
 - `git log --all` 에 이슈 커밋이 섞임 → 별칭 제안
 - `git push --mirror` 가 이슈 내용을 원격에 노출함
 
-### `paperwork doctor`
+### `ppwk doctor`
 
 환경을 점검한다. `init` 이후 문제 진단용.
 
 ```
-paperwork doctor
+ppwk doctor
 ```
 
 점검 항목:
@@ -182,7 +182,7 @@ tool hooks       SessionStart ✓  SessionEnd ✓
 
 각 항목을 OK / WARN / FAIL 로 보고한다. FAIL 이 하나라도 있으면 exit 1.
 
-### `paperwork version`
+### `ppwk version`
 
 CLI 버전, 스키마 버전, git 버전, go-git 버전을 출력한다.
 
@@ -190,10 +190,10 @@ CLI 버전, 스키마 버전, git 버전, go-git 버전을 출력한다.
 
 ## 2. 이슈 생성과 조회
 
-### `paperwork add`
+### `ppwk add`
 
 ```
-paperwork add <title>
+ppwk add <title>
     [--priority high|med|low|none] 기본 med. none 은 next 후보 제외 (백로그)
     [--label <label>]              반복 가능
     [--depends-on <id>]            반복 가능
@@ -211,10 +211,10 @@ paperwork add <title>
 - `--seq` 생략 시 해당 phase 최대값 + 10
 - 자기 자신 의존 거부
 
-### `paperwork list`
+### `ppwk list`
 
 ```
-paperwork list
+ppwk list
     [--status open|claimed|working|blocked|done|cancelled]   반복 가능
     [--priority high|med|low|none]                           반복 가능
     [--owner <agent>]
@@ -234,9 +234,9 @@ paperwork list
 `--priority none` 이 백로그다. 상태는 `open` 이지만 `next` 가 후보로 고르지 않는다. 별도 상태를 두지 않는 이유는 "당분간 안 함" 이 작업의 속성이지 상태가 아니기 때문이다 — 전이 규칙·gate·회수가 전부 그대로 적용된다.
 
 ```bash
-paperwork add "언젠가 리팩터링" --priority none
-paperwork list --priority none              # 백로그 보기
-paperwork edit T042 --priority low          # 꺼내기
+ppwk add "언젠가 리팩터링" --priority none
+ppwk list --priority none              # 백로그 보기
+ppwk edit T042 --priority low          # 꺼내기
 ```
 
 `--mine` 은 현재 대화 세션에서 claim 한 이슈만 보여준다. 세션 ID 가 도구에서 감지된 경우(§0.2.1) 의미 있게 동작한다.
@@ -254,10 +254,10 @@ T005   blocked   agent-b    -     -      migration script
 
 `for-each-ref` 한 번으로 처리한다 (§5.1).
 
-### `paperwork show`
+### `ppwk show`
 
 ```
-paperwork show <id> [--json]
+ppwk show <id> [--json]
 ```
 
 이슈 전체를 출력한다. `archive` 에 있어도 찾는다.
@@ -278,10 +278,10 @@ Updated     2026-08-30 05:40  by agent-a
 <body.md 내용>
 ```
 
-### `paperwork history`
+### `ppwk history`
 
 ```
-paperwork history <id> [-n <count>] [--json]
+ppwk history <id> [-n <count>] [--json]
 ```
 
 commit chain 을 이벤트 순서로 출력한다. subject 가 이벤트명이므로 가공이 거의 없다 (§5.3).
@@ -293,12 +293,12 @@ n1x9  05:12  agent-a  claim: SQLite storage 구현
 c1a2  04:12  agent-a  create: SQLite storage 구현
 ```
 
-### `paperwork edit`
+### `ppwk edit`
 
 메타데이터를 수정한다. 상태는 바꾸지 않는다.
 
 ```
-paperwork edit <id>
+ppwk edit <id>
     [--title <text>]
     [--priority P]
     [--add-label L] [--remove-label L]
@@ -349,12 +349,12 @@ CAS 를 거친다. 다른 에이전트가 동시에 상태를 바꾸면 exit 4.
 
 ## 4. 스케줄링
 
-### `paperwork next`
+### `ppwk next`
 
 에이전트가 실제로 호출하는 유일한 스케줄링 명령이다.
 
 ```
-paperwork next
+ppwk next
     [--claim]              후보를 claim 까지 수행
     [--plan <id>]          특정 plan 으로 제한
     [--label <label>]      capability 필터
@@ -377,10 +377,10 @@ paperwork next
 
 `--claim` 없이 부르면 reap 은 수행하되 배정은 하지 않는다. `--dry-run` 은 reap 도 건너뛰어 **저장소를 전혀 변형하지 않는다.**
 
-### `paperwork internal` (비공개)
+### `ppwk internal` (비공개)
 
 ```
-paperwork internal session-event
+ppwk internal session-event
 ```
 
 도구 훅에서만 호출된다. stdin 의 JSON(`session_id`, `cwd`, `hook_event_name`)을 읽어 `SessionStart` 는 세션을 등록하고 `hook_pid` 를 기록하며, `SessionEnd` 는 **`claimed` 만** `open` 으로 되돌린다. `working` 은 미커밋 작업이 있을 수 있어 건드리지 않는다 (D15).
@@ -389,10 +389,10 @@ paperwork internal session-event
 
 훅에서 실행되므로 **빠르게 끝내고 세션을 막지 않는다.** 알 수 없는 입력이나 오류를 만나면 조용히 exit 0 한다.
 
-### `paperwork reap`
+### `ppwk reap`
 
 ```
-paperwork reap [--dry-run] [--json]
+ppwk reap [--dry-run] [--json]
 ```
 
 죽은 소유자가 붙잡고 있던 이슈를 `open` 으로 되돌린다. 소유자 생존은 잠금으로 판정한다 (§4.5).
@@ -401,13 +401,13 @@ paperwork reap [--dry-run] [--json]
 
 `--dry-run` 은 회수 대상만 보여주고 변경하지 않는다.
 
-### `paperwork agents`
+### `ppwk agents`
 
 ```
-paperwork agents [--json]
+ppwk agents [--json]
 ```
 
-`$GIT_COMMON_DIR/paperwork/locks/` 의 잠금 파일을 읽어 출력한다. ref 가 아니다 (D13).
+`$GIT_COMMON_DIR/ppwk/locks/` 의 잠금 파일을 읽어 출력한다. ref 가 아니다 (D13).
 
 ```
 AGENT      SESSION   WORKTREE   PID     STATUS   HOLDING   FOR
@@ -421,32 +421,32 @@ agent-c    2ea8b730  /repo-c    48512   alive    T009      3h12m
 `FOR` 는 해당 이슈를 보유한 시간이다. **멈춘 프로세스를 사람이 판단하는 근거가 된다.** 잠금 방식은 살아있지만 진전이 없는 프로세스를 자동 회수하지 않으므로, 비정상적으로 긴 보유는 여기서 드러난다.
 
 ```bash
-paperwork release T009 --force    # 사람이 판단해 강제 회수
+ppwk release T009 --force    # 사람이 판단해 강제 회수
 ```
 
 ---
 
 ## 5. plan 과 phase
 
-### `paperwork plan new`
+### `ppwk plan new`
 
 ```
-paperwork plan new <title> [--priority P] [--id <id>]
+ppwk plan new <title> [--priority P] [--id <id>]
 ```
 
-### `paperwork plan phase add`
+### `ppwk plan phase add`
 
 ```
-paperwork plan phase add <plan> <title>
+ppwk plan phase add <plan> <title>
     [--gate all_done|any_done|manual]    기본 all_done
     [--id <phase-id>]
     [--before <phase-id> | --after <phase-id>]
 ```
 
-### `paperwork plan show`
+### `ppwk plan show`
 
 ```
-paperwork plan show <plan> [--json]
+ppwk plan show <plan> [--json]
 ```
 
 진행률과 현재 phase 를 **파생 계산**해서 보여준다. 저장된 값이 아니다 (§3.7.1).
@@ -472,13 +472,13 @@ p3 의 task 는 `status` 가 `open` 이다. `blocked (gate)` 는 **표시상의 
 ### 나머지 plan 명령
 
 ```
-paperwork plan list [--status active|closed|cancelled]
-paperwork plan advance <plan> <phase>     manual gate 개방
-paperwork plan close <plan>
-paperwork plan cancel <plan>
-paperwork plan edit <plan> [--title T] [--priority P]
-paperwork plan phase edit <plan> <phase> [--title T] [--gate G]
-paperwork plan phase remove <plan> <phase>    소속 task 있으면 거부
+ppwk plan list [--status active|closed|cancelled]
+ppwk plan advance <plan> <phase>     manual gate 개방
+ppwk plan close <plan>
+ppwk plan cancel <plan>
+ppwk plan edit <plan> [--title T] [--priority P]
+ppwk plan phase edit <plan> <phase> [--title T] [--gate G]
+ppwk plan phase remove <plan> <phase>    소속 task 있으면 거부
 ```
 
 ---
@@ -487,10 +487,10 @@ paperwork plan phase remove <plan> <phase>    소속 task 있으면 거부
 
 불변 ADR 을 ref 에 저장한다 (§3.9). 상태 머신과 동시성 모델에 영향이 없다.
 
-### `paperwork decide`
+### `ppwk decide`
 
 ```
-paperwork decide <title>
+ppwk decide <title>
     --context <text>              배경
     --option <text>               검토한 선택지. 반복 가능
     --decision <text>             택한 것
@@ -503,16 +503,16 @@ paperwork decide <title>
 
 생성된 ID(`D007`)를 출력한다. **수정 명령이 없다.** 바꾸려면 `--supersedes` 로 새 결정을 만든다.
 
-### `paperwork decisions`
+### `ppwk decisions`
 
 ```
-paperwork decisions                     유효한 것만 (superseded 제외)
-paperwork decisions --all
-paperwork decisions --issue <id>        이슈와 연결된 결정
-paperwork decisions --plan <id>
-paperwork decisions --search <text>     제목·본문 검색
-paperwork decisions show <id>
-paperwork decisions history <id>        supersedes 체인
+ppwk decisions                     유효한 것만 (superseded 제외)
+ppwk decisions --all
+ppwk decisions --issue <id>        이슈와 연결된 결정
+ppwk decisions --plan <id>
+ppwk decisions --search <text>     제목·본문 검색
+ppwk decisions show <id>
+ppwk decisions history <id>        supersedes 체인
 ```
 
 `show` 출력:
@@ -546,7 +546,7 @@ Decisions    D007 저장소는 SQLite
 ### export
 
 ```
-paperwork export --decisions [-o docs/decisions/]
+ppwk export --decisions [-o docs/decisions/]
 ```
 
 결정 하나당 ADR 마크다운 파일 하나를 만든다. 헤더에 생성 시각과 "파생물" 경고가 들어간다. 이 파일들은 평범하게 커밋한다.
@@ -555,10 +555,10 @@ paperwork export --decisions [-o docs/decisions/]
 
 ## 6. 변경 감지
 
-### `paperwork watch`
+### `ppwk watch`
 
 ```
-paperwork watch
+ppwk watch
     [--interval <dur>]     polling 주기, 기본 2s
     [--hook]               hook socket 우선, 실패 시 polling 폴백
     [--filter <prefix>]    특정 ref prefix 만
@@ -568,7 +568,7 @@ paperwork watch
 이벤트 형식:
 
 ```json
-{"ref":"refs/paperwork/issues/T001","old":"abc...","new":"def...","kind":"updated","id":"T001","status":"working"}
+{"ref":"refs/ppwk/issues/T001","old":"abc...","new":"def...","kind":"updated","id":"T001","status":"working"}
 ```
 
 `kind` 는 `created` / `updated` / `deleted`.
@@ -577,12 +577,12 @@ paperwork watch
 
 polling 이 기본이고 hook 은 최적화다. hook 이 없거나 죽어도 정상 동작한다 (§6.1).
 
-### `paperwork hook install / uninstall / status`
+### `ppwk hook install / uninstall / status`
 
 ```
-paperwork hook install [--git] [--agent-tools] [--claude-code] [--codex] [--force]
-paperwork hook uninstall [--git] [--agent-tools]
-paperwork hook status
+ppwk hook install [--git] [--agent-tools] [--claude-code] [--codex] [--force]
+ppwk hook uninstall [--git] [--agent-tools]
+ppwk hook status
 ```
 
 두 종류의 훅을 관리한다. 이름이 겹치므로 구분한다.
@@ -603,7 +603,7 @@ paperwork hook status
 ```
 git hooks
   reference-transaction    installed  /repo/.git/hooks/  executable
-  socket                   /repo/.git/paperwork.sock  no listener
+  socket                   /repo/.git/ppwk.sock  no listener
 
 agent tool hooks
   claude-code              SessionStart ✓  SessionEnd ✓
@@ -616,10 +616,10 @@ agent tool hooks
 
 ## 7. 운영
 
-### `paperwork export`
+### `ppwk export`
 
 ```
-paperwork export
+ppwk export
     [--format json|md|csv]     기본 json
     [--all]                    archive 포함
     [--decisions]              ADR 마크다운 (§5.5)
@@ -629,20 +629,20 @@ paperwork export
 
 **단방향 파생물이다.** 생성된 파일을 편집해도 반영되지 않는다. md/csv 헤더에 생성 시각과 경고를 넣는다.
 
-### `paperwork import`
+### `ppwk import`
 
 ```
-paperwork import <file> [--dry-run] [--format json]
+ppwk import <file> [--dry-run] [--format json]
 ```
 
 `export --format json` 출력을 다시 넣는다. 백업 복원과 초기 이관용이다.
 
 기존 ID 와 충돌하면 기본 거부. `--dry-run` 으로 미리 확인한다. 각 이슈를 개별 CAS 로 넣으므로 부분 실패가 가능하며, 그 경우 어디까지 성공했는지 보고한다.
 
-### `paperwork fsck`
+### `ppwk fsck`
 
 ```
-paperwork fsck [--fix] [--json]
+ppwk fsck [--fix] [--json]
 ```
 
 검사 항목 (§9.3):
@@ -669,20 +669,20 @@ stale .lock 파일 (경고, 자동 삭제 안 함)
 
 `--fix` 는 **trailer 재생성과 archive 이동만** 자동 처리한다. 나머지는 보고만 한다. 판단이 필요한 수정을 도구가 임의로 하지 않는다.
 
-### `paperwork gc`
+### `ppwk gc`
 
 ```
-paperwork gc [--pack-refs] [--dry-run]
+ppwk gc [--pack-refs] [--dry-run]
 ```
 
 `git pack-refs --all` 을 실행하고, archive 크기와 loose ref 개수를 보고한다. 이슈가 수천 개일 때 필요하다 (§9.2).
 
-### `paperwork archive`
+### `ppwk archive`
 
 ```
-paperwork archive <id>            수동 이동
-paperwork archive --sweep         종료 상태인데 issues/ 에 남은 것 일괄 이동
-paperwork unarchive <id>          v1 미지원, 명시적 오류
+ppwk archive <id>            수동 이동
+ppwk archive --sweep         종료 상태인데 issues/ 에 남은 것 일괄 이동
+ppwk unarchive <id>          v1 미지원, 명시적 오류
 ```
 
 평소에는 `done`/`cancel` 이 자동으로 이동하므로 `--sweep` 은 복구용이다.
@@ -691,11 +691,11 @@ paperwork unarchive <id>          v1 미지원, 명시적 오류
 
 ## 8. 에이전트 통합
 
-### 8.0 paperwork 가 하지 않는 것
+### 8.0 ppwk 가 하지 않는 것
 
-**작업 배정과 메시지 전달은 오케스트레이터의 몫이다.** paperwork 는 그 메시지가 가리키는 **공유 상태**만 담당한다.
+**작업 배정과 메시지 전달은 오케스트레이터의 몫이다.** ppwk 는 그 메시지가 가리키는 **공유 상태**만 담당한다.
 
-| | 오케스트레이터 | paperwork |
+| | 오케스트레이터 | ppwk |
 |---|---|---|
 | 누가 무엇을 할지 결정 | 담당 | 관여 안 함 |
 | 에이전트에게 메시지 전달 | 담당 | 관여 안 함 |
@@ -715,14 +715,14 @@ paperwork unarchive <id>          v1 미지원, 명시적 오류
 ```
 사람 → A: "작업1 등록하고 B에게 넘겨"
 
-A:  paperwork add "작업1" --priority high
+A:  ppwk add "작업1" --priority high
     → T001
     [오케스트레이터 메시지 도구] "T001 작업하세요" → B
 
-B:  paperwork show T001        내용 확인
-    paperwork start T001       claim 을 겸한다. 여기서 처음 소유자가 생긴다
+B:  ppwk show T001        내용 확인
+    ppwk start T001       claim 을 겸한다. 여기서 처음 소유자가 생긴다
     ... 작업 ...
-    paperwork done T001
+    ppwk done T001
 ```
 
 메시지는 **포인터**다. 내용은 ref 에 있다. 메시지에 작업 내용을 담으면 상태가 두 곳에 생긴다.
@@ -737,8 +737,8 @@ B:  paperwork show T001        내용 확인
 라벨로 힌트를 남길 수 있으나 선택이다. 상태 모델을 건드리지 않는다.
 
 ```bash
-paperwork add "작업1" --label for:B
-paperwork list --label for:B
+ppwk add "작업1" --label for:B
+ppwk list --label for:B
 ```
 
 ### 8.2 스스로 가져가는 경우
@@ -746,7 +746,7 @@ paperwork list --label for:B
 오케스트레이터가 배정하지 않고 에이전트가 직접 고르게 할 수도 있다.
 
 ```bash
-paperwork next --claim     # 의존성·gate·우선순위를 반영해 하나 선택
+ppwk next --claim     # 의존성·gate·우선순위를 반영해 하나 선택
 ```
 
 대화 중 한 번 호출하는 형태가 일반적이다.
@@ -761,10 +761,10 @@ paperwork next --claim     # 의존성·gate·우선순위를 반영해 하나 �
 ```bash
 # 상시 워커가 필요한 특수한 경우에만
 while true; do
-    id=$(paperwork next --claim --json | jq -r '.data.id // empty')
+    id=$(ppwk next --claim --json | jq -r '.data.id // empty')
     [ -z "$id" ] && sleep 10 && continue
-    paperwork start "$id"
-    do_work "$id" && paperwork done "$id" || paperwork block "$id" --message "$(reason)"
+    ppwk start "$id"
+    do_work "$id" && ppwk done "$id" || ppwk block "$id" --message "$(reason)"
 done
 ```
 
@@ -777,8 +777,8 @@ done
 빠른 회수가 필요하면:
 
 ```bash
-paperwork hook install --agent-tools     # 즉시 감지
-paperwork release --mine                 # 오케스트레이터가 세션 종료 시
+ppwk hook install --agent-tools     # 즉시 감지
+ppwk release --mine                 # 오케스트레이터가 세션 종료 시
 ```
 
 `doctor` 가 훅이 없으면 WARN 한다.
@@ -797,11 +797,11 @@ paperwork release --mine                 # 오케스트레이터가 세션 종�
 **충돌은 첫 상태 변경 명령에서 거부된다.** 별도 초기화 명령이 없어도 검출된다.
 
 ```
-$ paperwork claim T001
+$ ppwk claim T001
 error: worktree /repo-a is in use by claude-code:repo-a (session 7f3a..., pid 48211)
 hint:  git worktree add 로 새 worktree 를 만드세요.
        의도한 구성이라면 --allow-shared-worktree 또는
-       git config paperwork.allowSharedWorktree true 를 쓰세요.
+       git config ppwk.allowSharedWorktree true 를 쓰세요.
 ```
 
 조회 명령(`list`, `show`, `history`, `agents`, `watch`, `export`)은 잠금을 요구하지 않는다. 몇 개든 동시에 실행할 수 있다.
@@ -820,13 +820,13 @@ next --claim 이 exit 0 + 빈 결과  → 할 일 없음
 
 | 변수 | 용도 |
 |---|---|
-| `PAPERWORK_AGENT` | 에이전트 ID |
-| `PAPERWORK_SOCK` | hook socket 경로 override |
-| `PAPERWORK_POLL_INTERVAL` | watch 기본 주기 |
-| `PAPERWORK_LOCK_DIR` | 잠금 디렉터리 override |
-| `PAPERWORK_ACTIVITY_TTL` | `last_activity` 임계값 (기본 8h) |
-| `PAPERWORK_SESSION` | 세션 ID 명시 지정 |
-| `PAPERWORK_EMIT_TIMEOUT` | hook 알림 timeout |
+| `PPWK_AGENT` | 에이전트 ID |
+| `PPWK_SOCK` | hook socket 경로 override |
+| `PPWK_POLL_INTERVAL` | watch 기본 주기 |
+| `PPWK_LOCK_DIR` | 잠금 디렉터리 override |
+| `PPWK_ACTIVITY_TTL` | `last_activity` 임계값 (기본 8h) |
+| `PPWK_SESSION` | 세션 ID 명시 지정 |
+| `PPWK_EMIT_TIMEOUT` | hook 알림 timeout |
 | `NO_COLOR` | 색상 비활성화 (표준 관례) |
 
 ---

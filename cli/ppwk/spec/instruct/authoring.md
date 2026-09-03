@@ -3,7 +3,7 @@
 [← AGENTS.md](../../AGENTS.md)
 
 ```bash
-paperwork add "제목"
+ppwk add "제목"
     --priority high|med|low|none   기본 med. none 은 백로그
     --label backend                반복 가능
     --depends-on T001              반복 가능
@@ -23,13 +23,13 @@ paperwork add "제목"
 `--depends-on` 으로 지정한 이슈가 `done` 이 되어야 후보에 나타납니다.
 
 ```bash
-paperwork add "마이그레이션" --depends-on T001 --depends-on T002
+ppwk add "마이그레이션" --depends-on T001 --depends-on T002
 ```
 
 선행 이슈가 `cancelled` 면 의존은 충족되지 않습니다. 이 경우 의존을 직접 정리하세요.
 
 ```bash
-paperwork edit T005 --remove-depends-on T001
+ppwk edit T005 --remove-depends-on T001
 ```
 
 ## 백로그
@@ -37,16 +37,16 @@ paperwork edit T005 --remove-depends-on T001
 당장 하지 않을 것은 `--priority none` 으로 둡니다. `next` 가 고르지 않지만 목록에는 남습니다.
 
 ```bash
-paperwork add "언젠가 리팩터링" --priority none
-paperwork list --priority none
-paperwork edit T042 --priority low     # 꺼내기
+ppwk add "언젠가 리팩터링" --priority none
+ppwk list --priority none
+ppwk edit T042 --priority low     # 꺼내기
 ```
 
 ## 수정
 
 ```bash
-paperwork edit T001 --title "새 제목" --priority high
-paperwork edit T001 --add-label urgent --remove-label backend
+ppwk edit T001 --title "새 제목" --priority high
+ppwk edit T001 --add-label urgent --remove-label backend
 ```
 
 `edit` 은 메타데이터만 바꾸며 상태는 유지합니다.

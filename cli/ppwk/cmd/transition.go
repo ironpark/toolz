@@ -88,7 +88,7 @@ func releaseCommand() *cli.Command {
 	return &cli.Command{
 		Name:      "release",
 		Usage:     "소유권을 반납한다 (claimed → open)",
-		ArgsUsage: "<id>",
+		ArgsUsage: "[id]", // --mine 이면 생략한다
 		Flags: transitionFlags(
 			&cli.BoolFlag{Name: "force", Usage: "소유자가 아니어도 강제"},
 			&cli.BoolFlag{Name: "mine", Usage: "현재 세션이 보유한 이슈 전체에 적용"},

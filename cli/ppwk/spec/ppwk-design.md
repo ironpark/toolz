@@ -1,10 +1,10 @@
-# paperwork 설계 문서
+# ppwk 설계 문서
 
 Git ref namespace를 이용한 멀티 에이전트 작업 조율 시스템
 
 버전 5.2 (스키마 v1) / 2026-09-02
 
-관련 문서: 결정 기록 `paperwork-decisions.md` · 구현 계획 `paperwork-implementation.md` · 기능 명세 `paperwork-features.md` · E2E 테스트 `paperwork-e2e.md`
+관련 문서: 결정 기록 `ppwk-decisions.md` · 구현 계획 `ppwk-implementation.md` · 기능 명세 `ppwk-features.md` · E2E 테스트 `ppwk-e2e.md`
 
 이 문서는 **현재 상태**만 서술한다. 왜 다른 선택지를 기각했는지는 결정 기록의 `D#` 를 참조한다.
 
@@ -52,7 +52,7 @@ B: show T001 → claim T001 → start → done
 
 메시지는 포인터이고 내용은 ref 에 있다. 따라서 `assign` 류의 명령을 두지 않는다 (D14). 이슈를 `open` 으로 두는 것이 "아무도 받지 않았다" 를 정확히 표현한다.
 
-오케스트레이터는 **세션 종료 시 정리**도 맡는다. B 의 대화가 끝난 것을 오케스트레이터는 알지만 paperwork 는 훅 없이는 늦게 안다 (§3.6). `release --mine` 한 줄이면 된다.
+오케스트레이터는 **세션 종료 시 정리**도 맡는다. B 의 대화가 끝난 것을 오케스트레이터는 알지만 ppwk 는 훅 없이는 늦게 안다 (§3.6). `release --mine` 한 줄이면 된다.
 
 ### 1.4 전제 조건
 
@@ -97,7 +97,7 @@ gc reachability   → 자동 수명 관리
 ### 3.1 ref 레이아웃
 
 ```
-refs/paperwork/
+refs/ppwk/
 ├─ issues/<id>       commit chain — canonical, CAS 대상
 ├─ plans/<plan-id>   commit chain — 계획 구조. 상태를 갖지 않음
 ├─ decisions/<id>    commit chain — 불변 결정 기록 (3.9)
@@ -107,20 +107,20 @@ refs/paperwork/
 
 `phases/`는 없다. phase는 독립적으로 claim되지 않고 수명이 plan에 종속되므로 별도 ref로 뺄 이유가 없다. plan 문서 안의 배열이다 (3.7).
 
-`agents/`도 없다. 에이전트 생존은 런타임 신호이며 `$GIT_COMMON_DIR/paperwork/locks/` 의 파일로 관리한다 (3.6, D13).
+`agents/`도 없다. 에이전트 생존은 런타임 신호이며 `$GIT_COMMON_DIR/ppwk/locks/` 의 파일로 관리한다 (3.6, D13).
 
-`issues/`와 `archive/`를 나누는 이유: 활성 이슈 조회(`for-each-ref refs/paperwork/issues/`)가 닫힌 이슈 수에 비례해 느려지지 않게 하기 위함. 삭제가 아니라 이동이므로 이력은 보존된다.
+`issues/`와 `archive/`를 나누는 이유: 활성 이슈 조회(`for-each-ref refs/ppwk/issues/`)가 닫힌 이슈 수에 비례해 느려지지 않게 하기 위함. 삭제가 아니라 이동이므로 이력은 보존된다.
 
 ### 3.2 이슈 ID
 
-두 가지 전략을 지원하고 `paperwork.idStrategy` 설정으로 고른다.
+두 가지 전략을 지원하고 `ppwk.idStrategy` 설정으로 고른다.
 
 **sequential (기본)** — `T001`, `T002`. 사람이 읽기 쉽다. 채번 자체를 CAS로 처리한다:
 
 ```
 n = 현재 최대 번호 + 1
 loop:
-    update-ref refs/paperwork/issues/T<n> <commit> ""   # create-only
+    update-ref refs/ppwk/issues/T<n> <commit> ""   # create-only
     성공 → n 확정
     실패 → n += 1, 재시도
 ```
@@ -153,9 +153,9 @@ message:
   Agent-Session: 8f3a2c1d
 ```
 
-**subject를 이벤트로 쓴다.** `git log refs/paperwork/issues/T001` 이 그대로 `paperwork history T001` 이 된다. 별도 이력 자료구조가 필요 없다.
+**subject를 이벤트로 쓴다.** `git log refs/ppwk/issues/T001` 이 그대로 `ppwk history T001` 이 된다. 별도 이력 자료구조가 필요 없다.
 
-**trailer에 상태를 복제한다.** 목록 조회를 `for-each-ref` 한 번으로 끝내기 위한 비정규화다. `issue.json`이 진실이고 trailer는 인덱스다. 둘이 어긋나면 `issue.json`을 신뢰하고, `paperwork fsck`가 검출한다.
+**trailer에 상태를 복제한다.** 목록 조회를 `for-each-ref` 한 번으로 끝내기 위한 비정규화다. `issue.json`이 진실이고 trailer는 인덱스다. 둘이 어긋나면 `issue.json`을 신뢰하고, `ppwk fsck`가 검출한다.
 
 ### 3.4 issue.json 스키마
 
@@ -217,7 +217,7 @@ message:
 #### 잠금 파일
 
 ```
-$GIT_COMMON_DIR/paperwork/locks/
+$GIT_COMMON_DIR/ppwk/locks/
 ├─ agent-<name>.lock        에이전트 신원 및 생존 기록
 └─ worktree-<hash>.lock     worktree 배타
 ```
@@ -266,13 +266,13 @@ read-modify-write 가 원자적이므로 두 에이전트가 동시에 같은 wo
 
 **훅이 있으면 즉시, 없으면 임계값.**
 
-기본 임계값은 **8시간** 이며 `PAPERWORK_ACTIVITY_TTL` 로 조정한다. 배정 모델(§1.3)에서는 `start` 후 몇 시간 동안 CLI 호출이 없는 것이 정상이므로, 짧게 잡으면 산 작업을 회수한다. "죽은 작업 방치" 보다 "산 작업 회수" 가 훨씬 나쁜 오류다.
+기본 임계값은 **8시간** 이며 `PPWK_ACTIVITY_TTL` 로 조정한다. 배정 모델(§1.3)에서는 `start` 후 몇 시간 동안 CLI 호출이 없는 것이 정상이므로, 짧게 잡으면 산 작업을 회수한다. "죽은 작업 방치" 보다 "산 작업 회수" 가 훨씬 나쁜 오류다.
 
 따라서 **훅 없는 환경에서 자동 회수는 사실상 하루 단위**다. 그 사이의 정리는 오케스트레이터와 사람의 몫이다.
 
 ```bash
-paperwork release --mine       # 오케스트레이터가 세션 종료 시
-paperwork release T009 --force # 사람이 판단해 회수
+ppwk release --mine       # 오케스트레이터가 세션 종료 시
+ppwk release T009 --force # 사람이 판단해 회수
 ```
 
 `doctor` 는 훅이 없으면 WARN 한다.
@@ -288,11 +288,11 @@ hint       자동 회수가 느립니다. 훅을 설치하거나
 worktree 는 `HEAD` 와 index 를 하나만 가지므로, 두 에이전트가 같은 워킹 디렉터리에서 작업하면 보드는 정확한 채로 **작업 결과가 조용히 손상된다.** 살아있는 다른 세션이 같은 worktree 를 점유하고 있으면 상태 변경 명령을 **거부한다.**
 
 ```
-$ paperwork start T001
+$ ppwk start T001
 error: worktree /repo-a is in use by claude-code:repo-a (session 7f3a..., pid 48211)
 hint:  git worktree add 로 새 worktree 를 만드세요.
        의도한 구성이라면 --allow-shared-worktree 또는
-       git config paperwork.allowSharedWorktree true 를 쓰세요.
+       git config ppwk.allowSharedWorktree true 를 쓰세요.
 ```
 
 조회 명령(`list`, `show`, `history`, `agents`, `watch`, `export`)은 잠금을 요구하지 않는다.
@@ -404,7 +404,7 @@ phase 가 열려 있음 =
 
 task가 하나도 없는 phase는 `all_done`이 공허참으로 즉시 통과한다. 의도와 다를 수 있으므로 fsck가 경고한다.
 
-`manual` gate는 `paperwork plan advance`가 `advanced_phases`에 추가하며, 이것이 plan ref를 쓰는 몇 안 되는 경우다.
+`manual` gate는 `ppwk plan advance`가 `advanced_phases`에 추가하며, 이것이 plan ref를 쓰는 몇 안 되는 경우다.
 
 #### 3.7.6 plan 상태
 
@@ -434,7 +434,7 @@ Claude Code, Codex 같은 도구 안에서 동작할 때, 신원과 세션 경�
 
 #### 층 2 — 환경변수 감지 (훅 불필요)
 
-`paperwork` 실행 시점에 환경을 읽는다. 설정 없이 얻어진다.
+`ppwk` 실행 시점에 환경을 읽는다. 설정 없이 얻어진다.
 
 | 신호 | 얻는 것 |
 |---|---|
@@ -450,7 +450,7 @@ agent-id = claude-code:repo-a          도구 + worktree
 session  = 7f3a...                     실제 대화 세션 UUID
 ```
 
-사람이 `PAPERWORK_AGENT` 를 정할 필요가 없어지고, **같은 대화에서 실행된 모든 명령이 같은 세션으로 묶인다.** §3.6 의 session 비교가 이제 진짜 대화 경계를 반영한다.
+사람이 `PPWK_AGENT` 를 정할 필요가 없어지고, **같은 대화에서 실행된 모든 명령이 같은 세션으로 묶인다.** §3.6 의 session 비교가 이제 진짜 대화 경계를 반영한다.
 
 감지에 실패하면 조용히 넘어가지 않고 폴백을 쓴다: `<hostname>:<worktree basename>` + 현재 프로세스. `doctor` 가 감지 결과를 표시해 사람이 확인할 수 있게 한다.
 
@@ -467,8 +467,8 @@ session  = 7f3a...                     실제 대화 세션 UUID
 stdin 으로 `session_id`, `cwd`, `hook_event_name` 등이 JSON 으로 전달된다.
 
 ```
-SessionStart → paperwork internal session-event   세션 등록, hook_pid 기록
-SessionEnd   → paperwork internal session-event   claimed 만 open 으로
+SessionStart → ppwk internal session-event   세션 등록, hook_pid 기록
+SessionEnd   → ppwk internal session-event   claimed 만 open 으로
 ```
 
 `SessionEnd` 가 `working` 을 건드리지 않는 이유 (D15): 사용자가 도구를 닫았다 다시 열어 같은 작업을 잇는 것은 흔하고, `working` 에는 worktree 의 미커밋 변경이 있다. 반납하면 다른 에이전트가 다른 worktree 에서 처음부터 한다. `working` 은 §3.6 의 생존 판정에 맡긴다.
@@ -543,7 +543,7 @@ ref 가 진실이고 파일은 파생물이다 (§5.4 와 같은 규칙).
 #### 문서 형식
 
 ```
-refs/paperwork/decisions/<id> → commit (사실상 1개)
+refs/ppwk/decisions/<id> → commit (사실상 1개)
 tree: decision.json
 ```
 
@@ -641,8 +641,8 @@ Git object는 content-addressed다. 두 에이전트가 같은 초에, 같은 pa
 
 ```
 start
-update refs/paperwork/archive/T001 <oid> <zero>
-delete refs/paperwork/issues/T001 <oid>
+update refs/ppwk/archive/T001 <oid> <zero>
+delete refs/ppwk/issues/T001 <oid>
 prepare
 commit
 ```
@@ -702,9 +702,9 @@ reap 명령        — 수동 진단·복구용
 이것을 **더 나은 동작**으로 본다. TTL 은 정상적으로 오래 걸리는 작업도 오탐으로 뺏었다. 진짜로 멈춘 프로세스는 사람이 판단할 문제이며, `agents` 명령이 보유 시간을 보여주면 개입할 수 있다.
 
 ```bash
-paperwork agents
+ppwk agents
 # claude-code:repo-c  alive  T009  holding 3h12m     ← 사람이 판단
-paperwork release T009 --force
+ppwk release T009 --force
 ```
 
 #### 환경 제약
@@ -722,7 +722,7 @@ paperwork release T009 --force
 ```bash
 git for-each-ref \
   --format='%(refname:lstrip=3)%09%(trailers:key=Status,valueonly,unfold)%09%(trailers:key=Owner,valueonly,unfold)%09%(trailers:key=Plan,valueonly,unfold)%09%(trailers:key=Phase,valueonly,unfold)%09%(trailers:key=Seq,valueonly,unfold)%09%(subject)' \
-  refs/paperwork/issues/
+  refs/ppwk/issues/
 ```
 
 trailer 비정규화 덕분에 이슈 수와 무관하게 프로세스 하나로 끝난다. `issue.json`을 열지 않는다.
@@ -732,7 +732,7 @@ trailer 비정규화 덕분에 이슈 수와 무관하게 프로세스 하나로
 ### 5.2 상세
 
 ```bash
-git show refs/paperwork/issues/T001:issue.json
+git show refs/ppwk/issues/T001:issue.json
 ```
 
 여러 개를 한 번에 볼 때는 `cat-file --batch`에 `<ref>:issue.json` 을 줄 단위로 밀어넣는다.
@@ -740,7 +740,7 @@ git show refs/paperwork/issues/T001:issue.json
 ### 5.3 이력
 
 ```bash
-git log --format='%h %ad %an %s' --date=iso refs/paperwork/issues/T001
+git log --format='%h %ad %an %s' --date=iso refs/ppwk/issues/T001
 ```
 
 subject가 이벤트명이므로 추가 가공이 거의 필요 없다.
@@ -750,8 +750,8 @@ subject가 이벤트명이므로 추가 가공이 거의 필요 없다.
 파생물이며 단방향이다. 편집해도 반영되지 않는다.
 
 ```bash
-paperwork export --format=json > board.json
-paperwork export --format=md   > BOARD.md
+ppwk export --format=json > board.json
+ppwk export --format=md   > BOARD.md
 ```
 
 생성 파일은 `.gitignore`에 넣는다. 사람이 직접 고치지 못하게 헤더에 생성 시각과 경고를 넣는다.
@@ -773,7 +773,7 @@ paperwork export --format=md   > BOARD.md
 ### 6.2 polling
 
 ```bash
-git for-each-ref --format='%(refname) %(objectname)' refs/paperwork/
+git for-each-ref --format='%(refname) %(objectname)' refs/ppwk/
 ```
 
 결과를 이전 스냅샷과 ref 단위로 비교한다. 파일 mtime이나 inotify를 쓰면 안 된다 — `pack-refs`가 loose 파일을 없애고, reftable backend에는 애초에 ref별 파일이 없다.
@@ -787,13 +787,13 @@ git for-each-ref --format='%(refname) %(objectname)' refs/paperwork/
 - **`committed` 단계만 처리한다.** `preparing`/`prepared`는 아직 확정 전이고, `prepared`에서 non-zero exit은 트랜잭션을 abort시킨다.
 - **prefix 필터를 가장 먼저 한다.** 이 hook은 일반 commit, fetch, rebase, checkout 등 모든 ref 갱신마다 호출된다. 우리 namespace가 아니면 즉시 종료한다.
 - **절대 ref를 쓰지 않는다.** 재귀가 된다.
-- **절대 블로킹하지 않는다.** git 프로세스 안에서 동기 실행되므로 listener가 죽으면 `paperwork done`이 영영 안 끝난다. `timeout`으로 감싸고 실패는 무시한다.
+- **절대 블로킹하지 않는다.** git 프로세스 안에서 동기 실행되므로 listener가 죽으면 `ppwk done`이 영영 안 끝난다. `timeout`으로 감싸고 실패는 무시한다.
 - **SHA-1과 SHA-256 zero OID를 모두 비교한다.** 40자리만 보면 SHA-256 저장소에서 created/deleted 판정이 전부 틀린다.
 
 출력은 줄당 JSON 하나:
 
 ```json
-{"ref":"refs/paperwork/issues/T001","old":"abc...","new":"def...","kind":"updated"}
+{"ref":"refs/ppwk/issues/T001","old":"abc...","new":"def...","kind":"updated"}
 ```
 
 `core.hooksPath`가 전역으로 설정되어 있으면 `$GIT_COMMON_DIR/hooks`의 hook이 무시된다. `init`이 이를 감지해 경고한다.
@@ -805,35 +805,35 @@ git for-each-ref --format='%(refname) %(objectname)' refs/paperwork/
 ### 7.1 명령
 
 ```
-paperwork init [--hooks]
-paperwork add <title> [--priority P] [--label L] [--depends-on ID]
+ppwk init [--hooks]
+ppwk add <title> [--priority P] [--label L] [--depends-on ID]
                         [--plan P01 --phase p2 [--seq N]]
-paperwork list [--status S] [--owner A] [--plan P] [--json]
-paperwork show <id> [--json]
-paperwork history <id>
+ppwk list [--status S] [--owner A] [--plan P] [--json]
+ppwk show <id> [--json]
+ppwk history <id>
 
-paperwork claim <id>          open      → claimed
-paperwork start <id>          claimed   → working
-paperwork done <id>           working   → done      (+ archive)
-paperwork block <id> <on>     working   → blocked
-paperwork unblock <id>        blocked   → working
-paperwork release <id>        claimed   → open
-paperwork cancel <id>         any       → cancelled (+ archive)
+ppwk claim <id>          open      → claimed
+ppwk start <id>          claimed   → working
+ppwk done <id>           working   → done      (+ archive)
+ppwk block <id> <on>     working   → blocked
+ppwk unblock <id>        blocked   → working
+ppwk release <id>        claimed   → open
+ppwk cancel <id>         any       → cancelled (+ archive)
 
-paperwork next [--claim]      다음 작업 선택
-paperwork reap                  죽은 소유자의 이슈 회수 (수동·진단용)
-paperwork agents                에이전트 생존 및 보유 현황 (잠금 파일 기반)
-paperwork watch               변경 스트림
-paperwork export [--format F]
-paperwork fsck [--fix]
+ppwk next [--claim]      다음 작업 선택
+ppwk reap                  죽은 소유자의 이슈 회수 (수동·진단용)
+ppwk agents                에이전트 생존 및 보유 현황 (잠금 파일 기반)
+ppwk watch               변경 스트림
+ppwk export [--format F]
+ppwk fsck [--fix]
 
-paperwork plan new <title> [--priority P]
-paperwork plan phase add <plan> <title> [--gate all_done|any_done|manual]
-paperwork plan show <plan>
-paperwork plan list
-paperwork plan advance <plan> <phase>     manual gate 개방
-paperwork plan close <plan>
-paperwork plan cancel <plan>
+ppwk plan new <title> [--priority P]
+ppwk plan phase add <plan> <title> [--gate all_done|any_done|manual]
+ppwk plan show <plan>
+ppwk plan list
+ppwk plan advance <plan> <phase>     manual gate 개방
+ppwk plan close <plan>
+ppwk plan cancel <plan>
 ```
 
 #### plan show 출력
@@ -909,13 +909,13 @@ CAS 실패 시 재시도가 아니라 **다음 후보로 넘어가는 것**이 �
 
 ```
 GIT_AUTHOR_NAME=agent-b
-GIT_AUTHOR_EMAIL=agent-b+8f3a2c1d@paperwork.local
+GIT_AUTHOR_EMAIL=agent-b+8f3a2c1d@ppwk.local
 GIT_COMMITTER_NAME / GIT_COMMITTER_EMAIL 동일
 ```
 
 `commit.gpgsign`이 켜져 있으면 `commit-tree`가 서명을 시도해 느려지거나 실패한다. 호출 시 `git -c commit.gpgsign=false` 로 끈다.
 
-에이전트 ID는 `PAPERWORK_AGENT` 환경변수 → `paperwork.agent` 설정 → `hostname:worktree basename` 순으로 결정한다.
+에이전트 ID는 `PPWK_AGENT` 환경변수 → `ppwk.agent` 설정 → `hostname:worktree basename` 순으로 결정한다.
 
 ---
 
@@ -923,7 +923,7 @@ GIT_COMMITTER_NAME / GIT_COMMITTER_EMAIL 동일
 
 ```
 1. meta/schema ref 생성 (없으면)
-2. git config --add log.excludeDecoration refs/paperwork/
+2. git config --add log.excludeDecoration refs/ppwk/
 3. git config core.filesRefLockTimeout 1000
 4. --hooks 이면:
      core.hooksPath 확인 → 설정돼 있으면 경고하고 그쪽에 설치
@@ -937,7 +937,7 @@ GIT_COMMITTER_NAME / GIT_COMMITTER_EMAIL 동일
 `log.excludeDecoration`은 **데코레이션 표시만** 지운다. 커밋 자체를 빼려면 사용자가 `--exclude`를 써야 하므로 별칭을 제안한다:
 
 ```bash
-git config alias.la "log --exclude=refs/paperwork/* --all"
+git config alias.la "log --exclude=refs/ppwk/* --all"
 ```
 
 ---
@@ -964,7 +964,7 @@ git config alias.la "log --exclude=refs/paperwork/* --all"
 
 ### 9.3 fsck
 
-`paperwork fsck`가 검사할 것:
+`ppwk fsck`가 검사할 것:
 
 - trailer의 `Status`와 `issue.json`의 `status` 불일치
 - `depends_on`이 존재하지 않는 ID를 가리킴
@@ -1071,8 +1071,8 @@ git config alias.la "log --exclude=refs/paperwork/* --all"
 같은 데이터 모델이 그대로 올라간다. 이슈 chain은 항상 fast-forward이므로 **원격의 non-fast-forward reject = 원격 CAS 실패** 로 해석하면 된다.
 
 ```bash
-git config --add remote.origin.push  'refs/paperwork/issues/*:refs/paperwork/issues/*'
-git config --add remote.origin.fetch '+refs/paperwork/issues/*:refs/paperwork/issues/*'
+git config --add remote.origin.push  'refs/ppwk/issues/*:refs/ppwk/issues/*'
+git config --add remote.origin.fetch '+refs/ppwk/issues/*:refs/ppwk/issues/*'
 ```
 
 추가로 필요한 것:
@@ -1082,7 +1082,7 @@ git config --add remote.origin.fetch '+refs/paperwork/issues/*:refs/paperwork/is
   - claim: 서버에 먼저 도달한 쪽 승
   - 그 외 필드: `updated_at` 최신 승
   - 병합 결과는 두 부모를 갖는 merge commit
-- 잠금 파일은 머신 경계를 넘지 못하므로 이 단계에서 비로소 `refs/paperwork/agents/` 를 추가한다 (D13). TTL 이 다시 필요해진다
+- 잠금 파일은 머신 경계를 넘지 못하므로 이 단계에서 비로소 `refs/ppwk/agents/` 를 추가한다 (D13). TTL 이 다시 필요해진다
 
 **v1에서는 이 전부를 구현하지 않는다.** 단일 `$GIT_COMMON_DIR` 전제를 명시하고, 다른 clone에서 실행하면 경고한다.
 
@@ -1090,7 +1090,7 @@ git config --add remote.origin.fetch '+refs/paperwork/issues/*:refs/paperwork/is
 
 ## 13. 구현 순서
 
-단계별 상세 계획, 각 단계의 통과 조건과 엣지 케이스는 별도 문서 `paperwork-implementation.md` 를 따른다. 아래는 순서 요약이다.
+단계별 상세 계획, 각 단계의 통과 조건과 엣지 케이스는 별도 문서 `ppwk-implementation.md` 를 따른다. 아래는 순서 요약이다.
 
 0. `RefStore` 인터페이스 + `ExecRefStore` + `classifyRefError` (14.5, 14.6)
 1. `init`, `add`, `list`, `show` — 읽기/쓰기 기본 (CAS 없이 단일 에이전트)
@@ -1232,7 +1232,7 @@ ref update  → exec    git update-ref <ref> <new> <old>
 ### 14.8 패키지 구조
 
 ```
-cmd/paperwork/       CLI 진입점 (cobra)
+cmd/ppwk/       CLI 진입점 (cobra)
 internal/board/      도메인 로직: 상태 전이, gate, next 알고리즘
 internal/refstore/   RefStore 인터페이스 + ExecRefStore
 internal/model/      Issue, Plan, Decision 스키마 + JSON

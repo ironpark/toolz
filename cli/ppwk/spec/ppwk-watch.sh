@@ -1,16 +1,16 @@
 #!/bin/sh
 #
-# paperwork-watch — install the hook, then listen for issue changes.
+# ppwk-watch — install the hook, then listen for issue changes.
 #
-#   paperwork-watch install    # set up hook + config
-#   paperwork-watch listen     # print change events as they happen
+#   ppwk-watch install    # set up hook + config
+#   ppwk-watch listen     # print change events as they happen
 #
 # The listener is the ONLY long-lived process. The hook itself stays dumb.
 
 set -e
 
 COMMON="$(git rev-parse --path-format=absolute --git-common-dir)"
-SOCK="$COMMON/paperwork.sock"
+SOCK="$COMMON/ppwk.sock"
 
 cmd_install() {
 	hp="$(git config --get core.hooksPath || true)"
@@ -30,8 +30,8 @@ cmd_install() {
 	cp "$(dirname "$0")/reference-transaction" "$dest/reference-transaction"
 	chmod +x "$dest/reference-transaction"
 
-	# Keep paperwork refs out of `git log` decoration noise.
-	git config --add log.excludeDecoration refs/paperwork/
+	# Keep ppwk refs out of `git log` decoration noise.
+	git config --add log.excludeDecoration refs/ppwk/
 
 	echo "installed: $dest/reference-transaction"
 	echo "socket:    $SOCK"
@@ -50,10 +50,10 @@ cmd_listen() {
 # Polling fallback. Correct even when the hook is absent, gc has packed the
 # refs, or the reftable backend is in use — none of which expose ref files.
 cmd_poll() {
-	interval="${PAPERWORK_POLL_INTERVAL:-2}"
+	interval="${PPWK_POLL_INTERVAL:-2}"
 	prev=""
 	while :; do
-		cur="$(git for-each-ref --format='%(refname) %(objectname)' refs/paperwork/)"
+		cur="$(git for-each-ref --format='%(refname) %(objectname)' refs/ppwk/)"
 		if [ "$cur" != "$prev" ] && [ -n "$prev" ]; then
 			printf '%s\n' "$cur" | diff - <(printf '%s\n' "$prev") >/dev/null 2>&1 || {
 				printf '%s\n' "$cur" | comm -23 - <(printf '%s\n' "$prev" | sort) 2>/dev/null ||

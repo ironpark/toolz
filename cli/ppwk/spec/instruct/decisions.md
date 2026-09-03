@@ -7,7 +7,7 @@
 ## 기록
 
 ```bash
-paperwork decide "저장소는 SQLite" \
+ppwk decide "저장소는 SQLite" \
     --context "단일 머신, 동시 쓰기 적음" \
     --option SQLite --option PostgreSQL \
     --decision SQLite \
@@ -21,10 +21,10 @@ paperwork decide "저장소는 SQLite" \
 ## 조회
 
 ```bash
-paperwork decisions                  # 유효한 것만
-paperwork decisions --issue T001     # 이 이슈와 관련된 결정
-paperwork decisions --search sqlite
-paperwork decisions show D007
+ppwk decisions                  # 유효한 것만
+ppwk decisions --issue T001     # 이 이슈와 관련된 결정
+ppwk decisions --search sqlite
+ppwk decisions show D007
 ```
 
 **작업을 시작하기 전에 관련 결정을 확인하세요.** 세션이 바뀌어도 같은 논의를 반복하지 않게 됩니다.
@@ -34,7 +34,7 @@ paperwork decisions show D007
 결정은 수정할 수 없습니다. 바뀌면 새 결정으로 대체합니다.
 
 ```bash
-paperwork decide "저장소는 PostgreSQL" --supersedes D007 --context "동시 쓰기가 늘어남" ...
+ppwk decide "저장소는 PostgreSQL" --supersedes D007 --context "동시 쓰기가 늘어남" ...
 # → D012
 ```
 
@@ -51,7 +51,7 @@ paperwork decide "저장소는 PostgreSQL" --supersedes D007 --context "동시 �
 ## 저장소에 남기기
 
 ```bash
-paperwork export --decisions -o docs/decisions/
+ppwk export --decisions -o docs/decisions/
 ```
 
-ADR 마크다운 파일이 생성됩니다. 이건 평범하게 커밋하세요. 원본은 여전히 `paperwork` 안에 있고, 파일은 파생물입니다.
+ADR 마크다운 파일이 생성됩니다. 이건 평범하게 커밋하세요. 원본은 여전히 `ppwk` 안에 있고, 파일은 파생물입니다.

@@ -4,16 +4,16 @@
 
 ## 보드 데이터의 위치
 
-이슈는 `refs/paperwork/*` 에 저장되며 소스 커밋 히스토리와 분리됩니다.
+이슈는 `refs/ppwk/*` 에 저장되며 소스 커밋 히스토리와 분리됩니다.
 
 ```
-refs/paperwork/
+refs/ppwk/
 ├─ issues/<id>       활성 이슈
 ├─ plans/<id>        계획
 └─ archive/<id>      종료된 이슈
 ```
 
-에이전트 생존 정보는 ref 가 아니라 `$GIT_COMMON_DIR/paperwork/locks/` 의 파일입니다. 런타임 신호라 공유 저장소에 둘 이유가 없고, 이 디렉터리도 모든 worktree 가 공유합니다.
+에이전트 생존 정보는 ref 가 아니라 `$GIT_COMMON_DIR/ppwk/locks/` 의 파일입니다. 런타임 신호라 공유 저장소에 둘 이유가 없고, 이 디렉터리도 모든 worktree 가 공유합니다.
 
 결과적으로:
 
@@ -31,13 +31,13 @@ refs/paperwork/
 `--all` 은 모든 ref 를 포함하므로 이슈 커밋까지 나옵니다. 소스 히스토리만 보려면:
 
 ```bash
-git log --exclude='refs/paperwork/*' --all
+git log --exclude='refs/ppwk/*' --all
 ```
 
 `init` 이 아래 별칭을 제안합니다.
 
 ```bash
-git config alias.la "log --exclude=refs/paperwork/* --all"
+git config alias.la "log --exclude=refs/ppwk/* --all"
 ```
 
 ## 원격 공유
@@ -49,9 +49,9 @@ git config alias.la "log --exclude=refs/paperwork/* --all"
 의도적으로 동기화하려면 refspec 을 설정에 두는 편이 안전합니다.
 
 ```bash
-git config --add remote.origin.push 'refs/paperwork/*:refs/paperwork/*'
+git config --add remote.origin.push 'refs/ppwk/*:refs/ppwk/*'
 ```
 
 ## 직접 조작을 피하는 이유
 
-`git update-ref` 를 손으로 부르면 compare-and-swap 규약을 우회하게 되어 다른 에이전트의 변경을 덮어쓸 수 있습니다. 상태 변경은 `paperwork` 명령으로 하세요.
+`git update-ref` 를 손으로 부르면 compare-and-swap 규약을 우회하게 되어 다른 에이전트의 변경을 덮어쓸 수 있습니다. 상태 변경은 `ppwk` 명령으로 하세요.

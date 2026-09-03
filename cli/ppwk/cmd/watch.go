@@ -18,7 +18,7 @@ func watchCommand() *cli.Command {
 				Name:    "interval",
 				Value:   2 * time.Second,
 				Usage:   "polling 주기",
-				Sources: cli.EnvVars("PAPERWORK_POLL_INTERVAL"),
+				Sources: cli.EnvVars("PPWK_POLL_INTERVAL"),
 			},
 			&cli.BoolFlag{Name: "hook", Usage: "hook socket 우선, 실패 시 polling 폴백"},
 			&cli.StringFlag{Name: "filter", Usage: "특정 ref prefix 만"},

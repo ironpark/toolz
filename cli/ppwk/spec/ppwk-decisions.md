@@ -1,4 +1,4 @@
-# paperwork 설계 결정 기록
+# ppwk 설계 결정 기록
 
 설계 문서에서 "왜 X 가 아닌가" 를 분리한 것이다. 설계 문서는 현재 상태만 서술하고, 근거가 필요하면 여기의 번호를 참조한다.
 
@@ -12,7 +12,7 @@
 
 **검토** — tracked `TASKS.json`(브랜치마다 갈림), 전용 브랜치(checkout·conflict), `git notes`(단일 ref 경쟁, commit 종속), SQLite(Git 외부 상태).
 
-**결정** — `refs/paperwork/*`. 모든 worktree 가 `$GIT_COMMON_DIR` 를 공유하므로 fetch 없이 즉시 보이고, 브랜치와 직교한다.
+**결정** — `refs/ppwk/*`. 모든 worktree 가 `$GIT_COMMON_DIR` 를 공유하므로 fetch 없이 즉시 보이고, 브랜치와 직교한다.
 
 **결과** — `git log --all` 에 이슈 커밋이 섞인다. `--exclude` 로 완화만 가능.
 
@@ -22,7 +22,7 @@
 
 **맥락** — 여러 에이전트가 서로 다른 이슈를 동시에 갱신한다.
 
-**결정** — `refs/paperwork/issues/<id>` 가 commit 을 가리키고, parent 체인이 이력이다. 이슈마다 ref 가 다르므로 경쟁이 분산된다.
+**결정** — `refs/ppwk/issues/<id>` 가 commit 을 가리키고, parent 체인이 이력이다. 이슈마다 ref 가 다르므로 경쟁이 분산된다.
 
 **결과** — `git log <ref>` 가 곧 `history`. 별도 이력 구조가 없다.
 
@@ -138,9 +138,9 @@
 
 ## D13. lease ref 없음
 
-**맥락** — `refs/paperwork/agents/<name>` 을 "다른 worktree 에서 현황을 보기 위해" 두었다.
+**맥락** — `refs/ppwk/agents/<name>` 을 "다른 worktree 에서 현황을 보기 위해" 두었다.
 
-**검토** — 잠금 파일이 `$GIT_COMMON_DIR/paperwork/locks/` 에 있어 이미 모든 worktree 가 읽는다. 같은 정보를 두 곳에 쓰고 있었고, "런타임 생존 신호는 데이터가 아니다" 원칙과 어긋난다.
+**검토** — 잠금 파일이 `$GIT_COMMON_DIR/ppwk/locks/` 에 있어 이미 모든 worktree 가 읽는다. 같은 정보를 두 곳에 쓰고 있었고, "런타임 생존 신호는 데이터가 아니다" 원칙과 어긋난다.
 
 **결정** — ref 를 없애고 `agents` 명령이 잠금 파일을 직접 읽는다.
 
@@ -186,7 +186,7 @@
 
 **검토** — 이슈에 `--label decision` 으로 대신하기. 동작은 하지만 불변성·supersede 연결·전용 export 가 없다. 결정은 상태가 전이하지 않으므로 이슈와 성질이 다르다.
 
-**결정** — `refs/paperwork/decisions/` 에 불변 ADR. `edit` 없음, `--supersedes` 로 대체. 엣지는 결정 → 이슈 한 방향. 상태 머신 없음. `export --decisions` 로 tracked 파일을 파생.
+**결정** — `refs/ppwk/decisions/` 에 불변 ADR. `edit` 없음, `--supersedes` 로 대체. 엣지는 결정 → 이슈 한 방향. 상태 머신 없음. `export --decisions` 로 tracked 파일을 파생.
 
 **결과** — `show <issue>` 가 연결된 결정을 표시해 세션 간 논의 반복을 막는다. 시금석: 이 파일의 D1~D17 을 `decide` 로 다시 기록할 수 있어야 한다.
 

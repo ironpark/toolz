@@ -1,10 +1,10 @@
-# paperwork E2E 테스트 명세
+# ppwk E2E 테스트 명세
 
 실제 저장소·실제 프로세스·실제 `git` 바이너리 기준
 
 버전 5.2 / 2026-09-02
 
-설계: `paperwork-design.md` v5.2 · 구현: `paperwork-implementation.md` v5.2 · 기능: `paperwork-features.md` v5.2
+설계: `ppwk-design.md` v5.2 · 구현: `ppwk-implementation.md` v5.2 · 기능: `ppwk-features.md` v5.2
 
 ---
 
@@ -16,7 +16,7 @@
 
 | | 단위/통합 테스트 | E2E (이 문서) |
 |---|---|---|
-| 대상 | Go 함수, 패키지 | 빌드된 `paperwork` 바이너리 |
+| 대상 | Go 함수, 패키지 | 빌드된 `ppwk` 바이너리 |
 | 저장소 | 임시, 최소 | 실제 worktree 다중 구성 |
 | 동시성 | goroutine 또는 소수 프로세스 | 실제 에이전트 프로세스 |
 | 검증 | 반환값 | stdout/stderr/exit code + `git` 로 직접 확인 |
@@ -28,7 +28,7 @@
 
 각 시나리오는 두 층에서 확인한다.
 
-1. **CLI 층** — `paperwork list --json` 등의 출력
+1. **CLI 층** — `ppwk list --json` 등의 출력
 2. **git 층** — `git for-each-ref`, `git cat-file`, `git log` 로 저장소 상태를 직접 확인
 
 CLI 가 거짓말을 해도 git 층이 잡는다. 특히 오염 검사(§7)는 반드시 git 층에서 한다.
@@ -43,7 +43,7 @@ CLI 가 거짓말을 해도 git 층이 잡는다. 특히 오염 검사(§7)는 �
 newFixture(t) *Fixture
     임시 디렉터리에 저장소 생성
     초기 commit 1개 (빈 저장소는 HEAD 가 없어 동작이 다름)
-    paperwork init 실행
+    ppwk init 실행
     t.Cleanup 으로 정리
 
 f.AddWorktree(name, branch) *Worktree
@@ -73,7 +73,7 @@ E2E 는 flake 가 나기 쉽다. 다음을 통제한다.
 
 | 요소 | 방법 |
 |---|---|
-| 시간 | 훅 경로는 대기가 없다. last_activity 경로는 PAPERWORK_ACTIVITY_TTL 로 축소 |
+| 시간 | 훅 경로는 대기가 없다. last_activity 경로는 PPWK_ACTIVITY_TTL 로 축소 |
 | 랜덤 | 세션 nonce 는 랜덤 유지 (§4.3 목적) — 로그에 기록 |
 | 순서 | 동시성 테스트는 결과의 **집합**을 검증. 순서 아님 |
 | 대기 | `sleep` 금지. 조건 폴링 헬퍼 `waitFor(cond, timeout)` |
@@ -108,8 +108,8 @@ init → add → list → claim → start → done → archive 확인
 
 ```
 CLI: 각 단계에서 list/show 의 status 가 기대값
-git: refs/paperwork/issues/T001 이 done 후 사라짐
-git: refs/paperwork/archive/T001 이 존재
+git: refs/ppwk/issues/T001 이 done 후 사라짐
+git: refs/ppwk/archive/T001 이 존재
 git: git log <ref> 가 create/claim/start/done 4개 commit
 git: 각 commit 의 author 가 agent id
 git: commit message trailer 의 Status 가 issue.json 과 일치
@@ -196,7 +196,7 @@ git diff main feature/foo 에 이슈 관련 변화 없음
 
 ```
 이슈 1개, 에이전트 16개를 동시에 spawn
-전원이 paperwork claim T001 실행
+전원이 ppwk claim T001 실행
 ```
 
 검증:
@@ -414,7 +414,7 @@ T001 → working 유지 (미커밋 작업 보호)
 검증:
 
 ```
-A: PAPERWORK_ACTIVITY_TTL(테스트에서 축소) 경과 후 회수
+A: PPWK_ACTIVITY_TTL(테스트에서 축소) 경과 후 회수
 B: 즉시 회수
 두 구성 모두 최종 상태가 동일
 doctor 가 각 구성의 판정 근거를 정확히 표시
@@ -531,7 +531,7 @@ plan 1개, 같은 phase 에 task 10개
 
 ```
 중복 배정 0건
-git: refs/paperwork/plans/P01 의 OID 가 시작과 끝이 동일
+git: refs/ppwk/plans/P01 의 OID 가 시작과 끝이 동일
 ```
 
 **plan ref 쓰기 0회가 핵심이다** (§3.7.1). plan 에 진행률 필드를 추가하면 반드시 실패한다.
@@ -799,7 +799,7 @@ SessionStart 실행 시간이 상한 이내
 
 ```
 git status --porcelain 이 빈 출력
-    (단 init 직후의 AGENTS.md 와 docs/paperwork/*.md 는 예외 —
+    (단 init 직후의 AGENTS.md 와 docs/ppwk/*.md 는 예외 —
      untracked 로 나타난다. E2E 픽스처는 init 후 이들을 커밋하고
      베이스라인을 잡는다)
 git log --format=%an <branch> 에 에이전트 ID 없음
@@ -818,7 +818,7 @@ bare 원격 생성, git push (기본 refspec)
 검증:
 
 ```
-원격에 refs/paperwork/* 없음
+원격에 refs/ppwk/* 없음
 git clone 한 사본에도 없음
 ```
 
@@ -829,7 +829,7 @@ git push --mirror 수행
 검증:
 
 ```
-원격에 refs/paperwork/* 존재 (경고 문구의 사실 확인)
+원격에 refs/ppwk/* 존재 (경고 문구의 사실 확인)
 ```
 
 두 번째는 "안 되어야 한다" 가 아니라 **문서의 경고가 사실인지** 확인하는 것이다 (§9.1).

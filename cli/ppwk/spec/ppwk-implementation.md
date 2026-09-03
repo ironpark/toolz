@@ -1,8 +1,8 @@
-# paperwork 구현 계획
+# ppwk 구현 계획
 
-설계 문서 `paperwork-design.md` v5.2 기준 / Go + go-git 하이브리드
+설계 문서 `ppwk-design.md` v5.2 기준 / Go + go-git 하이브리드
 
-완성 시점의 명령어와 기능 범위는 `paperwork-features.md`, 바이너리 수준 검증은 `paperwork-e2e.md` 참조
+완성 시점의 명령어와 기능 범위는 `ppwk-features.md`, 바이너리 수준 검증은 `ppwk-e2e.md` 참조
 
 버전 5.2 / 2026-09-02
 
@@ -134,7 +134,7 @@ type RefStore interface {
 - go-git 으로 blob/tree/commit 생성 (§14.7)
 - commit message 조립: subject + trailer 블록 (§3.3)
 - trailer 파싱
-- `paperwork init` (§8)
+- `ppwk init` (§8)
 - 읽기 전용 `list`, `show` — CAS 없이, 단일 프로세스 가정
 
 ### 범위 밖
@@ -153,7 +153,7 @@ type RefStore interface {
 [T1.7] init 이 log.excludeDecoration, core.filesRefLockTimeout 설정
 [T1.8] init 두 번 실행해도 안전 (멱등)
 [T1.9] core.hooksPath 설정된 상태에서 init → 경고 출력
-[T1.12] init 이 AGENTS.md + docs/paperwork/*.md 전부 생성
+[T1.12] init 이 AGENTS.md + docs/ppwk/*.md 전부 생성
 [T1.13] 기존 파일은 덮어쓰지 않음 (파일 단위 판단)
             일부만 존재하면 없는 것만 생성
 [T1.14] --no-agents-md 로 전체 생성 건너뜀
@@ -203,7 +203,7 @@ F1.1 의 불변식은 "정확한 파싱" 이 아니라 **"자기가 만든 것�
 ### Exit criteria
 
 - T1.1~T1.11 통과
-- `paperwork init && paperwork add "x" && paperwork list` 가 동작
+- `ppwk init && ppwk add "x" && ppwk list` 가 동작
 - `git status` 가 clean, `git log <branch>` 에 변화 없음 (§11.5)
 
 ---
@@ -375,8 +375,8 @@ heartbeat, 데몬, 세션 관리 명령. **상시 프로세스와 사용자 대�
 [T4.10] 조회 명령(list/show/watch)은 잠금 없이 병행 가능
 [T4.11] N개 프로세스가 동시 reap → 정확히 1회만 회수
 [T4.12] 회수 대상이 없으면 ref 쓰기 0회
-[T4.13] 임계값 조정(PAPERWORK_ACTIVITY_TTL)이 반영됨
-[T4.14] refs/paperwork/agents/ 가 존재하지 않음
+[T4.13] 임계값 조정(PPWK_ACTIVITY_TTL)이 반영됨
+[T4.14] refs/ppwk/agents/ 가 존재하지 않음
            (D13 재도입 방지. agents 명령은 잠금 파일만 읽는다)
 [T4.15] 생존 판정 5단계가 각각 정확히 동작 (§3.6 표, 케이스당 1개)
 [T4.16] last_activity 가 임계값 이내면 생존, 초과면 사망
@@ -400,8 +400,8 @@ heartbeat, 데몬, 세션 관리 명령. **상시 프로세스와 사용자 대�
 [T4.21] CLAUDECODE 설정 시 agent-id 가 claude-code:<worktree>
 [T4.22] CODEX_* 설정 시 agent-id 가 codex:<worktree>
 [T4.23] 감지 신호가 전무하면 <hostname>:<worktree> 폴백
-[T4.24] PAPERWORK_AGENT 가 감지보다 우선
-[T4.25] PAPERWORK_SESSION 이 도구 세션 ID 보다 우선
+[T4.24] PPWK_AGENT 가 감지보다 우선
+[T4.25] PPWK_SESSION 이 도구 세션 ID 보다 우선
 [T4.26] 같은 세션 ID 로 실행된 여러 명령이 같은 세션으로 묶임
 [T4.27] doctor 가 감지 근거(환경변수 이름)를 함께 표시
 ```
@@ -720,7 +720,7 @@ F5.2 는 겉보기에 사소하지만, 비일관 비교자는 **정렬 결과가
 
 ### 목표
 
-불변 ADR 을 `refs/paperwork/decisions/` 에 저장 (§3.9).
+불변 ADR 을 `refs/ppwk/decisions/` 에 저장 (§3.9).
 
 - `decide`, `decisions list/show/history/--search`
 - trailer 비정규화 (`Title`, `Supersedes`, `Issues`)
@@ -772,7 +772,7 @@ F5.2 는 겉보기에 사소하지만, 비일관 비교자는 **정렬 결과가
 ### Exit criteria
 
 - T12.1~T12.12 통과
-- **이 프로젝트의 `paperwork-decisions.md` D1~D16 을 `decide` 로 다시 기록할 수 있음**
+- **이 프로젝트의 `ppwk-decisions.md` D1~D16 을 `decide` 로 다시 기록할 수 있음**
   - D8 → D9 → D11 의 폐기 체인이 `--supersedes` 로 표현됨
   - D10 (기각) 이 표현됨 — 기각도 결정이다
 

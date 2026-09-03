@@ -99,7 +99,7 @@ func globalFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name:    "agent",
 			Usage:   "에이전트 신원 override",
-			Sources: cli.EnvVars("PAPERWORK_AGENT"),
+			Sources: cli.EnvVars("PPWK_AGENT"),
 		},
 		&cli.StringFlag{
 			Name:  "C",

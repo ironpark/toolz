@@ -5,8 +5,8 @@
 계획은 이슈를 단계(phase)로 묶어 순서를 강제합니다.
 
 ```bash
-paperwork plan list
-paperwork plan show P01        # phase 별 진행 상황
+ppwk plan list
+ppwk plan show P01        # phase 별 진행 상황
 ```
 
 ## plan show 읽기
@@ -43,9 +43,9 @@ gate 로 대기 중인 작업은 `status` 가 `open` 인 채로 `next` 후보에
 ## 계획 만들기
 
 ```bash
-paperwork plan new "storage 레이어 재작성" --priority high
-paperwork plan phase add P01 "스키마 설계" --gate all_done
-paperwork plan phase add P01 "구현"
-paperwork plan advance P01 p3          # manual gate 개방
-paperwork plan close P01
+ppwk plan new "storage 레이어 재작성" --priority high
+ppwk plan phase add P01 "스키마 설계" --gate all_done
+ppwk plan phase add P01 "구현"
+ppwk plan advance P01 p3          # manual gate 개방
+ppwk plan close P01
 ```
