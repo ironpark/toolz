@@ -97,9 +97,11 @@ func globalFlags() []cli.Flag {
 			Usage: "출력을 JSON 으로. 스크립트/에이전트용",
 		},
 		&cli.StringFlag{
-			Name:    "agent",
-			Usage:   "에이전트 신원 override",
-			Sources: cli.EnvVars("PPWK_AGENT"),
+			Name:  "agent",
+			Usage: "에이전트 신원 override",
+			// PPWK_AGENT 를 여기 묶지 않는다. 묶으면 환경변수로 온 값이
+			// 플래그로 온 값과 구분되지 않아 doctor 가 감지 근거를 틀리게
+			// 말한다 (T4.27). 결정 순서는 session.Resolve 하나가 갖는다.
 		},
 		&cli.StringFlag{
 			Name:  "C",

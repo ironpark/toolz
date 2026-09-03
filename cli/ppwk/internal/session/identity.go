@@ -25,6 +25,11 @@ type Options struct {
 	Worktree string // 현재 worktree 경로
 	// GitConfig 는 ppwk.agent 값을 돌려준다. nil 이면 건너뛴다.
 	GitConfig func() string
+	// Detect 는 도구 감지를 수행한다. nil 이면 runby.Current 다.
+	//
+	// runby.Current 는 프로세스당 한 번만 감지하고 결과를 캐시한다. 그래서
+	// 환경변수를 바꿔 가며 감지를 검증하려면 이 자리가 필요하다 (T4.20~T4.24).
+	Detect func() runby.Result
 }
 
 // Resolve 는 §0.2 와 §0.2.1 의 결정 순서를 그대로 따른다.
@@ -32,7 +37,11 @@ type Options struct {
 //	agent:   --agent → PPWK_AGENT → 도구 감지 → git config ppwk.agent → <hostname>:<worktree>
 //	session: PPWK_SESSION → 도구 세션 ID → 생성한 nonce
 func Resolve(opts Options) Identity {
-	detected := runby.Current()
+	detect := opts.Detect
+	if detect == nil {
+		detect = runby.Current
+	}
+	detected := detect()
 	id := Identity{}
 
 	suffix := filepath.Base(opts.Worktree)

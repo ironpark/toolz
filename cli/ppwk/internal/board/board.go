@@ -29,6 +29,10 @@ type Board struct {
 	root string
 	// leases 는 machine-local 생존 기록이다 (D13).
 	leases *session.Registry
+	// leaseSnapshot 은 생존 판정에 쓸 기록 전체를 한 번에 읽는다. 필드로 둔
+	// 이유는 reap 이 소유자 수·이슈 수와 무관하게 한 번만 읽는지 테스트가
+	// 셀 수 있어야 하기 때문이다 (T4.18).
+	leaseSnapshot func() []model.Lease
 	// allowSharedWorktree 는 Open 에서 한 번 정해진다. 전이마다 설정을
 	// 다시 읽지 않도록, 이것은 연산이 아니라 이 프로세스의 성질로 둔다.
 	allowSharedWorktree bool
@@ -92,7 +96,7 @@ func openRepo(path string) (*refstore.ExecRefStore, string, error) {
 }
 
 func makeBoard(store *refstore.ExecRefStore, root string, ident session.Identity) *Board {
-	return &Board{
+	b := &Board{
 		store:    store,
 		git:      store,
 		repo:     store.Repo(),
@@ -101,6 +105,8 @@ func makeBoard(store *refstore.ExecRefStore, root string, ident session.Identity
 		backoff:  DefaultBackoff(),
 		leases:   session.NewRegistry(store.CommonDir(), root, ident),
 	}
+	b.leaseSnapshot = b.leases.List
+	return b
 }
 
 // Store 는 ref 저장소를 돌려준다.
@@ -133,6 +139,15 @@ func (b *Board) RegisterSession() error {
 	_, err := b.leases.Register(b.allowSharedWorktree)
 	return err
 }
+
+// WorktreeLease 는 이 worktree 를 누가 쥐고 있는지다. 쓰지 않는다.
+func (b *Board) WorktreeLease() (model.Lease, bool) { return b.leases.LookupWorktree() }
+
+// LeaseAlive 는 기록의 생존 판정이다 (§3.6).
+func (b *Board) LeaseAlive(lease model.Lease) bool { return b.leases.Alive(lease) }
+
+// ProbeLock 은 flock 이 이 파일시스템에서 동작하는지 확인한다.
+func (b *Board) ProbeLock() error { return b.leases.ProbeLock() }
 
 // ActivityTTL 은 마지막 활동을 죽음으로 볼 때까지의 시간이다.
 func (b *Board) ActivityTTL() time.Duration { return b.leases.TTL }

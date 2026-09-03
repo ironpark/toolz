@@ -122,6 +122,26 @@ func (r *Registry) Alive(lease model.Lease) bool {
 	return now.Sub(lease.LastActivity.Time) <= r.TTL
 }
 
+// LookupWorktree 는 이 worktree 의 현재 점유 기록을 읽는다.
+//
+// 조회 전용이다 — doctor 같은 읽기 명령이 last_activity 를 건드리면 안 된다.
+func (r *Registry) LookupWorktree() (model.Lease, bool) {
+	return readLeaseAt(r.worktreePath())
+}
+
+// ProbeLock 은 잠금 디렉터리에서 flock 이 실제로 동작하는지 본다.
+//
+// flock 은 로컬 파일시스템을 전제한다. NFS 등에서는 조용히 무력해지므로
+// 판정을 추측이 아니라 실제 시도로 한다 (design §719).
+func (r *Registry) ProbeLock() error {
+	if err := os.MkdirAll(r.Dir, 0o700); err != nil {
+		return fmt.Errorf("잠금 디렉터리 생성: %w", err)
+	}
+	path := filepath.Join(r.Dir, "flock-probe")
+	defer os.Remove(path)
+	return r.withLocked(path, func(*os.File) error { return nil })
+}
+
 // List 는 잠금 디렉터리의 에이전트 기록을 전부 읽는다.
 func (r *Registry) List() []model.Lease {
 	entries, _ := filepath.Glob(filepath.Join(r.Dir, "agent-*.lock"))

@@ -33,7 +33,7 @@ func (b *Board) Reap(opts ReapOptions) ([]*Issue, error) {
 	}
 
 	live := make(map[string]model.Lease)
-	for _, lease := range b.leases.List() {
+	for _, lease := range b.leaseSnapshot() {
 		if b.leases.Alive(lease) {
 			live[lease.Agent] = lease
 		}

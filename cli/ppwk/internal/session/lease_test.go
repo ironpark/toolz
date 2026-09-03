@@ -103,7 +103,7 @@ func TestAliveDecisionOrderAndTTL(t *testing.T) {
 	}
 }
 
-func TestLookupCorruptRecordIsDead(t *testing.T) {
+func TestCorruptRecordIsDead(t *testing.T) {
 	r := NewRegistry(t.TempDir(), t.TempDir(), Identity{})
 	if err := os.MkdirAll(r.Dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -142,4 +142,9 @@ func TestCanonicalWorktreeResolvesSymlink(t *testing.T) {
 	if r.Worktree != want {
 		t.Fatalf("worktree=%q want=%q", r.Worktree, want)
 	}
+}
+
+// leaseAt 은 마지막 활동 시각만 다른 정상 기록을 만든다.
+func leaseAt(when time.Time) model.Lease {
+	return model.Lease{Agent: "a", Session: "s", LastActivity: model.NewTimestamp(when)}
 }
