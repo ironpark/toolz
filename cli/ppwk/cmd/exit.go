@@ -89,6 +89,9 @@ func classify(err error) error {
 		return CASConflictError("%v", err)
 	}
 	switch {
+	// 이 둘은 규칙 위반이다. 재시도해도 답이 같으므로 exit 4 가 아니다.
+	case errors.Is(err, board.ErrNotTerminal), errors.Is(err, board.ErrAlreadyArchived):
+		return TransitionError("%v", err)
 	case errors.Is(err, board.ErrNotFound):
 		return NotFoundError("%v", err)
 	case errors.Is(err, board.ErrSchemaTooNew):

@@ -25,11 +25,19 @@ var allActions = []Action{
 // initBoard 는 초기화만 된 빈 보드다.
 func initBoard(t *testing.T) *Board {
 	t.Helper()
-	b, _ := newBoard(t)
+	b, _ := initBoardDir(t)
+	return b
+}
+
+// initBoardDir 은 초기화된 보드와 그 경로를 함께 돌려준다. 자식 프로세스를
+// 띄우는 테스트가 경로를 필요로 한다.
+func initBoardDir(t *testing.T) (*Board, string) {
+	t.Helper()
+	b, dir := newBoard(t)
 	if _, err := b.Init(InitOptions{NoAgentsMD: true}); err != nil {
 		t.Fatalf("Init() = %v", err)
 	}
-	return b
+	return b, dir
 }
 
 // issueIn 은 주어진 상태의 이슈 하나를 만든다.

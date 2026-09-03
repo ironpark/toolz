@@ -122,7 +122,7 @@ func (b *Board) Transition(action Action, id string, opts TransitionOptions) (*I
 		sub = b.WithBackoff(backoff)
 	}
 
-	return sub.Mutate(Mutation{
+	issue, err := sub.Mutate(Mutation{
 		ID:      id,
 		Event:   string(action),
 		Message: opts.Message,
@@ -130,6 +130,13 @@ func (b *Board) Transition(action Action, id string, opts TransitionOptions) (*I
 			return b.applyTransition(action, rule, issue, opts)
 		},
 	})
+	if err != nil {
+		return nil, err
+	}
+	// done/cancel 은 이동을 겸한다 (§7.1). 전이와 이동을 한 트랜잭션으로 묶지
+	// 않는 이유는, 이동이 두 ref 를 건드리는 반면 전이는 하나이고, 둘을 합치면
+	// 모든 전이가 다중 ref 경로를 타게 되기 때문이다.
+	return b.archiveAfterTransition(issue), nil
 }
 
 // applyTransition 은 규칙을 검사하고 상태를 바꾼다 (§4.1 3단계).

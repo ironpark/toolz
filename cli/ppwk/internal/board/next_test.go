@@ -2,11 +2,13 @@ package board
 
 import (
 	"fmt"
+
 	"math/rand/v2"
 	"testing"
 	"time"
 
 	"github.com/go-git/go-git/v6/plumbing"
+
 	"github.com/ironpark/toolz/cli/ppwk/internal/faultstore"
 	"github.com/ironpark/toolz/cli/ppwk/internal/gitobj"
 	"github.com/ironpark/toolz/cli/ppwk/internal/model"
@@ -173,8 +175,12 @@ func TestDependencyFoundInArchive(t *testing.T) {
 	b := initBoard(t)
 	blocker := mustAdd(t, b, AddOptions{Title: "선행"})
 	waiter := mustAdd(t, b, AddOptions{Title: "후속", DependsOn: []string{blocker.ID}})
+	// done 이 이동을 겸한다 (단계 6). 의존 검사가 archive 를 안 보면 여기서
+	// 후속이 사라진다.
 	transitionAll(t, b, blocker.ID, ActionStart, ActionDone)
-	moveToArchive(t, b, blocker.ID)
+	if archived, err := b.Show(blocker.ID); err != nil || !archived.Archived() {
+		t.Fatalf("선행이 archive 로 가지 않았습니다: %v %v", archived, err)
+	}
 
 	got := ids(mustNext(t, b, NextOptions{}).Candidates)
 	if fmt.Sprint(got) != fmt.Sprint([]string{waiter.ID}) {
@@ -348,21 +354,6 @@ func transitionAll(t *testing.T, b *Board, id string, actions ...Action) {
 		if _, err := b.Transition(a, id, TransitionOptions{}); err != nil {
 			t.Fatalf("%s %s = %v", a, id, err)
 		}
-	}
-}
-
-// moveToArchive 는 단계 6 이 올 때까지 archive 이동을 손으로 흉내 낸다.
-func moveToArchive(t *testing.T, b *Board, id string) {
-	t.Helper()
-	hash, err := b.Store().Get(refstore.Issues + id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := b.Store().Transaction([]refstore.RefOp{
-		{Ref: refstore.Archive + id, New: hash, Old: plumbing.ZeroHash},
-		{Ref: refstore.Issues + id, New: plumbing.ZeroHash, Old: hash},
-	}); err != nil {
-		t.Fatal(err)
 	}
 }
 

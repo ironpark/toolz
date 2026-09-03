@@ -86,7 +86,7 @@ func (b *Board) Mutate(m Mutation) (*Issue, error) {
 
 	for attempt := range attempts {
 		// 1~2. 매 회차마다 다시 읽는다. 이전 회차의 판단은 이미 무효다.
-		old, current, body, err := b.loadIssue(ref, m.ID)
+		old, current, body, archived, err := b.loadIssue(ref, m.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -95,6 +95,13 @@ func (b *Board) Mutate(m Mutation) (*Issue, error) {
 		next := current
 		if err := m.Apply(&next); err != nil {
 			return nil, err
+		}
+		// 여기 도달했다는 것은 규칙상 허용되는 변경이라는 뜻이다. 그래도
+		// archive 된 이슈는 쓰지 않는다. 되살리려면 이력 정합성 판단이
+		// 필요하고, 그것은 도구가 대신할 수 있는 판단이 아니다 (features §7).
+		if archived {
+			return nil, &TransitionError{ID: m.ID, From: current.Status, To: next.Status,
+				Reason: "archive 된 이슈는 수정할 수 없습니다"}
 		}
 		next.UpdatedAt = model.Now()
 		next.UpdatedBy = b.identity.Agent
@@ -147,19 +154,26 @@ func (b *Board) casWithLockRetry(ref string, new, old plumbing.Hash) error {
 }
 
 // loadIssue 는 ref 가 가리키는 현재 상태를 읽는다 (§4.1 1~2단계).
-func (b *Board) loadIssue(ref, id string) (plumbing.Hash, model.Issue, []byte, error) {
-	hash, err := b.store.Get(ref)
+//
+// issues/ 에 없으면 archive/ 도 본다. 읽기만 하기 위해서다 — 그래야 종료된
+// 이슈에 전이를 시도했을 때 "없는 이슈" 가 아니라 "이미 끝난 이슈" 라고
+// 말할 수 있다. 둘은 사용자에게 전혀 다른 사실이다.
+func (b *Board) loadIssue(ref, id string) (hash plumbing.Hash, issue model.Issue, body []byte, archived bool, err error) {
+	hash, err = b.store.Get(ref)
 	if isNotFound(err) {
-		// CAS 직전에 ref 가 삭제된 경우도 여기로 온다. 재시도가 아니라 "없음" 이다.
-		return plumbing.ZeroHash, model.Issue{}, nil, fmt.Errorf("%s: %w", id, ErrNotFound)
+		hash, err = b.store.Get(refstore.Archive + id)
+		if isNotFound(err) {
+			// CAS 직전에 ref 가 삭제된 경우도 여기로 온다. 재시도가 아니라 "없음" 이다.
+			return plumbing.ZeroHash, model.Issue{}, nil, false, fmt.Errorf("%s: %w", id, ErrNotFound)
+		}
+		archived = true
 	}
 	if err != nil {
-		return plumbing.ZeroHash, model.Issue{}, nil, err
+		return plumbing.ZeroHash, model.Issue{}, nil, false, err
 	}
-	var issue model.Issue
-	body, _, _, err := gitobj.Read(b.repo, hash, gitobj.FileIssue, &issue)
+	body, _, _, err = gitobj.Read(b.repo, hash, gitobj.FileIssue, &issue)
 	if err != nil {
-		return plumbing.ZeroHash, model.Issue{}, nil, err
+		return plumbing.ZeroHash, model.Issue{}, nil, false, err
 	}
-	return hash, issue, body, nil
+	return hash, issue, body, archived, nil
 }

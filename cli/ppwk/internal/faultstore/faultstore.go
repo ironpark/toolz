@@ -34,6 +34,11 @@ type Config struct {
 	FailAfter int
 	// Abort 는 FailAfter 도달 시 낼 오류다. nil 이면 ErrAborted.
 	Abort error
+	// TransactionErr 는 Transaction 이 낼 오류다. nil 이면 그대로 위임한다.
+	//
+	// 다중 ref 이동이 실패했을 때 호출자가 무엇을 하는지 보기 위한 것이다
+	// (T6.1 계열) — 이동 실패가 전이 실패로 번지면 안 된다.
+	TransactionErr error
 }
 
 // Store 는 결함을 주입하는 RefStore 래퍼다. 동시 사용에 안전하다.
@@ -45,6 +50,7 @@ type Store struct {
 	rand     *rand.Rand
 	casCount int
 	lockHits int
+	txCount  int
 }
 
 var _ refstore.RefStore = (*Store)(nil)
@@ -64,8 +70,24 @@ func (s *Store) Get(ref string) (plumbing.Hash, error) { return s.inner.Get(ref)
 // List 는 그대로 위임한다.
 func (s *Store) List(prefix string) ([]refstore.RefEntry, error) { return s.inner.List(prefix) }
 
-// Transaction 은 그대로 위임한다.
-func (s *Store) Transaction(ops []refstore.RefOp) error { return s.inner.Transaction(ops) }
+// Transaction 은 설정된 오류가 있으면 그것을 내고, 없으면 위임한다.
+func (s *Store) Transaction(ops []refstore.RefOp) error {
+	s.mu.Lock()
+	s.txCount++
+	err := s.cfg.TransactionErr
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.inner.Transaction(ops)
+}
+
+// TransactionCalls 는 Transaction 호출 횟수다.
+func (s *Store) TransactionCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.txCount
+}
 
 // CAS 는 설정된 결함을 먼저 적용한 뒤 위임한다.
 func (s *Store) CAS(ref string, new, old plumbing.Hash) error {

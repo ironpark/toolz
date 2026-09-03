@@ -2,8 +2,15 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
+	"github.com/ironpark/toolz/cli/ppwk/internal/board"
+	"github.com/ironpark/toolz/cli/ppwk/internal/watch"
 	"github.com/urfave/cli/v3"
 )
 
@@ -23,10 +30,40 @@ func watchCommand() *cli.Command {
 			&cli.BoolFlag{Name: "hook", Usage: "hook socket 우선, 실패 시 polling 폴백"},
 			&cli.StringFlag{Name: "filter", Usage: "특정 ref prefix 만"},
 		},
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("watch")
+		Action: func(ctx context.Context, c *cli.Command) error {
+			return classify(runWatch(ctx, newCtx(c)))
 		},
 	}
+}
+
+// runWatch 는 변경을 줄당 JSON 으로 흘려보낸다 (§6).
+//
+// SIGINT 는 오류가 아니라 정상 종료다. 그래서 action() 대신 ctx 를 받는
+// 형태를 쓴다 — 이 명령만 유일하게 수명이 긴 명령이다.
+func runWatch(ctx context.Context, x *ctx) error {
+	b, err := x.board()
+	if err != nil {
+		return err
+	}
+	if x.cmd.Bool("hook") {
+		// hook 은 최적화이고 polling 이 기본이다. hook 경로가 없어도 감지는
+		// 정상 동작해야 하므로, 미구현을 오류로 만들지 않고 폴백한다 (§6.1).
+		fmt.Fprintln(x.stderr, "hook 경로가 아직 없습니다. polling 으로 진행합니다")
+	}
+
+	signalCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	enc := json.NewEncoder(x.stdout)
+	return b.Watch(signalCtx, board.WatchOptions{
+		Interval: x.cmd.Duration("interval"),
+		Filter:   x.cmd.String("filter"),
+	}, func(event watch.Event) error {
+		if x.quiet {
+			return nil
+		}
+		return enc.Encode(event)
+	})
 }
 
 // hookCommand — git hook 과 에이전트 도구 hook 을 관리한다 (§6).

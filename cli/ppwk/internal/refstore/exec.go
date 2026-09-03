@@ -85,6 +85,12 @@ func (s *ExecRefStore) List(prefix string) ([]RefEntry, error) {
 		if !strings.HasPrefix(name, prefix) {
 			return nil
 		}
+		// .lock 은 ref 가 아니라 갱신 중이라는 표시다. git 자신은 ref 열거에서
+		// 이것을 빼지만 go-git 은 파일을 그대로 읽어 준다. 걸러내지 않으면
+		// 잠금이 걸린 순간마다 "T001.lock" 이라는 유령 이슈가 목록에 뜬다.
+		if strings.HasSuffix(name, ".lock") {
+			return nil
+		}
 		entries = append(entries, RefEntry{Ref: name, Hash: r.Hash()})
 		return nil
 	})
