@@ -355,13 +355,29 @@ type processHandle struct {
 	stdout io.ReadCloser
 }
 
+// CommandBuilder starts the app-server somewhere other than as a plain child
+// of this process. It is handed the executable, its arguments, the working
+// directory and the environment, and must return a command that has not been
+// started; the caller pipes it and starts it as it would its own.
+type CommandBuilder func(ctx context.Context, path string, args []string, dir string, env []string) *exec.Cmd
+
 // startProcess spawns `codex app-server` (or the configured equivalent) with
 // piped stdin/stdout.
-func startProcess(bin string, args []string, env []string, dir string, stderr io.Writer) (*processHandle, error) {
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = dir
-	if env != nil {
-		cmd.Env = env
+func startProcess(ctx context.Context, build CommandBuilder, bin string, args []string, env []string, dir string, stderr io.Writer) (*processHandle, error) {
+	var cmd *exec.Cmd
+	if build != nil {
+		// Stripped of cancellation: the caller's context bounds the
+		// initialize handshake, while the subprocess is the client's for as
+		// long as the client lives and is stopped by closing it. A builder
+		// handed the handshake's context would kill the app-server the moment
+		// New returned.
+		cmd = build(context.WithoutCancel(ctx), bin, args, dir, env)
+	} else {
+		cmd = exec.Command(bin, args...)
+		cmd.Dir = dir
+		if env != nil {
+			cmd.Env = env
+		}
 	}
 	if stderr != nil {
 		cmd.Stderr = stderr

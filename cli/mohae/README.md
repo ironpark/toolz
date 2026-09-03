@@ -17,18 +17,20 @@
 
 한 번의 실행(trial)은 설정 파일 하나가 정의합니다.
 
-1. **격리** — `workspace.source`를 임시 디렉터리로 복사합니다. 원본은 절대 수정되지
-   않으므로 같은 설정의 두 실행은 동일한 상태에서 시작합니다.
+1. **격리** — `workspace.source`를 임시 디렉터리로 복사합니다. mohae는 원본을
+   수정하지 않으므로 같은 설정의 두 실행은 동일한 상태에서 시작합니다.
+   `container`를 지정하면 이후 단계가 호스트가 아니라 그 이미지 안에서 실행되어,
+   시작 상태뿐 아니라 툴체인까지 고정됩니다.
 2. **준비** — `workspace.init_script`로 의존성을 빌드하거나 데이터를 심고,
    `workspace.agent_md`를 `AGENTS.md`로 설치합니다.
 3. **실행** — `prompts`를 순서대로 보냅니다. 각 프롬프트는 앞 턴이 끝난 뒤에 전송되고,
    `when` 조건이 붙어 있으면 조건이 참일 때만 보냅니다. 그 사이에는 개입하지 않으므로
    에이전트가 스스로 완료를 판단해야 하며, 그동안 대화·명령 실행·실패·토큰 사용량을
    기록합니다.
-4. **채점** — `verify.commands`가 순서대로 끝난 워크스페이스를 검사합니다. 워크스페이스 **밖**에서
-   실행되고 안으로 복사되지도 않으므로, 에이전트가 검사 항목에 맞춰 결과를 꾸밀 수
-   없습니다.
-5. **리포트** — 성공 여부, 토큰 종류별 사용량, 소요 시간, 실패한 명령을 리포트로 남깁니다.
+4. **후처리** — `hooks.after`가 에이전트 종료 직후 선택한 scope에서 명령을 실행합니다.
+5. **채점** — `verify.commands`가 워크스페이스 밖에서 결과를 검사합니다.
+6. **보존** — `artifacts`를 복사하고 결과와 사용량을 리포트로 남긴 뒤 임시
+   워크스페이스를 정리합니다.
 
 프롬프트를 워크스페이스에 두지 않는 이유는, 디스크에서 다시 읽을 수 있는 과제 명세가
 아니라 대화로 받은 요청만으로 일하는 실제 상황을 재현하기 위해서입니다.
@@ -55,26 +57,48 @@ workspace:
   agent_md: ./AGENTS.md # 워크스페이스에 AGENTS.md로 설치
   git: true
 
+container: # 생략하면 호스트에서 실행. image나 build가 있어야 켜집니다
+  image: golang:1.26 # 또는 build: ./docker (Dockerfile이 있는 디렉터리)
+  runtime: auto # auto | docker | podman
+  scope: setup # setup | full
+  network: none
+  user: host # host | root | uid:gid
+  mounts:
+    - source: ~/.codex
+      target: /mohae-home/.codex
+      read_only: true
+  env:
+    CODEX_HOME: /mohae-home/.codex
+
 prompts: # 대화. 순서대로 전송되며, 둘 이상이면 멀티턴
   - file: ./PROMPT.md
   - text: 빌드가 깨져 있습니다. 멈추기 전에 고치세요.
     when: sh("go build ./...") != 0 # 조건이 참일 때만 전송
 
 skills: # 워크스페이스에 설치할 스킬. agents로 대상 에이전트 제한
-  - path: ./skills/commit
+  - path: ./skills/commit # 로컬 경로
     agents: [claude-code]
+  - source: vercel-labs/skills # 원격에서 내려받아 설치
+    ref: v1.2.0 # 브랜치·태그·커밋. 생략 가능하지만 지정을 권장
+    subpath: skills/commit # 생략하면 저장소가 제공하는 스킬을 모두 설치
 
 mcp: # 연결할 MCP 서버. agents 생략 시 모든 에이전트에 제공
   - name: context7
     config: ./mcp.json
     agents: [claude-code, codex]
 
+hooks:
+  after: # 에이전트 종료 후, 검증 전에 실행
+    - ./finalize.sh
+    - run: ./publish-summary.sh
+      scope: outside # workspace | outside
+
 verify:
   commands: # 셸 명령을 순서대로 실행. 각각 종료 코드 0이면 합격, 출력 형식은 자유
     - ./verify.sh
     - test -f "$MOHAE_WORKSPACE/README.md"
 
-artifacts: # 검증 뒤 report.dir로 보존할 workspace 내부 경로 또는 glob
+artifacts: # 검증 후 report.dir에 보존할 workspace 상대 경로 또는 glob
   - plans-active/**
   - .harness/planr-events.log
 
@@ -85,6 +109,85 @@ report:
   dir: .mohae/reports
   formats: [terminal, json]
 ```
+
+### 컨테이너 격리
+
+`container`가 있으면 trial은 호스트가 아니라 컨테이너 안에서 실행됩니다. 워크스페이스
+복사만으로는 **에이전트가 무엇에서 시작하는지**만 고정될 뿐, 그것을 빌드하는 툴체인과
+채점하는 명령은 여전히 그 머신에 깔린 것을 씁니다. 이미지는 그 나머지를 고정합니다.
+
+`scope`가 경계를 어디에 둘지 정합니다.
+
+| scope             | 컨테이너 안                                 | 호스트     | 이미지 요구사항        |
+| ----------------- | ------------------------------------------- | ---------- | ---------------------- |
+| `setup` (기본값)  | `init_script`, `hooks.after`, `verify`, `sh()` | 에이전트   | 과제의 툴체인          |
+| `full`            | 위 전부 + 에이전트                          | —          | 툴체인 + 에이전트 CLI  |
+
+`setup`은 채점 환경의 재현성만 필요할 때 쓰는 값이고, 이미지에 에이전트를 넣지 않아도
+됩니다. `full`은 에이전트까지 컨테이너가 묶으므로 [알려진 한계](#알려진-한계)의
+`claude-code` 샌드박스 문제를 해소하지만, 이미지가 에이전트 CLI를 담고 있어야 하고
+로그인 자격 증명을 `mounts`로 넣어 줘야 합니다.
+
+동작에 관해 알아 둘 것:
+
+- **경로.** trial의 임시 디렉터리는 컨테이너 안에서 항상 `/mohae`에 마운트됩니다.
+  워크스페이스는 `/mohae/workspace`, scratch는 `/mohae/scratch`입니다. `$MOHAE_WORKSPACE`는
+  **그 명령이 보는 경로**로 채워지므로, `scope: setup`에서는 에이전트가 호스트 경로를,
+  검증 명령이 컨테이너 경로를 받습니다. 두 이름은 같은 파일을 가리킵니다.
+- **`$HOME`.** `/mohae/home`이 기본값입니다. 호스트 사용자로 실행되는 컨테이너에는
+  대개 passwd 항목도 홈도 없어서, 이것이 없으면 패키지 매니저와 에이전트 CLI가
+  쓰기에 실패합니다. `container.env`로 덮어쓸 수 있습니다.
+- **파일 소유권.** `user: host`(기본값)는 호스트의 uid/gid로 실행하므로 trial이 만든
+  파일을 그대로 읽고 지울 수 있습니다. rootless podman에는 `--userns=keep-id`가 함께
+  붙습니다. `user: root`는 호스트에 root 소유 파일을 남기고 워크스페이스 정리를
+  실패시킵니다.
+- **스크립트.** `init_script`는 설정 파일 옆에 있어 컨테이너가 볼 수 없으므로 trial의
+  디렉터리로 복사한 뒤 실행합니다.
+- **취소.** 턴 제한 시간이나 `limits.timeout_seconds`가 만료되면 컨테이너 안에서 그
+  명령이 시작한 프로세스 전체를 죽입니다. 워크스페이스 정리 시 컨테이너도 제거됩니다.
+- **런타임.** `auto`는 docker, podman 순으로 찾습니다. 설정이 지정한 런타임이 없으면
+  호스트로 물러서지 않고 실패합니다 — 격리되지 않은 실행이 격리된 것으로 기록되는
+  편이 더 나쁘기 때문입니다. `mohae verify`가 실행 전에 이를 검사합니다.
+- **비용.** trial마다 컨테이너를 하나 띄웁니다. `build`는 매번 호출하지만 런타임의
+  레이어 캐시가 반복 빌드를 감당합니다.
+
+### 원격 스킬
+
+`skills`의 각 항목은 로컬 경로(`path`)이거나 원격 소스(`source`)입니다. 둘은 같은
+질문에 대한 두 가지 답이므로 함께 쓸 수 없고, 함께 쓰면 설정 검증에서 거부됩니다.
+
+`source`가 받는 형태:
+
+| 형태          | 예시                                                        |
+| ------------- | ----------------------------------------------------------- |
+| GitHub 축약형 | `vercel-labs/skills`                                        |
+| GitHub URL    | `https://github.com/vercel-labs/skills`                     |
+| GitHub 경로   | `https://github.com/vercel-labs/skills/tree/v1.2.0/skills/commit` |
+| git 리모트    | `git@gitlab.com:org/repo.git`, `https://gitlab.com/org/repo` |
+| 아카이브      | `https://example.com/skills.tar.gz`, `.tgz`, `.tar`, `.zip` |
+
+`/tree/<ref>/<path>` URL은 브라우저 주소창에서 그대로 복사해 쓸 수 있습니다. URL이
+담은 ref·경로는 `ref`·`subpath`가 비어 있을 때 채워지며, 둘이 서로 다른 값을 가리키면
+어느 쪽을 따를지 mohae가 정하지 않고 오류를 냅니다.
+
+동작에 관해 알아 둘 것:
+
+- **고정.** `ref`는 브랜치·태그·커밋을 받습니다. 생략하면 실행할 때마다 기본 브랜치를
+  새로 확인하므로, 같은 설정이 다음 주에는 다른 지시문을 설치할 수 있습니다 — 비교를
+  위해 쓰는 도구에서는 이것이 측정 자체를 무너뜨립니다. `mohae verify`는 고정되지
+  않은 소스를 경고합니다.
+- **기록.** 소스는 내려받기 전에 **불변 커밋으로 확정**되고, 그 커밋이 JSON 리포트의
+  `skills[].commit`에 남습니다. 실행을 재현하려면 그 값을 `ref`에 넣으면 됩니다.
+- **캐시.** 캐시는 소스 문자열이 아니라 확정된 커밋으로 키를 잡습니다. 같은 커밋을
+  다르게 적은 두 설정은 같은 바이트를 공유하고, 브랜치가 움직이면 기존 항목을 덮어쓰는
+  대신 새 항목이 생깁니다. `--skill-cache`로 위치를 바꿀 수 있습니다.
+- **선택.** `subpath`를 주면 그 디렉터리 하나만, 생략하면 저장소가 제공하는 스킬을 모두
+  설치합니다. 스킬은 `SKILL.md`를 가진 디렉터리이며, 저장소 루트와 `skills/`,
+  `.claude/skills/` 등 관례적인 위치에서 찾습니다.
+- **오프라인.** `--offline`은 네트워크를 쓰지 않고 캐시에 있는 것만 씁니다. 네트워크가
+  닿지 않을 때는 그 ref를 이 머신에서 마지막으로 확정했던 커밋으로 물러섭니다.
+- **인증.** 비공개 GitHub 저장소는 `MOHAE_GITHUB_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN` 중
+  설정된 것을 씁니다. git 리모트는 git에 이미 설정된 자격 증명을 그대로 씁니다.
 
 ### 프로파일
 
@@ -233,11 +336,15 @@ mohae run -p 'file://PROMPT.md' -p '이제 테스트를 작성하세요'
 | `--prompt-when <EXPR>`   | 같은 순서의 프롬프트에 붙일 실행 조건 (반복 가능)          |
 | `--agent-md <PATH>`      | 설치할 `AGENTS.md` 대체                                    |
 | `--init-script <PATH>`   | 환경 구성 스크립트 대체                                    |
+| `--container-image <IMG>`| 이 이미지 안에서 trial 실행                                |
+| `--container-scope`      | `setup`(기본) 또는 `full`                                  |
 | `--verify-command <CMD>` | 검증 명령 목록 대체 (반복 가능)                            |
 | `-m, --mcp-config`       | MCP 서버 설정 주입                                         |
 | `-o, --output <FORMAT>`  | `terminal`, `json`, `markdown`, `html`                      |
 | `--report-dir <DIR>`     | 리포트 저장 위치 (기본 `.mohae/reports`)                   |
 | `--show-dialogue`        | 대화 내용을 터미널로 실시간 출력                           |
+| `--offline`              | 원격 스킬을 내려받지 않고 캐시에 있는 것만 사용            |
+| `--skill-cache <DIR>`    | 원격 스킬 캐시 위치 (기본: 사용자 캐시 디렉터리)           |
 | `--detailed-tokens`      | 입력·출력·캐시 읽기/쓰기로 토큰을 나눠 출력                |
 | `-t, --timeout <SEC>`    | 실행 하나당 제한 시간 (기본 300)                           |
 | `--fail-fast`            | 검증 실패나 명령 에러 발생 시 즉시 중단                    |
@@ -246,38 +353,58 @@ mohae run -p 'file://PROMPT.md' -p '이제 테스트를 작성하세요'
 오버라이드는 설정 파일을 고치지 않고 이번 실행에만 적용됩니다. 같은 설정을 조건만 바꿔
 반복할 수 있어야 A/B 비교가 성립하기 때문입니다.
 
-한 trial은 항상 같은 순서로 진행됩니다. `workspace.source`를 임시 디렉터리로 복사하고,
-`workspace.exclude`에 맞는 항목은 복사하지 않습니다. slash가 없는 패턴은 모든 깊이의
-파일명에 적용되고 `**`는 여러 디렉터리 깊이를 가로지릅니다. 예를 들어 `FIXTURE.*`는
-어느 디렉터리에 있든 같은 접두사의 파일을 제외하고, `generated/**`는 디렉터리 전체를
-제외합니다. 절대 경로나 `..`로 워크스페이스 밖을 가리키는 패턴은 설정을 읽을 때
-거부합니다.
+#### 워크스페이스 준비
 
-그 뒤 `AGENTS.md`와 해당 에이전트용 skill을 설치하고, `init_script`를 복사본 안에서 실행하고,
-`workspace.git`이 켜져 있으면 그 상태를 기준 커밋으로 남깁니다. 그다음 프롬프트를 순서대로
-보내고, 에이전트가 멈추면 워크스페이스 **바깥**에서 `verify.commands`를 실행합니다. 원본은
-읽기만 하므로 같은 설정을 두 번 돌리면 항상 같은 상태에서 시작합니다.
+`workspace.source`를 임시 디렉터리로 복사하되 `workspace.exclude`와 일치하는 항목은
+제외합니다. 슬래시(`/`)가 없는 패턴은 모든 깊이의 파일명에 적용되고 `**`는 여러 디렉터리
+깊이를 가로지릅니다. 예를 들어 `FIXTURE.*`는 위치와 관계없이 같은 접두사의 파일을,
+`generated/**`는 디렉터리 전체를 제외합니다. 빈 패턴, 절대 경로, `..`가 포함된 경로는
+설정을 읽을 때 거부합니다.
 
-`artifacts`는 검증이 끝난 워크스페이스에서 보존할 상대 경로나 glob입니다. 일치한 파일과
-디렉터리는 상대 경로를 유지한 채
-`report.dir/<trial 이름>-<시각>.artifacts/`로 복사되므로 통과한 trial의 임시
-워크스페이스가 삭제된 뒤에도 남습니다. 심볼릭 링크는 대상을 따라가지 않고 링크 자체를
-복사합니다. 일치 항목이 없는 패턴은 리포트에 기록되지만 trial을 실패시키지는 않습니다.
-반드시 생성되어야 하는 산출물은 `verify.commands`에서 `test -e` 등으로 검사하세요.
+복사 후 `AGENTS.md`와 해당 에이전트용 skill을 설치하고 `workspace.init_script`를
+실행합니다. `workspace.git`이 켜져 있으면 준비가 끝난 상태를 기준 커밋으로 남깁니다.
 
-통과한 trial의 워크스페이스는 삭제하고, 실패한 trial의 워크스페이스는 남긴 뒤 경로를
-리포트에 적습니다. 에이전트가 실제로 무엇을 했는지 확인할 방법이 그것뿐입니다.
-`verify.commands`가 없는 trial의 워크스페이스도 남깁니다. 채점한 것이 없으니 판정도 없고,
-그 trial이 남긴 것은 워크스페이스뿐이기 때문입니다. 이런 trial의 판정은 `pass`가 아니라
-`ungraded`로 표시됩니다.
+#### 완료 훅
 
-리포트는 `-o`로 고른 형식이 화면에 출력되고, 설정의 `report.formats`와 `-o`가 가리키는
-파일 형식이 `report.dir`에 `<trial 이름>-<시각>.<확장자>`로 저장됩니다. 여러 설정이 같은
-`report.dir`를 쓰는 것이 기본값이므로, 이름과 시각을 함께 붙여야 같은 초에 끝난 두 trial의
-리포트가 서로를 덮어쓰지 않습니다. trial이 하나라도 실패하면
-종료 코드가 0이 아닙니다. `--fail-fast`는 첫 실패에서 남은 trial을 취소하고 아직 시작하지
-않은 trial은 아예 실행하지 않습니다. `--concurrency`로 병렬 실행해도 리포트 순서는 설정을
-넘긴 순서로 고정되지만, `--show-dialogue` 출력은 trial 단위로 섞여 나옵니다.
+`hooks.after`는 에이전트 세션이 끝난 뒤, 검증 전에 순서대로 실행됩니다. 문자열은
+`run`만 적는 축약형이며 `scope`의 기본값은 `workspace`입니다.
+
+| scope       | 실행 위치              | 용도                                |
+| ----------- | ---------------------- | ----------------------------------- |
+| `workspace` | `$MOHAE_WORKSPACE`      | 검증할 결과를 정리하거나 파일을 생성 |
+| `outside`   | 격리된 scratch 디렉터리 | 후처리 출력을 워크스페이스 밖에 생성 |
+
+두 scope 모두 `MOHAE_WORKSPACE`, `MOHAE_TRIAL`, `MOHAE_MODEL`, `MOHAE_EFFORT`와
+`agent.env`를 받습니다. `outside`에서도 `$MOHAE_WORKSPACE`로 결과를 읽을 수 있습니다.
+`scope`는 권한 경계가 아니라 기본 실행 위치를 고르는 값이므로, `outside` 명령도 해당
+환경 변수를 사용해 워크스페이스를 명시적으로 변경할 수 있습니다. 훅 단계는 에이전트 오류나
+시간 초과 뒤에도 별도의 제한 시간으로 실행됩니다. 하나라도 실패하면 trial은 실패하지만,
+진단을 위해 나머지 훅과 검증은 계속 실행됩니다. 명령, scope, 출력, 종료 코드와 소요 시간은
+리포트에 기록됩니다.
+
+#### 검증과 artifact
+
+`verify.commands`는 훅이 끝난 워크스페이스를 scratch 디렉터리에서 검사합니다. 따라서
+상대 경로로 만든 검증 파일은 에이전트 결과나 artifact에 섞이지 않습니다. 모든 명령을
+실행하며 각 종료 코드가 해당 검사의 판정입니다.
+
+검증 후 `artifacts`와 일치하는 워크스페이스 내부 파일과 디렉터리를 상대 경로 그대로
+`report.dir/<trial 이름>-<시각>.artifacts/`에 복사합니다. 심볼릭 링크는 대상을 따라가지
+않고 링크 자체를 보존합니다. 일치 항목이 없는 패턴은 리포트에 기록될 뿐 trial을
+실패시키지 않습니다. 필수 산출물은 `verify.commands`에서 `test -e` 등으로 검사하세요.
+
+#### 정리와 리포트
+
+통과한 trial의 임시 워크스페이스는 삭제합니다. 실패하거나 검증 명령이 없는 trial은
+워크스페이스를 남기고 리포트에 경로를 기록합니다. 검증이 없으면 판정은 `pass`가 아니라
+`ungraded`입니다.
+
+`-o`로 고른 형식은 화면에 출력되고, 설정의 `report.formats`와 `-o`가 가리키는 파일 형식은
+`report.dir`에 `<trial 이름>-<시각>.<확장자>`로 저장됩니다. 이름이 같은 결과가 같은 초에
+생겨도 기존 파일을 덮어쓰지 않습니다. 하나라도 실패하면 종료 코드는 0이 아닙니다.
+`--fail-fast`는 첫 실패 뒤 아직 시작하지 않은 trial을 실행하지 않으며, `--concurrency`를
+사용해도 리포트 순서는 입력 순서로 유지됩니다. 단, `--show-dialogue` 출력은 병렬 trial
+사이에서 섞일 수 있습니다.
 
 MCP 서버는 에이전트 CLI가 읽는 `mcpServers` 형식 그대로 읽습니다. trial 시작 전에
 go-sdk로 각 서버에 접속해 도구 목록을 확인하고 리포트에 남기는데, 서버가 뜨지 않은 실행은
@@ -287,7 +414,7 @@ go-sdk로 각 서버에 접속해 도구 목록을 확인하고 리포트에 남
 그 자리에 프롬프트가 들어가고, 없으면 표준 입력으로 전달됩니다. 표준 출력이 응답입니다.
 `MOHAE_WORKSPACE`, `MOHAE_TRIAL`, `MOHAE_MODEL`, `MOHAE_EFFORT`와 `agent.env`는 에이전트
 종류와 상관없이 모든 드라이버가 동일하게 전달합니다. mohae가 그 CLI의 플래그를 몰라도 모델과
-강도를 넘길 수 있고, `init_script`나 verify 명령이 어느 에이전트에서든 같은 변수를 읽습니다.
+강도를 넘길 수 있고, `init_script`, 완료 훅, verify 명령도 같은 변수를 읽습니다.
 
 ### `mohae compare`
 
@@ -360,8 +487,8 @@ mohae init trials/kvstore --template cli-skill --with-scripts
 | 명령      | 상태                                              |
 | --------- | ------------------------------------------------- |
 | `init`    | 동작 — 설정과 참조 파일 일체 생성 (`--all`)       |
-| `verify`  | 동작 — 경로·스크립트·`AGENTS.md` 검사 (MCP는 예정) |
-| `run`     | 동작 — 실행·검증·리포트 (`--web`은 예정)          |
+| `verify`  | 동작 — 경로·스크립트·`AGENTS.md`·컨테이너 런타임 검사 (MCP는 예정) |
+| `run`     | 동작 — 실행·훅·검증·artifact·리포트 (`--web`은 예정) |
 | `compare` | 인자 검증까지 동작                                |
 | `report`  | 인자 검증까지 동작                                |
 | `web`     | 미구현                                            |
@@ -375,10 +502,13 @@ mohae init trials/kvstore --template cli-skill --with-scripts
 띄우므로 호스트의 아무 경로나 읽고 쓸 수 있습니다. 실제로 프롬프트가 경로를 명시하지
 않자 에이전트가 워크스페이스 밖에 결과물을 만들어 `when` 조건과 `verify`가 함께
 어긋나는 일이 관측됐습니다. 두 에이전트가 같은 규칙에서 측정되지 않는다는 뜻이기도
-합니다. 신뢰할 수 없는 설정은 컨테이너 같은 별도 샌드박스 안에서 실행하세요.
+합니다. [`container.scope: full`](#컨테이너-격리)이 이를 해소합니다 — 그 경우 두
+에이전트 모두 컨테이너가 경계입니다.
 
 **실패한 trial의 워크스페이스는 남습니다.** 무엇이 일어났는지 볼 방법이 그것뿐이기
 때문입니다. 24시간이 지난 것은 다음 `run`이 정리하며, 정리한 개수를 출력합니다.
+컨테이너는 남기지 않습니다 — 워크스페이스를 보존하는 경우에도 trial이 끝나면 제거하고,
+mohae가 강제 종료돼 남은 컨테이너는 다음 `run`이 회수합니다.
 
 ## 개발
 
@@ -389,3 +519,15 @@ cd cli/mohae
 go test ./...
 go build -o mohae .
 ```
+
+소스는 의존 방향에 따라 나뉩니다.
+
+```text
+main.go → cmd/ → internal/config, runner, report, scaffold
+                    runner → agent, driver, process
+                    driver → claude, codex
+```
+
+`cmd/{command}.go`는 한 명령의 플래그와 액션을 함께 소유합니다. 설정 해석은
+`internal/config`, trial 실행과 워크스페이스는 `internal/runner`, 결과 출력은
+`internal/report`, `init` 템플릿은 `internal/scaffold`가 담당합니다.

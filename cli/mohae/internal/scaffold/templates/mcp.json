@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "server-under-test": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-everything"]
+    }
+  }
+}
