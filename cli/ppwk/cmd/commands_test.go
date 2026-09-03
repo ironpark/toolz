@@ -13,7 +13,7 @@ import (
 // 배정은 오케스트레이터의 일이지 보드의 일이 아니다. 이 명령들이 다시 생기면
 // 큐가 두 개가 되고, 어느 쪽이 진실인지 알 수 없게 된다. 재도입 방지 회귀다.
 func TestAssignmentCommandsAbsent(t *testing.T) {
-	banned := []string{"assign", "unassign", "inbox", "accept", "reject"}
+	banned := []string{"assign", "unassign", "inbox", "accept", "reject", "session"}
 	root := New(Version{CLI: "test", Schema: "1"}, io.Discard, io.Discard)
 
 	var walk func(cmds []*cli.Command, path string)

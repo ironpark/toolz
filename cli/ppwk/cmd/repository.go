@@ -25,12 +25,34 @@ func initCommand() *cli.Command {
 // doctorCommand — 환경을 점검한다 (§1).
 func doctorCommand() *cli.Command {
 	return &cli.Command{
-		Name:  "doctor",
-		Usage: "환경을 점검한다. FAIL 이 있으면 exit 1",
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("doctor")
-		},
+		Name:   "doctor",
+		Usage:  "환경을 점검한다. FAIL 이 있으면 exit 1",
+		Action: action(runDoctor),
 	}
+}
+
+func runDoctor(x *ctx) error {
+	b, err := x.board()
+	if err != nil {
+		return err
+	}
+	id := b.Identity()
+	ttl := b.ActivityTTL().String()
+	info := map[string]any{
+		"agent": id.Agent, "agent_source": id.AgentSource,
+		"session": id.Session, "session_source": id.SessionSource,
+		"liveness": "last_activity", "activity_ttl": ttl,
+	}
+	if x.json {
+		return x.emit(info)
+	}
+	x.printf("agent      %s\n", id.Agent)
+	x.printf("detected   %s\n", id.AgentSource)
+	x.printf("session    %s\n", id.Session)
+	x.printf("source     %s\n", id.SessionSource)
+	x.printf("liveness   last_activity (%s threshold)  WARN\n", ttl)
+	x.printf("hint       자동 회수가 느립니다. 훅을 설치하거나 release --mine 을 호출하세요.\n")
+	return nil
 }
 
 // versionCommand — CLI/스키마/git 버전을 출력한다 (§1).

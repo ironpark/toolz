@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-	"text/tabwriter"
-
 	"github.com/ironpark/toolz/cli/ppwk/internal/board"
 )
 
@@ -92,9 +89,9 @@ func runHistory(x *ctx) error {
 		return x.emit(events)
 	}
 
-	w := tabwriter.NewWriter(x.stdout, 0, 0, 2, ' ', 0)
+	rows := make([][]string, 0, len(events))
 	for _, e := range events {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.Short, e.When, e.Who, e.Subject)
+		rows = append(rows, []string{e.Short, e.When, e.Who, e.Subject})
 	}
-	return w.Flush()
+	return x.table(rows)
 }
