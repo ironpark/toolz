@@ -129,7 +129,7 @@ loop:
 
 **ulid** — `01K3QZ8...`. 채번 경쟁이 없고 여러 머신으로 확장할 때 안전하다. v2를 염두에 둔다면 이쪽.
 
-ID는 ref 경로에 들어가므로 `git check-ref-format`을 통과해야 한다. `[A-Za-z0-9_-]+` 로 제한한다.
+ID는 ref 경로에 들어가므로 `git check-ref-format`을 통과해야 한다. `[A-Za-z0-9_-]+` 로 제한하되, **`-` 로 시작하는 것은 거부한다.** ref 이름을 `git` 에 인자로 넘기므로 `-` 로 시작하면 플래그로 해석된다. 같은 이유로 ref 이름 검증은 `refs/` 접두사를 강제하고 컴포넌트 선두의 `-` 를 막는다 (F0.1 이 찾아낸 구멍).
 
 ### 3.3 이슈 commit 구조
 
@@ -1148,14 +1148,17 @@ go-git의 `CheckAndSetReference(new, old)` 는 CAS 처럼 보이지만 실제 �
 
 ### 14.4 commondir
 
-go-git은 `PlainOpenOptions.EnableDotGitCommonDir` 로 linked worktree의 공유 ref/객체에 접근한다. **파일시스템 스토리지에서만 동작하므로** 이 옵션을 끄거나 다른 스토리지를 쓰면 3.1의 전제가 깨진다.
+linked worktree의 공유 ref/객체가 보여야 3.1의 전제가 선다. **파일시스템 스토리지에서만 동작한다** — 다른 스토리지를 쓰면 전제가 깨진다.
 
 ```go
 repo, err := git.PlainOpenWithOptions(cwd, &git.PlainOpenOptions{
-    DetectDotGit:          true,
-    EnableDotGitCommonDir: true,
+    DetectDotGit: true,
 })
 ```
+
+**go-git v6 에서 `EnableDotGitCommonDir` 옵션은 사라졌다.** commondir 해석이 `PlainOpen` 의 기본 동작이 되었기 때문이다 (`repository.go` 의 `dotGitCommonDirectory`). v5 기준으로 쓰인 이전 판은 이 옵션을 켜라고 했으나, v6 에서는 켤 옵션이 없고 켤 필요도 없다.
+
+요구사항 자체는 그대로다. 옵션이 사라졌으므로 "옵션을 켰는지" 대신 **"linked worktree 에서 공유 ref 가 실제로 보이는지"** 를 검사한다 (T0.12).
 
 `git` CLI 호출 시 `cmd.Dir` 은 common dir 로 고정한다. worktree 마다 `GIT_DIR` 이 다르지만 우리가 다루는 ref는 전부 공유 영역이다.
 
@@ -1197,17 +1200,32 @@ var (
 func classifyRefError(stderr []byte, exitCode int) error {
     s := string(stderr)
     switch {
+    // CAS 판정이 먼저다. 아래 주석 참조.
+    case strings.Contains(s, "but expected"),
+         strings.Contains(s, "reference already exists"):
+        return ErrCASConflict
     case strings.Contains(s, "cannot lock ref"),
          strings.Contains(s, "unable to create") && strings.Contains(s, ".lock"),
          strings.Contains(s, "Unable to create") && strings.Contains(s, ".lock"):
         return ErrLockBusy
-    case strings.Contains(s, "but expected"),
-         strings.Contains(s, "reference already exists"):
-        return ErrCASConflict
     }
-    return fmt.Errorf("update-ref: %s", strings.TrimSpace(s))
+    if trimmed := strings.TrimSpace(s); trimmed != "" {
+        return fmt.Errorf("update-ref: %s", trimmed)
+    }
+    return fmt.Errorf("update-ref: exit %d", exitCode)
 }
 ```
+
+**분기 순서가 정확성을 좌우한다.** git 은 CAS 실패도 잠금 문구로 감싸서 낸다.
+
+```
+fatal: update_ref failed for ref 'refs/x': cannot lock ref 'refs/x': is at <a> but expected <b>
+fatal: update_ref failed for ref 'refs/x': cannot lock ref 'refs/x': reference already exists
+```
+
+한 메시지에 `cannot lock ref` 와 `but expected` 가 같이 들어 있으므로, 잠금 검사를 먼저 두면 **모든 경쟁 패배가 `ErrLockBusy` 로 둔갑한다.** 에이전트는 exit 4 를 받고 다른 일을 찾는 대신 같은 이슈를 무한히 재시도하게 된다. 더 구체적인 CAS 판정을 앞에 둔다.
+
+stderr 가 비어 있는데 exit≠0 인 경우도 일반 오류로 떨어뜨린다.
 
 문자열 매칭은 git 버전에 따라 문구가 바뀔 수 있으므로 **취약하다.** 완화책:
 
@@ -1232,7 +1250,8 @@ ref update  → exec    git update-ref <ref> <new> <old>
 ### 14.8 패키지 구조
 
 ```
-cmd/ppwk/       CLI 진입점 (cobra)
+main.go              CLI 진입점 (urfave/cli v3)
+cmd/                 명령 정의 — 명령당 파일 하나
 internal/board/      도메인 로직: 상태 전이, gate, next 알고리즘
 internal/refstore/   RefStore 인터페이스 + ExecRefStore
 internal/model/      Issue, Plan, Decision 스키마 + JSON
@@ -1252,6 +1271,5 @@ internal/watch/      polling + hook socket 수신
       go-git 의 CheckAndSetReference 로는 통과하지 못하는 테스트여야 한다
 - classifyRefError: lock 실패와 CAS 실패를 각각 실제로 유발해 분류 검증
 - go-git 으로 만든 commit 을 git CLI 가 정상으로 읽는지 (trailer 포함)
-- EnableDotGitCommonDir 없이 열면 linked worktree 에서 ref 가 안 보이는지
-      (옵션 누락 회귀 방지)
+- linked worktree 에서 공유 ref 가 보이는지 (commondir 회귀 방지)
 ```

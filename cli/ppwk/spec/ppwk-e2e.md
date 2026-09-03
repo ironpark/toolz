@@ -168,7 +168,7 @@ worktree A 에서 show  → owner 가 C
 어느 worktree 에서 봐도 ref OID 가 동일
 ```
 
-**이 테스트가 설계 §3.1 의 전제를 직접 검증한다.** `EnableDotGitCommonDir` 를 빼면 반드시 실패해야 한다.
+**이 테스트가 설계 §3.1 의 전제를 직접 검증한다.** commondir 해석이 깨지면 반드시 실패해야 한다.
 
 ### E2E-3: 브랜치 독립성
 

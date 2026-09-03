@@ -60,9 +60,13 @@ func ValidateRefName(ref string) error {
 // ValidateID 는 이슈·plan·결정 ID 를 검사한다 (design §3.2).
 //
 // ID 는 ref 이름의 마지막 컴포넌트가 되므로 [A-Za-z0-9_-]+ 로 제한한다.
+// 선두 "-" 는 거부한다 — ref 이름은 git 에 인자로 넘어가므로 플래그로 읽힌다.
 func ValidateID(id string) error {
 	if id == "" {
 		return fmt.Errorf("ID 가 비어 있습니다")
+	}
+	if strings.HasPrefix(id, "-") {
+		return fmt.Errorf("ID 가 %q 로 시작합니다: %q", "-", id)
 	}
 	for _, r := range id {
 		ok := r == '-' || r == '_' ||

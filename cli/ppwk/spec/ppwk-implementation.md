@@ -60,7 +60,7 @@ type RefStore interface {
 - `ExecRefStore` — `git update-ref` / `--stdin` 래핑, `List` 는 go-git
 - `MemRefStore` — 테스트용. 진짜 mutex 로 원자성 보장
 - `classifyRefError` (§14.6)
-- repo 열기: `EnableDotGitCommonDir: true` (§14.4)
+- repo 열기: commondir 이 반영되는지 확인 (§14.4). go-git v6 는 기본 동작이라 켤 옵션이 없다
 
 ### 범위 밖
 
@@ -79,10 +79,12 @@ type RefStore interface {
            → 정확히 1개 성공, 15개 ErrCASConflict 또는 ErrLockBusy
 [T0.8] classifyRefError: lock 실패 문자열 → ErrLockBusy
 [T0.9] classifyRefError: CAS 실패 문자열 → ErrCASConflict
+           git 은 CAS 실패도 "cannot lock ref" 로 감싸서 낸다.
+           두 문구가 한 메시지에 있을 때 CAS 로 분류돼야 한다 (§14.6)
 [T0.10] classifyRefError: 알 수 없는 문자열 → 일반 오류 (ErrLockBusy 아님)
 [T0.11] linked worktree 3개에서 각각 List → 동일한 결과
-[T0.12] EnableDotGitCommonDir 없이 열면 linked worktree 에서 ref 안 보임
-            (옵션 누락 회귀 방지)
+[T0.12] linked worktree 에서 CAS 한 ref 가 본 저장소에서도 보임
+            (commondir 회귀 방지)
 ```
 
 #### fuzz (단계 0)
@@ -90,7 +92,7 @@ type RefStore interface {
 ```
 [F0.1] FuzzRefName — 우리 검증기와 git check-ref-format 의 차등 테스트
            우리가 통과시킨 ID 는 git 도 반드시 통과시켜야 한다.
-           `..`, `@{`, 후행 `.lock`, 제어문자, 빈 컴포넌트 등을
+           `..`, `@{`, 후행 `.lock`, 제어문자, 빈 컴포넌트, 선두 `-` 등을
            자체 구현으로 다 막았다고 착각하기 쉽다.
 
 [F0.2] FuzzClassifyRefError — 안전 방향 검증
@@ -109,6 +111,7 @@ type RefStore interface {
 | `git` 바이너리가 `PATH` 에 없음 | 시작 시 명확한 오류. 런타임에 발견되면 안 됨 |
 | `git` 버전 < 2.28 | 거부 (§6.3 hook 의존) |
 | ref 이름에 `..`, 공백, 제어문자 | `git check-ref-format` 통과 여부를 자체 검증 |
+| ref 이름이 `-` 로 시작 | 거부. git 인자로 넘어가 플래그로 해석된다 |
 | `List` 중 다른 프로세스가 ref 삭제 | 부분 결과 허용, panic 금지 |
 | `packed-refs` 로 packing 된 상태 | `List`/`Get` 정상 동작 |
 | CAS 대상이 loose 가 아니라 packed | `update-ref` 가 알아서 처리 — 검증만 |
