@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# paperwork reference-transaction hook
+# ppwk reference-transaction hook
 #
 # Install to $GIT_COMMON_DIR/hooks/reference-transaction (chmod +x).
 # Runs INSIDE the git process on every ref transaction, so it must:
@@ -16,11 +16,11 @@ STAGE="$1"
 # Only act once the transaction is durable.
 [ "$STAGE" = "committed" ] || exit 0
 
-PREFIX="refs/paperwork/"
-SOCK="${PAPERWORK_SOCK:-${GIT_COMMON_DIR:-.git}/paperwork.sock}"
+PREFIX="refs/ppwk/"
+SOCK="${PPWK_SOCK:-${GIT_COMMON_DIR:-.git}/ppwk.sock}"
 
 # Never let a broken listener wedge a git command.
-EMIT_TIMEOUT="${PAPERWORK_EMIT_TIMEOUT:-0.2}"
+EMIT_TIMEOUT="${PPWK_EMIT_TIMEOUT:-0.2}"
 
 payload=""
 while read -r old new ref; do

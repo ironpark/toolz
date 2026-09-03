@@ -1,0 +1,76 @@
+# AGENTS.md
+
+여러 에이전트가 각자의 worktree 에서 동시에 작업합니다. 작업 목록과 상태는 `ppwk` 로 공유합니다.
+
+작업 배정과 메시지 전달은 오케스트레이터가 합니다. `ppwk` 는 그 메시지가 가리키는 내용을 담습니다.
+
+## 작업을 받았을 때
+
+메시지로 이슈 ID(`T001` 등)를 받으면:
+
+```bash
+ppwk show T001     # 내용 확인. 연결된 결정도 함께 표시됨
+ppwk start T001    # 소유권 획득 + 시작
+# ... 작업 ...
+ppwk done T001     # 또는 block T001 --message "이유"
+```
+
+`start` 가 exit 3 이나 4 로 실패하면 이미 다른 에이전트가 가져간 것입니다. 사람에게 알리세요.
+
+## 작업을 만들 때
+
+```bash
+ppwk add "제목" --priority high
+# → T002 출력. 이 ID 를 메시지로 전달하세요
+```
+
+이슈는 `open` 으로 남고, 받는 쪽이 `start` 할 때 소유자가 생깁니다.
+
+## 결정을 내렸을 때
+
+기술 선택, 설계 방향 등 다른 에이전트가 알아야 할 결정은 기록합니다. 브랜치와 무관하게 즉시 공유됩니다.
+
+```bash
+ppwk decide "저장소는 SQLite" --context "..." --decision SQLite --issue T001
+ppwk decisions --issue T001    # 작업 전에 관련 결정 확인
+```
+
+## 스스로 고를 때
+
+```bash
+ppwk next --claim    # 의존성·우선순위를 반영해 하나 선택
+```
+
+빈 결과는 "할 일 없음" 이라는 정상 응답입니다.
+
+## 종료 코드
+
+| 코드 | 해야 할 일 |
+|---|---|
+| 0 | 계속 |
+| 3 | 멈추고 보고 — 잘못된 상태 전이 |
+| 4 | 다시 조회 후 판단 — 경쟁에서 짐 |
+| 5 | 이슈 ID 확인 |
+| 6 | 멈추고 보고 — 업그레이드 필요 |
+
+## 항상 지키는 것
+
+1. 상태 변경은 `ppwk` 명령으로만 합니다. 이 경로가 동시성을 보장합니다.
+2. 작업 전에 `start` 합니다. 소유권이 여기서 생깁니다.
+3. 수정 범위는 자기 worktree 안으로 제한합니다.
+4. 막히면 `block` 에 사유를 남깁니다.
+
+## 필요할 때 읽기
+
+| 상황 | 문서 |
+|---|---|
+| 조회 명령이 궁금할 때 | [docs/ppwk/query.md](docs/ppwk/query.md) |
+| 이슈를 만들 때 | [docs/ppwk/authoring.md](docs/ppwk/authoring.md) |
+| 상태·전이 규칙이 헷갈릴 때 | [docs/ppwk/states.md](docs/ppwk/states.md) |
+| 계획(plan/phase) 작업일 때 | [docs/ppwk/plans.md](docs/ppwk/plans.md) |
+| 결정을 기록하거나 찾을 때 | [docs/ppwk/decisions.md](docs/ppwk/decisions.md) |
+| 오류가 나거나 작업이 사라졌을 때 | [docs/ppwk/troubleshooting.md](docs/ppwk/troubleshooting.md) |
+| git 동작이 이상해 보일 때 | [docs/ppwk/git-behavior.md](docs/ppwk/git-behavior.md) |
+| 이 저장소의 빌드·규칙 | [docs/ppwk/project.md](docs/ppwk/project.md) |
+
+위 문서는 **필요할 때만 여세요.** 이 파일만으로 기본 작업이 됩니다.
