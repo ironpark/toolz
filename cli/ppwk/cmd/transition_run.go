@@ -57,16 +57,22 @@ func runTransition(action board.Action) func(*ctx) error {
 // emitIssues 는 여러 이슈의 결과를 낸다 (release --mine).
 func (x *ctx) emitIssues(issues []*board.Issue) error {
 	if x.json {
-		docs := make([]any, 0, len(issues))
-		for _, issue := range issues {
-			docs = append(docs, issue.Issue)
-		}
-		return x.emit(docs)
+		return x.emit(issueDocs(issues))
 	}
 	for _, issue := range issues {
 		x.printf("%s  %s\n", issue.ID, issue.Status)
 	}
 	return nil
+}
+
+// issueDocs 는 --json 이 낼 문서 배열이다. nil 이 아니라 빈 배열이 나와야
+// 소비자가 length 만 보면 된다.
+func issueDocs(issues []*board.Issue) []any {
+	docs := make([]any, 0, len(issues))
+	for _, issue := range issues {
+		docs = append(docs, issue.Issue)
+	}
+	return docs
 }
 
 // runHistory 는 이슈의 이벤트 이력을 낸다 (§2, §5.3).

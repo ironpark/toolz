@@ -20,9 +20,7 @@ func nextCommand() *cli.Command {
 			&cli.BoolFlag{Name: "dry-run", Usage: "후보 목록만 표시. 저장소를 변형하지 않음"},
 			&cli.IntFlag{Name: "max-attempts", Value: 5, Usage: "claim 시도 상한"},
 		},
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("next")
-		},
+		Action: action(runNext),
 	}
 }
 
@@ -47,6 +45,44 @@ func agentsCommand() *cli.Command {
 		Usage:  "에이전트 잠금 현황을 출력한다",
 		Action: action(runAgents),
 	}
+}
+
+// runNext 는 다음에 할 이슈를 고른다.
+//
+// 후보가 없으면 오류가 아니라 빈 결과에 exit 0 이다. 에이전트가 이것을
+// "할 일 없음" 으로 읽고 대기하는 것이 정상 흐름이다 (features §4).
+func runNext(x *ctx) error {
+	b, err := x.board()
+	if err != nil {
+		return err
+	}
+	result, err := b.Next(board.NextOptions{
+		Plan:        x.cmd.String("plan"),
+		Label:       x.cmd.String("label"),
+		Claim:       x.cmd.Bool("claim"),
+		DryRun:      x.cmd.Bool("dry-run"),
+		MaxAttempts: x.cmd.Int("max-attempts"),
+	})
+	if err != nil {
+		return err
+	}
+
+	if x.json {
+		data := map[string]any{"candidates": issueDocs(result.Candidates)}
+		if result.Claimed != nil {
+			data["claimed"] = result.Claimed.Issue
+		}
+		return x.emit(data)
+	}
+	if result.Claimed != nil {
+		x.printf("%s\n", result.Claimed.ID)
+		return nil
+	}
+	rows := make([][]string, 0, len(result.Candidates))
+	for _, c := range result.Candidates {
+		rows = append(rows, []string{c.ID, string(c.Priority), dash(c.Plan), dash(c.Phase), c.Title})
+	}
+	return x.table(rows)
 }
 
 func runReap(x *ctx) error {

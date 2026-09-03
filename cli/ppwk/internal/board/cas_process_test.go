@@ -31,6 +31,9 @@ func TestMain(m *testing.M) {
 	if dir := os.Getenv(casChildDir); dir != "" {
 		os.Exit(runMutateChild(dir))
 	}
+	if dir := os.Getenv(nextChildDir); dir != "" {
+		os.Exit(runNextChild(dir))
+	}
 	os.Exit(m.Run())
 }
 

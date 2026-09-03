@@ -120,8 +120,16 @@ func TestConcurrentReapRecoversOnce(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			// 저마다 다른 세션이다. 같은 세션이면 경쟁 자체가 없다.
-			clone := *b
-			clone.identity.Session = fmt.Sprintf("reaper-%d", i)
+			//
+			// 보드를 복사하지 않고 새로 연다. go-git 의 저장소 객체는
+			// goroutine 안전이 아니라서, 하나를 공유하면 보려는 CAS 경쟁이
+			// 아니라 저장소 내부 자료구조의 경쟁이 잡힌다.
+			clone, err := Open(b.Root(), session.Identity{
+				Agent: b.identity.Agent, Session: fmt.Sprintf("reaper-%d", i)})
+			if err != nil {
+				results <- -1
+				return
+			}
 			clone.leases = sameLocks(b, clone.identity)
 			clone.leases.Now = dead
 			clone.leaseSnapshot = clone.leases.List
