@@ -116,6 +116,9 @@ func verifyConfig(cmd *cli.Command, config *configuration.Config) []checkResult 
 	if config.Container.Enabled() {
 		results = append(results, checkContainer(config))
 	}
+	if config.Sandbox.Enabled {
+		results = append(results, checkSandbox(config))
+	}
 	// Unconditional: this reads the configuration and touches nothing, and an
 	// unpinned skill is exactly what someone runs verify to be told about.
 	results = append(results, checkSkills(config)...)
@@ -173,6 +176,22 @@ func checkScripts(config *configuration.Config) []checkResult {
 		}
 	}
 	return []checkResult{{statusPass, field + " syntax", ""}}
+}
+
+// checkSandbox reports that this machine can confine the trial. Availability is
+// already checked when the configuration loads, so reaching here means it can;
+// what is worth saying is the scope, since setup leaves the agent unconfined
+// and that is the case the sandbox is usually reached for.
+func checkSandbox(config *configuration.Config) checkResult {
+	if !config.Sandbox.AgentInside() {
+		return checkResult{statusWarn, "sandbox",
+			"scope setup: the agent itself is not confined, so it can still write outside the workspace"}
+	}
+	network := "network allowed"
+	if !config.Sandbox.AllowsNetwork() {
+		network = "network denied"
+	}
+	return checkResult{statusPass, "sandbox", "scope full, " + network}
 }
 
 // checkSkills reports what each remote skill entry will fetch. Nothing is

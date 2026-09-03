@@ -27,6 +27,11 @@ type TrialResult struct {
 	// Two runs of one configuration on different images are not the same
 	// measurement, and the report is the only place that would say so.
 	Container string `json:"container,omitempty"`
+	// Sandbox is the scope the trial was confined under, empty when it ran
+	// unconfined. It belongs beside Container for the same reason: a run whose
+	// agent could write anywhere on the machine did not measure the same thing
+	// as one whose agent was held to its workspace.
+	Sandbox string `json:"sandbox,omitempty"`
 
 	StartedAt time.Time `json:"started_at"`
 	// DurationSeconds covers the whole trial, setup and verification included:

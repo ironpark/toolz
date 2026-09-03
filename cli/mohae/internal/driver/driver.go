@@ -160,7 +160,7 @@ func (o Options) environ() []string { return process.Env(o.Env) }
 // grew its own copy could silently leave its agent on the host.
 func (o Options) containedCommand() func(ctx context.Context, path string, args []string, dir string, env []string) *exec.Cmd {
 	executor := o.executor()
-	if !executor.Contained() {
+	if !executor.Isolated() {
 		return nil
 	}
 	return func(ctx context.Context, path string, args []string, dir string, env []string) *exec.Cmd {

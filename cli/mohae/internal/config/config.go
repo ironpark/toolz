@@ -45,6 +45,10 @@ type Config struct {
 	// is off unless it names an image, so a configuration that does not ask
 	// for one never needs a runtime installed.
 	Container ContainerConfig `yaml:"container,omitempty"`
+	// Sandbox confines what the trial may write to while leaving it on this
+	// machine. It answers a different question from Container — confinement
+	// rather than a pinned toolchain — and the two are mutually exclusive.
+	Sandbox SandboxConfig `yaml:"sandbox,omitempty"`
 	// Prompts is the conversation, in order. More than one makes the trial
 	// multi-turn; each entry may carry a `when` condition, so the same
 	// configuration can describe follow-ups that only some runs need.
@@ -247,6 +251,7 @@ func (c *Config) ApplyDefaults() {
 		c.Report.Formats = []string{reportformat.Terminal}
 	}
 	c.Container.applyDefaults()
+	c.applySandboxDefaults()
 }
 
 // Validate reports what a trial cannot proceed without. It checks the shape of
@@ -266,6 +271,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("workspace.source is required")
 	}
 	if err := c.Container.validate(); err != nil {
+		return err
+	}
+	if err := c.validateSandbox(); err != nil {
 		return err
 	}
 	for index, pattern := range c.Workspace.Exclude {

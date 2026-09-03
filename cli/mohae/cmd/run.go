@@ -34,6 +34,8 @@ func NewRun(version string) *cli.Command {
 			&cli.StringFlag{Name: "init-script", Usage: "override the workspace setup script"},
 			&cli.StringFlag{Name: "container-image", Usage: "run the trial in this image instead of on the host"},
 			&cli.StringFlag{Name: "container-scope", Usage: "what runs in the container: setup (the default) or full, which includes the agent"},
+			&cli.BoolFlag{Name: "sandbox", Usage: "confine the trial's writes to its workspace, using the toolchain installed on this machine"},
+			&cli.StringFlag{Name: "sandbox-scope", Usage: "what the sandbox confines: setup (the default) or full, which includes the agent"},
 			&cli.StringSliceFlag{Name: "verify-command", Usage: "replace the commands that grade the finished workspace (repeatable)"},
 			&cli.StringFlag{Name: "mcp-config", Aliases: []string{"m"}, Usage: "override the MCP server configuration"},
 			&cli.StringFlag{Name: "output", Aliases: []string{"o"}, Value: "terminal", Usage: "report format: terminal, json, markdown, html"},
@@ -282,6 +284,19 @@ func applyRunOverrides(cmd *cli.Command, configs []*configuration.Config) error 
 				return fmt.Errorf("--container-scope needs a container: set one in the config or pass --container-image")
 			}
 			config.Container.Scope = value
+		}
+		if cmd.Bool("sandbox") {
+			config.Sandbox.Enabled = true
+			// A container makes the sandbox redundant and the two are rejected
+			// together, so the flag turns off a container the config asked for
+			// rather than failing: the flag is the more specific instruction.
+			config.Container.Image, config.Container.Build = "", ""
+		}
+		if value := cmd.String("sandbox-scope"); value != "" {
+			if !config.Sandbox.Enabled {
+				return fmt.Errorf("--sandbox-scope needs a sandbox: set one in the config or pass --sandbox")
+			}
+			config.Sandbox.Scope = value
 		}
 		if values := cmd.StringSlice("verify-command"); len(values) > 0 {
 			// Commands are shell text, not paths, so they pass through as

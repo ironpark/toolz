@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/ironpark/toolz/cli/mohae/internal/agent"
+	configuration "github.com/ironpark/toolz/cli/mohae/internal/config"
 	"github.com/ironpark/toolz/cli/mohae/internal/container"
 	"github.com/ironpark/toolz/cli/mohae/internal/fsutil"
+	sandboxpkg "github.com/ironpark/toolz/cli/mohae/internal/sandbox"
 	skillsrc "github.com/ironpark/toolz/cli/mohae/internal/skill"
 
 	processutil "github.com/ironpark/toolz/cli/mohae/internal/process"
@@ -57,8 +59,13 @@ type Workspace struct {
 	// setup holds copies of the scripts the configuration named, which live
 	// beside the config file and so are not visible inside a container.
 	setup string
+	// tmp is the trial's own temporary directory. A sandboxed trial is pointed
+	// at it because the machine's shared one cannot be made writable without
+	// giving the workspace back, and it is removed with the rest of the trial.
+	tmp string
 
 	container *container.Container
+	sandbox   *sandboxpkg.Sandbox
 }
 
 // PrepareWorkspace builds the directory a trial runs in: the source tree copied
@@ -81,6 +88,7 @@ func PrepareWorkspace(ctx context.Context, config *Config, agentType string, ski
 		agent:   processutil.Host{},
 		base:    base,
 		setup:   filepath.Join(base, "setup"),
+		tmp:     filepath.Join(base, "tmp"),
 	}
 	// One place rather than at each step below: a preparation step added later
 	// cannot forget the cleanup call and leave a temporary tree behind.
@@ -89,7 +97,7 @@ func PrepareWorkspace(ctx context.Context, config *Config, agentType string, ski
 			prepared.Cleanup()
 		}
 	}()
-	for _, directory := range []string{prepared.Scratch, prepared.Home, prepared.setup} {
+	for _, directory := range []string{prepared.Scratch, prepared.Home, prepared.setup, prepared.tmp} {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			return nil, err
 		}
@@ -105,6 +113,13 @@ func PrepareWorkspace(ctx context.Context, config *Config, agentType string, ski
 	// directory that has to already hold what the trial provided.
 	if config.Container.Enabled() {
 		if err := prepared.startContainer(ctx, config); err != nil {
+			return nil, err
+		}
+	}
+	// Mutually exclusive with the container above, which the configuration
+	// rejects: both want to be the trial's executor.
+	if config.Sandbox.Enabled {
+		if err := prepared.startSandbox(config); err != nil {
 			return nil, err
 		}
 	}
@@ -298,6 +313,20 @@ func (w *Workspace) Container() string {
 	return w.container.Image()
 }
 
+// Sandbox describes the confinement the trial ran under, or an empty string
+// when it ran unconfined. Like Container it is recorded in the report: a run
+// whose agent could write anywhere did not measure the same thing as one whose
+// agent could not.
+func (w *Workspace) Sandbox() string {
+	if w == nil || w.sandbox == nil {
+		return ""
+	}
+	if w.agent == w.sandbox {
+		return configuration.SandboxScopeFull
+	}
+	return configuration.SandboxScopeSetup
+}
+
 // startContainer resolves the runtime and starts the trial's container. It is
 // reached only when the configuration asked for one, so a missing runtime is
 // an error rather than a reason to fall back to the host: a trial that quietly
@@ -324,6 +353,31 @@ func (w *Workspace) startContainer(ctx context.Context, config *Config) error {
 	w.exec = started
 	if config.Container.AgentInside() {
 		w.agent = started
+	}
+	return nil
+}
+
+// startSandbox confines the trial to the directories it owns. Unlike the
+// container there is nothing to start: the profile is written once and every
+// command mohae builds afterwards refers to it.
+//
+// The profile goes in the trial's base directory, which is the one place under
+// it that is not writable — the workspace, the scratch directory and the home
+// are, and a profile the trial could rewrite would bound only the first command
+// run under it.
+func (w *Workspace) startSandbox(config *Config) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("sandbox: %w", err)
+	}
+	confined, err := sandboxpkg.New(filepath.Join(w.base, "sandbox.sb"), config.SandboxSpec(w.base, home))
+	if err != nil {
+		return err
+	}
+	w.sandbox = confined
+	w.exec = confined
+	if config.Sandbox.AgentInside() {
+		w.agent = confined
 	}
 	return nil
 }
