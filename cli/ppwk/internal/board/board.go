@@ -15,9 +15,15 @@ import (
 
 // Board 는 한 저장소의 보드다.
 type Board struct {
-	store    *refstore.ExecRefStore
+	// store 는 ref 갱신 경로다. 인터페이스인 이유는 결함 주입 때문이다 —
+	// 결정적 동시성 테스트가 여기에 지연과 실패를 끼워 넣는다 (D2.1).
+	store refstore.RefStore
+	// git 은 ref 밖의 git 접근(설정 등)이다. 결함 주입 대상이 아니다.
+	git      *refstore.ExecRefStore
 	repo     *git.Repository
 	identity session.Identity
+	// backoff 는 CAS 재시도 정책이다.
+	backoff Backoff
 	// root 는 저장소의 작업 트리 최상단이다. 에이전트 문서가 여기 놓인다.
 	root string
 }
@@ -34,14 +40,35 @@ func Open(path string, ident session.Identity) (*Board, error) {
 	}
 	return &Board{
 		store:    store,
+		git:      store,
 		repo:     store.Repo(),
 		identity: ident,
 		root:     root,
+		backoff:  DefaultBackoff(),
 	}, nil
 }
 
 // Store 는 ref 저장소를 돌려준다.
-func (b *Board) Store() *refstore.ExecRefStore { return b.store }
+func (b *Board) Store() refstore.RefStore { return b.store }
+
+// WithStore 는 ref 저장소를 바꾼 사본을 돌려준다.
+//
+// 결함 주입 테스트(D2.1)를 위한 것이다. 원본 Board 는 그대로 둔다.
+func (b *Board) WithStore(store refstore.RefStore) *Board {
+	clone := *b
+	clone.store = store
+	return &clone
+}
+
+// WithBackoff 는 재시도 정책을 바꾼 사본을 돌려준다. 테스트가 대기를 없앤다.
+func (b *Board) WithBackoff(backoff Backoff) *Board {
+	clone := *b
+	clone.backoff = backoff
+	return &clone
+}
+
+// Identity 는 이 실행의 주체다.
+func (b *Board) Identity() session.Identity { return b.identity }
 
 // Root 는 작업 트리 최상단이다.
 func (b *Board) Root() string { return b.root }
@@ -69,8 +96,8 @@ func (b *Board) requireWritable() error {
 		return err
 	}
 	if version > model.SchemaVersion {
-		return fmt.Errorf("보드 스키마 %d 는 이 CLI(%d)보다 높습니다. 읽기만 가능합니다 — 업그레이드하세요",
-			version, model.SchemaVersion)
+		return fmt.Errorf("%w: 보드 스키마 %d 는 이 CLI(%d)보다 높습니다. 읽기만 가능합니다 — 업그레이드하세요",
+			ErrSchemaTooNew, version, model.SchemaVersion)
 	}
 	return nil
 }

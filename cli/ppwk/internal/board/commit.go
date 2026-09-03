@@ -15,6 +15,9 @@ import (
 // ErrNotFound 는 대상 이슈·plan·결정이 없다는 뜻이다.
 var ErrNotFound = errors.New("대상을 찾을 수 없습니다")
 
+// ErrSchemaTooNew 는 보드가 이 CLI 보다 새 스키마라는 뜻이다 (§9.4, exit 6).
+var ErrSchemaTooNew = errors.New("스키마 버전 불일치")
+
 // isNotFound 는 ref 부재를 판정한다.
 func isNotFound(err error) bool {
 	return errors.Is(err, refstore.ErrRefNotFound) || errors.Is(err, ErrNotFound)

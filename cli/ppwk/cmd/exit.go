@@ -1,6 +1,13 @@
 package cmd
 
-import "fmt"
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/ironpark/toolz/cli/ppwk/internal/board"
+	"github.com/urfave/cli/v3"
+)
 
 // 종료 코드 (features §0.3)
 const (
@@ -50,4 +57,42 @@ func CASConflictError(format string, args ...any) *Error {
 // notImplemented 는 아직 구현되지 않은 명령의 자리표시자다.
 func notImplemented(name string) error {
 	return newError(ExitGeneral, "not_implemented", "%s: 아직 구현되지 않았습니다", name)
+}
+
+// action 은 도메인 함수를 cli.Command 의 Action 으로 감싼다.
+//
+// 종료 코드 결정을 여기 한 곳에 모은다. 명령마다 오류를 분류하면 새 명령이
+// 늘 때마다 빠뜨리게 되고, 그 결과는 조용히 잘못된 종료 코드다.
+func action(fn func(*ctx) error) func(context.Context, *cli.Command) error {
+	return func(_ context.Context, c *cli.Command) error {
+		return classify(fn(newCtx(c)))
+	}
+}
+
+// classify 는 도메인 오류를 종료 코드에 맞춘다 (features §0.3).
+func classify(err error) error {
+	if err == nil {
+		return nil
+	}
+	// 이미 코드가 붙어 있으면 그대로 둔다.
+	var coded *Error
+	if errors.As(err, &coded) {
+		return err
+	}
+
+	var transition *board.TransitionError
+	if errors.As(err, &transition) {
+		return TransitionError("%v", err)
+	}
+	var conflict *board.ConflictError
+	if errors.As(err, &conflict) {
+		return CASConflictError("%v", err)
+	}
+	switch {
+	case errors.Is(err, board.ErrNotFound):
+		return NotFoundError("%v", err)
+	case errors.Is(err, board.ErrSchemaTooNew):
+		return newError(ExitSchemaVerErr, "schema_mismatch", "%v", err)
+	}
+	return err
 }

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -144,9 +143,6 @@ func runShow(x *ctx) error {
 	}
 	issue, err := b.Show(x.cmd.Args().First())
 	if err != nil {
-		if isNotFound(err) {
-			return NotFoundError("%v", err)
-		}
 		return err
 	}
 	if x.json {
@@ -198,9 +194,4 @@ func readAll(r io.Reader) ([]byte, error) {
 		r = os.Stdin
 	}
 	return io.ReadAll(r)
-}
-
-// isNotFound 는 도메인 계층의 "없음" 을 알아본다.
-func isNotFound(err error) bool {
-	return errors.Is(err, board.ErrNotFound)
 }

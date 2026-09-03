@@ -1258,9 +1258,12 @@ internal/model/      Issue, Plan, Decision 스키마 + JSON
 internal/gitobj/     go-git 객체 생성/읽기 래퍼
 internal/session/    잠금 파일, 생존 판정, 도구 감지
 internal/watch/      polling + hook socket 수신
+internal/faultstore/ RefStore 결함 주입 (테스트용, D2.1)
 ```
 
 `internal/board` 는 `RefStore` 인터페이스에만 의존한다. 동시성 테스트(11.1)를 메모리 구현으로 빠르게 돌리고, 실제 경쟁은 `ExecRefStore` 로 별도 검증한다.
+
+설정 읽기·쓰기처럼 ref 가 아닌 git 접근은 이 인터페이스에 넣지 않는다. `Board` 가 `ExecRefStore` 핸들을 따로 들고 쓴다. 결함 주입의 대상은 ref 갱신 경로뿐이어야 하고, 설정 접근까지 인터페이스에 섞으면 그 경계가 흐려진다.
 
 ### 14.9 테스트 보강
 

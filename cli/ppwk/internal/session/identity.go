@@ -13,7 +13,7 @@ import (
 // Identity 는 한 번의 실행이 어떤 에이전트·세션에 속하는지다.
 type Identity struct {
 	Agent   string // 에이전트 ID
-	Session string // 세션 ID. 비어 있으면 단발 실행
+	Session string // 세션 ID. 감지되지 않으면 실행마다 새 nonce (§4.3)
 	// Source 는 값을 어디서 얻었는지다. doctor 가 감지 근거를 보여줄 때 쓴다.
 	AgentSource   string
 	SessionSource string
@@ -30,7 +30,7 @@ type Options struct {
 // Resolve 는 §0.2 와 §0.2.1 의 결정 순서를 그대로 따른다.
 //
 //	agent:   --agent → PPWK_AGENT → 도구 감지 → git config ppwk.agent → <hostname>:<worktree>
-//	session: PPWK_SESSION → 도구 세션 ID → (훅 등록 세션은 호출자가 채운다) → 없음
+//	session: PPWK_SESSION → 도구 세션 ID → 생성한 nonce
 func Resolve(opts Options) Identity {
 	detected := runby.Current()
 	id := Identity{}
@@ -67,7 +67,12 @@ func Resolve(opts Options) Identity {
 	default:
 		if session, ok := detected.SessionID(); ok {
 			id.Session, id.SessionSource = session.Value, "tool session ("+session.Agent.String()+")"
+			break
 		}
+		// 감지되는 세션이 없어도 비워 두지 않는다. 세션 값은 commit content 에
+		// 들어가 OID 를 갈라놓는 역할을 겸하므로 (§4.3), 비어 있으면 같은 초에
+		// 같은 전이를 시도한 두 프로세스가 동일한 commit 을 만든다.
+		id.Session, id.SessionSource = NewNonce(), "generated nonce"
 	}
 
 	return id

@@ -18,9 +18,7 @@ func initCommand() *cli.Command {
 			&cli.BoolFlag{Name: "force", Usage: "기존 hook 덮어쓰기"},
 			&cli.BoolFlag{Name: "no-agents-md", Usage: "에이전트 문서 생성 건너뛰기"},
 		},
-		Action: func(_ context.Context, c *cli.Command) error {
-			return runInit(newCtx(c))
-		},
+		Action: action(runInit),
 	}
 }
 

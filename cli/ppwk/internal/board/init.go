@@ -55,7 +55,7 @@ func (b *Board) Init(opts InitOptions) (*InitResult, error) {
 	}
 
 	// 3. CAS 경쟁이 잦으므로 잠금 대기를 기본값(100ms)보다 늘린다 (§4.2).
-	if err := b.store.ConfigSet("core.filesRefLockTimeout", "1000"); err != nil {
+	if err := b.git.ConfigSet("core.filesRefLockTimeout", "1000"); err != nil {
 		return nil, err
 	}
 
@@ -142,19 +142,19 @@ func (b *Board) SchemaVersion() (int, error) {
 //
 // --add 를 그냥 부르면 두 번째 init 에서 값이 중복된다. 멱등해야 한다.
 func (b *Board) ensureConfigContains(key, value string) error {
-	values, err := b.store.ConfigGetAll(key)
+	values, err := b.git.ConfigGetAll(key)
 	if err != nil {
 		return err
 	}
 	if slices.Contains(values, value) {
 		return nil
 	}
-	return b.store.ConfigAdd(key, value)
+	return b.git.ConfigAdd(key, value)
 }
 
 // initAdvice 는 사용자가 알아야 할 것을 모은다 (features §1.1).
 func (b *Board) initAdvice() (warnings, notes []string, err error) {
-	hooksPath, err := b.store.ConfigGet("core.hooksPath")
+	hooksPath, err := b.git.ConfigGet("core.hooksPath")
 	if err != nil {
 		return nil, nil, err
 	}
