@@ -80,14 +80,17 @@ func ToolByName(name string) (Tool, bool) {
 type Status struct {
 	Tool string `json:"tool"`
 	Path string `json:"path"`
-	// Configured 는 설정 파일이 있는지다.
+	// Configured 는 설정 파일이 있는지다. 우리 훅이 있다는 뜻은 아니다.
 	Configured bool `json:"configured"`
 	// Events 는 이벤트별 등록 여부다.
 	Events map[string]bool `json:"events"`
+	// Installed 는 모든 이벤트가 등록됐는지다. Configured 와 헷갈리기 쉬워
+	// 사람이 보는 ✓/✗ 와 같은 판정을 JSON 에도 그대로 낸다.
+	Installed bool `json:"installed"`
 }
 
-// Installed 는 모든 이벤트가 등록됐는지다.
-func (s Status) Installed() bool {
+// allEventsRegistered 는 모든 이벤트가 등록됐는지다.
+func (s Status) allEventsRegistered() bool {
 	for _, event := range Events {
 		if !s.Events[event] {
 			return false
@@ -107,6 +110,7 @@ func (t Tool) Status(root string) Status {
 	for _, event := range Events {
 		status.Events[event] = slices.Contains(t.commandsOf(config.hooks[event]), Command)
 	}
+	status.Installed = status.allEventsRegistered()
 	return status
 }
 

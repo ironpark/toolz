@@ -31,6 +31,14 @@ func OpenRepository(path string) (*git.Repository, error) {
 		DetectDotGit: true,
 	})
 	if err != nil {
+		// reftable 저장소는 go-git 이 아직 읽지 못한다 (refstorage 확장).
+		// 그대로 두면 "unknown extension: refstorage" 만 보이고, 사용자는
+		// 무엇이 문제인지 알 수 없다. 무엇이 안 되는지를 말해 준다.
+		if strings.Contains(err.Error(), "refstorage") {
+			return nil, fmt.Errorf(
+				"reftable ref backend 는 아직 지원하지 않습니다 (%s). "+
+					"git init --ref-format=files 로 만든 저장소를 쓰세요", path)
+		}
 		return nil, fmt.Errorf("저장소를 열 수 없습니다 (%s): %w", path, err)
 	}
 	return repo, nil

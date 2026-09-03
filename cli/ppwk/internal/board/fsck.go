@@ -542,17 +542,25 @@ func checkSupersedes(s *fsckScan) []Finding {
 	return findings
 }
 
-// checkStaleLocks 는 남아 있는 .lock 파일을 경고한다.
+// StaleLocks 는 남아 있는 .lock 파일의 경로다.
 //
-// 지우지 않는다. 진짜로 다른 프로세스가 작업 중일 수 있고, 그 경우 지우는
-// 것이 바로 우리가 막으려던 손상을 만든다 (§9.3).
-func (b *Board) checkStaleLocks() []Finding {
+// doctor 와 fsck 가 같은 것을 본다. 두 곳에서 따로 세면 언젠가 어긋난다.
+func (b *Board) StaleLocks() []string {
 	pattern := filepath.Join(b.git.CommonDir(), "refs", "ppwk", "*", "*.lock")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return nil
 	}
 	slices.Sort(matches)
+	return matches
+}
+
+// checkStaleLocks 는 남아 있는 .lock 파일을 경고한다.
+//
+// 지우지 않는다. 진짜로 다른 프로세스가 작업 중일 수 있고, 그 경우 지우는
+// 것이 바로 우리가 막으려던 손상을 만든다 (§9.3).
+func (b *Board) checkStaleLocks() []Finding {
+	matches := b.StaleLocks()
 	findings := make([]Finding, 0, len(matches))
 	for _, path := range matches {
 		findings = append(findings, finding(CheckStaleLock, LevelWarn, "",

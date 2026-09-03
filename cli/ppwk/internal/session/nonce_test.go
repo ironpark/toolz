@@ -2,6 +2,7 @@ package session
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -41,5 +42,27 @@ func TestResolvePrefersEnvSession(t *testing.T) {
 	got := Resolve(Options{Flag: "agent-a", Worktree: t.TempDir()})
 	if got.Session != "from-env" || got.SessionSource != "PPWK_SESSION" {
 		t.Fatalf("Session = %q (%s)", got.Session, got.SessionSource)
+	}
+}
+
+// 같은 셸에서 실행한 명령들은 같은 세션으로 묶여야 한다.
+//
+// 이것이 깨지면 훅 없는 사용자의 claim 다음 start 가 자기 것이 아니게 되고,
+// list --mine 은 언제나 비어 있게 된다.
+func TestShellSessionIsStableAcrossCalls(t *testing.T) {
+	first, ok := ShellSession()
+	if !ok {
+		t.Skip("부모 프로세스를 알 수 없는 환경입니다")
+	}
+	second, _ := ShellSession()
+	if first != second {
+		t.Fatalf("같은 프로세스에서 %q != %q", first, second)
+	}
+	if !strings.HasPrefix(first, "shell-") {
+		t.Fatalf("세션 = %q", first)
+	}
+	// nonce 와 달라야 한다 — 매번 새로 만드는 값이면 안 된다.
+	if first == NewNonce() {
+		t.Fatal("nonce 와 같습니다")
 	}
 }

@@ -71,7 +71,7 @@ func (r *Registry) register(allowShared bool, hookPID *int) (model.Lease, error)
 	err := r.withLocked(r.worktreePath(), func(f *os.File) error {
 		previous, readErr := readLeaseFile(f)
 		same := readErr == nil && previous.Agent == r.Identity.Agent && previous.Session == r.Identity.Session
-		if readErr == nil && previous.Session != r.Identity.Session && r.Alive(previous) && !allowShared {
+		if readErr == nil && !allowShared && r.conflicts(previous) {
 			return &WorktreeBusyError{Lease: previous}
 		}
 		now := model.NewTimestamp(r.Now())
@@ -105,6 +105,32 @@ func (r *Registry) register(allowShared bool, hookPID *int) (model.Lease, error)
 		return model.Lease{}, err
 	}
 	return lease, nil
+}
+
+// conflicts 는 이전 점유자가 이 세션을 막아야 하는지다 (§3.6).
+//
+// 세션이 같으면 갱신이므로 막지 않는다. 다르면 두 경우로 갈린다.
+//
+// hook_pid 가 있으면 그 세션은 지금 살아 있는 도구 프로세스다. 이름이 같아도
+// (같은 worktree 의 claude-code 두 개) 작업 트리를 함께 편집하면 서로의
+// 파일을 덮어쓰므로 막는다.
+//
+// hook_pid 가 없으면 근거는 last_activity 뿐이고, 그것은 "최근에 명령이
+// 있었다" 는 뜻일 뿐 프로세스가 살아 있다는 뜻이 아니다. 도구 통합 없이 셸에서
+// 쓰면 명령마다 세션 nonce 가 새로 생기므로 (§4.3), 이때도 막으면 claim 다음의
+// start 가 자기 자신에게 거부된다. 신원이 같다면 같은 사람의 다음 명령으로
+// 본다 — 에이전트 ID 는 이미 hostname 과 worktree 를 담고 있다.
+func (r *Registry) conflicts(previous model.Lease) bool {
+	switch {
+	case previous.Session == r.Identity.Session:
+		return false
+	case !r.Alive(previous):
+		return false
+	case previous.HookPID != nil:
+		return true
+	default:
+		return previous.Agent != r.Identity.Agent
+	}
 }
 
 // withLocked 는 파일을 열고 배타 잠금 아래에서 fn 을 부른다.
@@ -180,12 +206,22 @@ func (r *Registry) List() []model.Lease {
 
 // readLeaseAt 은 경로에서 기록 하나를 읽는다. 깨진 기록은 없는 것으로 본다 —
 // "건너뛴다" 의 정의가 두 벌 생기지 않게 한 곳에 둔다.
+// readLeaseAt 은 공유 잠금 아래에서 기록 하나를 읽는다.
+//
+// 잠금 없이 읽으면 안 된다. writeLease 는 파일을 잘라내고 다시 쓰므로, 그
+// 틈에 읽은 쪽은 빈 파일이나 잘린 JSON 을 본다. 그러면 손상된 기록으로
+// 판정되고, 살아 있는 소유자가 죽은 것으로 보여 그 사람의 claim 이 회수된다.
+// 공유 잠금이라 읽는 쪽끼리는 서로를 막지 않고, 쓰는 순간에만 기다린다.
 func readLeaseAt(path string) (model.Lease, bool) {
 	f, err := os.Open(path)
 	if err != nil {
 		return model.Lease{}, false
 	}
 	defer f.Close()
+	if err := flockShared(f); err != nil {
+		return model.Lease{}, false
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 	l, err := decodeLease(f)
 	return l, err == nil
 }
@@ -199,10 +235,15 @@ func readLeaseAt(path string) (model.Lease, bool) {
 // 프로세스가 죽으면 커널이 즉시 풀어 주므로 오래 기다려도 매달리지 않는다.
 const flockTimeout = 5 * time.Second
 
-func flock(f *os.File) error {
+func flock(f *os.File) error { return lockWith(f, syscall.LOCK_EX) }
+
+// flockShared 는 읽기용 공유 잠금이다.
+func flockShared(f *os.File) error { return lockWith(f, syscall.LOCK_SH) }
+
+func lockWith(f *os.File, how int) error {
 	deadline := time.Now().Add(flockTimeout)
 	for {
-		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+		if err := syscall.Flock(int(f.Fd()), how|syscall.LOCK_NB); err == nil {
 			return nil
 		} else if !errors.Is(err, syscall.EWOULDBLOCK) {
 			return fmt.Errorf("flock: %w", err)

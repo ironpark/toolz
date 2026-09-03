@@ -30,7 +30,7 @@ func TestInstallsSameCommandToBothTools(t *testing.T) {
 			t.Fatalf("%s: %v", tool.Name, err)
 		}
 		status := tool.Status(root)
-		if !status.Installed() {
+		if !status.Installed {
 			t.Fatalf("%s = %+v", tool.Name, status)
 		}
 		data, err := os.ReadFile(filepath.Join(root, tool.Path))
@@ -167,7 +167,7 @@ func TestUninstallLeavesForeignHooks(t *testing.T) {
 	if !strings.Contains(string(data), "남의 훅") {
 		t.Fatalf("남의 훅을 지웠습니다:\n%s", data)
 	}
-	if tool.Status(root).Installed() {
+	if tool.Status(root).Installed {
 		t.Fatal("status 가 여전히 설치됨입니다")
 	}
 
@@ -183,7 +183,7 @@ func TestStatusReportsPerEvent(t *testing.T) {
 	root := t.TempDir()
 
 	status := tool.Status(root)
-	if status.Configured || status.Installed() {
+	if status.Configured || status.Installed {
 		t.Fatalf("설정 없음 = %+v", status)
 	}
 
@@ -196,7 +196,7 @@ func TestStatusReportsPerEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	status = tool.Status(root)
-	if !status.Configured || status.Installed() {
+	if !status.Configured || status.Installed {
 		t.Fatalf("절반만 설치 = %+v", status)
 	}
 	if !status.Events["SessionStart"] || status.Events["SessionEnd"] {

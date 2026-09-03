@@ -206,6 +206,7 @@ type hookStatus struct {
 	Path       string          `json:"path"`
 	Configured bool            `json:"configured"`
 	Events     map[string]bool `json:"events"`
+	Installed  bool            `json:"installed"`
 }
 
 func hookStatusJSON(t *testing.T, dir string) map[string]hookStatus {
@@ -251,13 +252,9 @@ func TestHookInstallLifecycle(t *testing.T) {
 	}
 
 	runCLI(t, dir, "hook", "uninstall", "--agent-tools")
-	if hookStatusJSON(t, dir)["claude-code"].Installed() {
+	if hookStatusJSON(t, dir)["claude-code"].Installed {
 		t.Fatal("제거되지 않았습니다")
 	}
-}
-
-func (s hookStatus) Installed() bool {
-	return s.Events["SessionStart"] && s.Events["SessionEnd"]
 }
 
 // T10.1 git 의 reference-transaction 훅은 두지 않는다.

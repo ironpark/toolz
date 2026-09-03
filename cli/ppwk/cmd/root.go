@@ -27,6 +27,7 @@ func New(v Version, stdout, stderr io.Writer) *cli.Command {
 		EnableShellCompletion: true,
 		HideHelpCommand:       true,
 		Flags:                 globalFlags(),
+		Metadata:              map[string]any{},
 		Commands: []*cli.Command{
 			// 1. 저장소 관리
 			initCommand(),
@@ -85,10 +86,25 @@ func New(v Version, stdout, stderr io.Writer) *cli.Command {
 	root.OnUsageError = func(_ context.Context, _ *cli.Command, err error, _ bool) error {
 		return UsageError("%v", err)
 	}
+	// 알 수 없는 명령은 사용법 오류다. 흔적만 남기고 출력은 하지 않는다 —
+	// 종료 코드와 메시지는 다른 오류와 같은 경로로 나가야 한다 (§0.3).
 	root.CommandNotFound = func(_ context.Context, c *cli.Command, name string) {
-		c.ErrWriter.Write([]byte("알 수 없는 명령: " + name + "\n"))
+		c.Root().Metadata[metaUnknownCommand] = name
 	}
 	return root
+}
+
+// metaUnknownCommand 는 CommandNotFound 가 남기는 흔적의 키다.
+//
+// urfave/cli 의 CommandNotFound 는 오류를 돌려줄 수 없다. 전역 변수를 쓰면
+// 같은 프로세스의 다음 실행이 그것을 물려받으므로, 명령 인스턴스에 붙인다.
+const metaUnknownCommand = "ppwk.unknown_command"
+
+// UnknownCommand 는 이번 실행이 알 수 없는 명령이었는지다. main 이 종료
+// 코드를 정할 때 본다.
+func UnknownCommand(root *cli.Command) string {
+	name, _ := root.Metadata[metaUnknownCommand].(string)
+	return name
 }
 
 // globalFlags 는 모든 명령에 적용되는 플래그다 (§0.1).

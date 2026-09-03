@@ -120,6 +120,8 @@ type ListOptions struct {
 	Plan       string
 	Phase      string
 	Unassigned bool
+	// Mine 은 이 세션이 쥔 것만이다.
+	Mine bool
 	// Archived 는 archive/ 만 본다. All 은 둘 다 본다.
 	Archived bool
 	All      bool
@@ -168,9 +170,13 @@ func (b *Board) List(opts ListOptions) ([]ListEntry, error) {
 				// 손상된 이슈 하나가 목록 전체를 죽이지 않는다.
 				continue
 			}
-			if matches(entry, opts) {
-				entries = append(entries, entry)
+			if !matches(entry, opts) {
+				continue
 			}
+			if opts.Mine && !b.ownedByThisSession(entry) {
+				continue
+			}
+			entries = append(entries, entry)
 		}
 	}
 
@@ -236,6 +242,22 @@ func (b *Board) readEntry(ref string, hash plumbing.Hash) (ListEntry, error) {
 		Ref:      ref,
 		Commit:   hash.String(),
 	}, nil
+}
+
+// ownedByThisSession 은 owner 와 session 이 둘 다 이 실행의 것인지다.
+//
+// owner 는 trailer 에 있지만 session 은 없다. 그래서 소유자가 일치하는 것만
+// issue.json 을 마저 읽는다 — 전체를 읽으면 목록 조회를 trailer 만으로
+// 끝낸다는 §5.1 의 성질이 사라진다.
+func (b *Board) ownedByThisSession(entry ListEntry) bool {
+	if entry.Owner != b.identity.Agent {
+		return false
+	}
+	issue, err := b.Show(entry.ID)
+	if err != nil {
+		return false
+	}
+	return issue.Session == b.identity.Session
 }
 
 // matches 는 필터를 적용한다.

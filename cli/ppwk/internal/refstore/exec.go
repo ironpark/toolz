@@ -115,10 +115,23 @@ func (s *ExecRefStore) CAS(ref string, new, old plumbing.Hash) error {
 		// 삭제. old 를 붙여 남의 갱신을 지우지 않도록 한다.
 		args = []string{"update-ref", "-d", ref, old.String()}
 	} else {
-		// 생성은 old 가 ZeroHash 다. git 은 이를 "존재하면 안 됨" 으로 읽는다.
-		args = []string{"update-ref", ref, new.String(), old.String()}
+		// 생성은 old 가 ZeroHash 다. git 은 빈 문자열을 "존재하면 안 됨" 으로
+		// 읽는다.
+		args = []string{"update-ref", ref, new.String(), oldValue(old)}
 	}
 	return s.run(args, nil)
+}
+
+// oldValue 는 update-ref 에 넘길 이전 값이다.
+//
+// zero OID 를 문자열로 적으면 안 된다. plumbing.ZeroHash 는 40자리이고
+// SHA-256 저장소의 git 은 64자리를 요구하므로 "not a valid old SHA1" 으로
+// 거절한다. 빈 문자열은 해시 길이와 무관하게 "존재하면 안 됨" 을 뜻한다.
+func oldValue(h plumbing.Hash) string {
+	if h.IsZero() {
+		return ""
+	}
+	return h.String()
 }
 
 // Transaction 은 ops 를 전부 적용하거나 전부 적용하지 않는다 (design §4.4).
@@ -136,7 +149,7 @@ func (s *ExecRefStore) Transaction(ops []RefOp) error {
 		case OpCreate:
 			fmt.Fprintf(&buf, "create %s %s\n", op.Ref, op.New.String())
 		case OpUpdate:
-			fmt.Fprintf(&buf, "update %s %s %s\n", op.Ref, op.New.String(), op.Old.String())
+			fmt.Fprintf(&buf, "update %s %s %s\n", op.Ref, op.New.String(), oldValue(op.Old))
 		case OpDelete:
 			fmt.Fprintf(&buf, "delete %s %s\n", op.Ref, op.Old.String())
 		default:

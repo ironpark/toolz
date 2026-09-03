@@ -27,6 +27,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	root := cmd.New(cmd.Version{CLI: version, Schema: schemaVersion}, stdout, stderr)
 
 	err := root.Run(ctx, args)
+	if name := cmd.UnknownCommand(root); name != "" {
+		// 오타를 exit 0 으로 끝내면 스크립트가 성공했다고 믿는다 (§0.3).
+		err = cmd.UsageError("알 수 없는 명령: %s", name)
+	}
 	if err == nil {
 		return cmd.ExitOK
 	}

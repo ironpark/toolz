@@ -199,3 +199,86 @@ func TestLockHeldOnlyDuringUpdate(t *testing.T) {
 		t.Fatal("잠금을 풀었는데 Register 가 끝나지 않았다")
 	}
 }
+
+// 잠금 기록을 쓰는 도중에 읽어도 손상된 것으로 보이지 않는다.
+//
+// writeLease 는 파일을 잘라내고 다시 쓴다. 읽는 쪽이 잠금 없이 열면 그 틈에
+// 빈 파일이나 잘린 JSON 을 본다. 그러면 살아 있는 소유자가 죽은 것으로
+// 판정되고, 그 사람이 방금 claim 한 이슈가 회수된다 — 조용한 작업 유실이다.
+func TestConcurrentReadDuringWriteNeverSeesTornRecord(t *testing.T) {
+	dir := t.TempDir()
+	r := NewRegistry(dir, filepath.Join(dir, "wt"), Identity{Agent: "a", Session: "s1"})
+	if _, err := r.Register(false); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	// 쓰는 쪽: 계속 갱신한다.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := r.Register(false); err != nil {
+				t.Errorf("Register: %v", err)
+				return
+			}
+		}
+	}()
+
+	// 읽는 쪽: 매번 정확히 한 건이 보여야 한다.
+	for range 300 {
+		leases := r.List()
+		if len(leases) != 1 || leases[0].Agent != "a" || leases[0].Session != "s1" {
+			close(stop)
+			wg.Wait()
+			t.Fatalf("찢어진 기록을 읽었습니다: %#v", leases)
+		}
+	}
+	close(stop)
+	wg.Wait()
+}
+
+// 도구 통합 없이 셸에서 쓰면 명령마다 세션 nonce 가 새로 생긴다 (§4.3).
+// 그때도 worktree 배타를 세션 기준으로 걸면, claim 다음의 start 가 자기
+// 자신에게 거부된다 — 훅 없는 사용자가 아무것도 못 하게 된다.
+func TestSameAgentNewNonceIsNotBlocked(t *testing.T) {
+	dir := t.TempDir()
+	worktree := filepath.Join(dir, "wt")
+	first := NewRegistry(dir, worktree, Identity{Agent: "host:repo", Session: NewNonce()})
+	if _, err := first.Register(false); err != nil {
+		t.Fatal(err)
+	}
+	second := NewRegistry(dir, worktree, Identity{Agent: "host:repo", Session: NewNonce()})
+	if _, err := second.Register(false); err != nil {
+		t.Fatalf("같은 신원의 다음 명령이 거부됐습니다: %v", err)
+	}
+
+	// 다른 에이전트는 여전히 막힌다. 그것이 이 배타의 목적이다.
+	other := NewRegistry(dir, worktree, Identity{Agent: "host:other", Session: NewNonce()})
+	if _, err := other.Register(false); err == nil {
+		t.Fatal("다른 에이전트가 통과했습니다")
+	}
+}
+
+// 훅이 있으면 이름이 같아도 막는다. hook_pid 는 그 세션의 프로세스가 지금
+// 살아 있다는 증거이고, 같은 작업 트리를 둘이 편집하면 서로를 덮어쓴다.
+func TestSameAgentWithLiveHookIsBlocked(t *testing.T) {
+	dir := t.TempDir()
+	worktree := filepath.Join(dir, "wt")
+	first := NewRegistry(dir, worktree, Identity{Agent: "claude-code:repo", Session: "s1"})
+	if _, err := first.RegisterHook(os.Getpid(), false); err != nil {
+		t.Fatal(err)
+	}
+	second := NewRegistry(dir, worktree, Identity{Agent: "claude-code:repo", Session: "s2"})
+	_, err := second.Register(false)
+	var busy *WorktreeBusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("살아 있는 훅 세션이 있는데 통과했습니다: %v", err)
+	}
+}

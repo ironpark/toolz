@@ -156,7 +156,7 @@ linked worktree 목록과 각각의 가시성
 schema 버전 일치
 도구 훅 설치 상태
 현재 에이전트 신원과 lease 상태
-stale .lock 파일 존재 여부
+stale .lock 파일 존재 여부 (보고만 한다 — 지우지 않는다)
 도구 감지 결과와 감지 근거
 도구 훅 설치 상태
 ```

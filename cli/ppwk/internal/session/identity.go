@@ -84,7 +84,13 @@ func Resolve(opts Options) Identity {
 			id.Session, id.SessionSource = session.Value, toolSessionSource(session.Agent.String())
 			break
 		}
-		// 감지되는 세션이 없어도 비워 두지 않는다. 세션 값은 commit content 에
+		// 도구가 없으면 셸을 세션으로 본다. 명령마다 새 값을 만들면 세션이
+		// 명령 하나짜리가 되어 소유권과 --mine 이 무너진다.
+		if shell, ok := ShellSession(); ok {
+			id.Session, id.SessionSource = shell, "parent shell"
+			break
+		}
+		// 부모조차 알 수 없으면 nonce 로 간다. 세션 값은 commit content 에
 		// 들어가 OID 를 갈라놓는 역할을 겸하므로 (§4.3), 비어 있으면 같은 초에
 		// 같은 전이를 시도한 두 프로세스가 동일한 commit 을 만든다.
 		id.Session, id.SessionSource = NewNonce(), "generated nonce"

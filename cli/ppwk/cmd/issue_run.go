@@ -98,6 +98,7 @@ func runList(x *ctx) error {
 		Plan:       x.cmd.String("plan"),
 		Phase:      x.cmd.String("phase"),
 		Unassigned: x.cmd.Bool("unassigned"),
+		Mine:       x.cmd.Bool("mine"),
 		Archived:   x.cmd.Bool("archived"),
 		All:        x.cmd.Bool("all"),
 		Limit:      x.cmd.Int("limit"),

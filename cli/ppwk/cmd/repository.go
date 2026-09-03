@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/ironpark/toolz/cli/ppwk/internal/board"
@@ -98,8 +99,27 @@ func doctorChecks(b *board.Board) []check {
 		{Name: "session id", Status: statusOK, Value: id.Session, Via: id.SessionSource},
 	}
 	checks = append(checks, lockingCheck(b), worktreeCheck(b), livenessCheck(b),
-		holdingCheck(b), refStatsCheck(b))
+		holdingCheck(b), staleLockCheck(b), refStatsCheck(b))
 	return checks
+}
+
+// staleLockCheck 는 남아 있는 .lock 파일을 보고한다 (features §1).
+//
+// 지우지 않는다. 남의 .lock 을 함부로 지우면 진짜로 쓰는 중인 프로세스를
+// 깨뜨린다 — 그것이 우리가 막으려던 손상이다 (§9.3). 사람이 판단하도록
+// 있다는 사실만 알린다.
+func staleLockCheck(b *board.Board) check {
+	locks := b.StaleLocks()
+	if len(locks) == 0 {
+		return check{Name: "stale locks", Status: statusOK, Value: "없음"}
+	}
+	return check{
+		Name:   "stale locks",
+		Status: statusWarn,
+		Value:  fmt.Sprintf("%d개", len(locks)),
+		Via:    filepath.Base(locks[0]),
+		Hint:   "쓰는 중인 프로세스가 없다고 확인한 뒤에만 지우세요: " + strings.Join(locks, ", "),
+	}
 }
 
 // looseRefWarn 은 이 개수를 넘으면 정리를 권하는 임계값이다.
