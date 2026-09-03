@@ -68,6 +68,7 @@ func RunTrial(ctx context.Context, config *Config, options TrialOptions) (result
 		return result
 	}
 	result.Container = workspace.Container()
+	result.Sandbox = workspace.Sandbox()
 	// Recorded before anything can fail: which revision of a fetched skill the
 	// agent was given is part of what the run measured, whatever the verdict.
 	result.Skills = workspace.Skills

@@ -274,6 +274,10 @@ func (c *Container) Path(host string) string {
 // Contained is true: this is the whole point of the type.
 func (c *Container) Contained() bool { return true }
 
+// Isolated is true: a command spawned as a child of this process would run on
+// the host, outside the container the trial asked for.
+func (c *Container) Isolated() bool { return true }
+
 // ID is the container the trial ran in, for the report.
 func (c *Container) ID() string { return c.id }
 

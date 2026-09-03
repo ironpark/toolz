@@ -42,6 +42,7 @@ func (m *mappedExecutor) unmap(mapped string) string {
 }
 
 func (m *mappedExecutor) Contained() bool { return true }
+func (m *mappedExecutor) Isolated() bool  { return true }
 
 func TestTrialEnvNamesTheWorkspaceAsTheExecutorSeesIt(t *testing.T) {
 	workspace := &Workspace{Root: "/host/base/workspace"}

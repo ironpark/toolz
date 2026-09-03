@@ -29,10 +29,19 @@ type Executor interface {
 	// better for a command to fail on a missing file than to silently read a
 	// different one.
 	Path(host string) string
-	// Contained reports whether commands run anywhere other than this host. A
-	// driver reads it to decide whether looking for the agent CLI on the local
-	// filesystem means anything.
+	// Contained reports whether commands run anywhere other than this host,
+	// which is to say whether Path is more than the identity. It answers
+	// questions about paths: whether a script named by the configuration has
+	// to be copied somewhere the command can reach, and whether a path in the
+	// environment means the same thing on both sides.
 	Contained() bool
+	// Isolated reports whether a command started outside this executor would
+	// be a different command. It answers a question about launching rather
+	// than about paths, and the two do not always agree: a sandbox runs on
+	// this host under this host's paths, so it is not contained, but a command
+	// spawned around it would run unconfined. A driver reads this to decide
+	// whether it may let its SDK spawn the agent CLI itself.
+	Isolated() bool
 }
 
 // Host runs commands as child processes of this one. It is the executor a
@@ -55,6 +64,9 @@ func (Host) Path(host string) string { return host }
 
 // Contained is false: this is the host.
 func (Host) Contained() bool { return false }
+
+// Isolated is false: there is nothing here to run outside of.
+func (Host) Isolated() bool { return false }
 
 // Shell builds the `sh -c` form hooks, verification and the setup script all
 // use, so the shell mohae grades with is chosen once.
