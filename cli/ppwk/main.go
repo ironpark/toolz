@@ -1,44 +1,39 @@
 package main
 
 import (
+	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/ironpark/toolz/cli/ppwk/cmd"
+	"github.com/urfave/cli/v3"
 )
 
-const version = "dev"
+// 빌드 시 -ldflags 로 주입한다.
+var (
+	version       = "dev"
+	schemaVersion = "1"
+)
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	os.Exit(run(context.Background(), os.Args, os.Stdout, os.Stderr))
 }
 
-func run(args []string, stdout, stderr io.Writer) error {
-	flags := flag.NewFlagSet("ppwk", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+// run 은 종료 코드를 돌려준다 (§0.3).
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	root := cmd.New(cmd.Version{CLI: version, Schema: schemaVersion}, stdout, stderr)
 
-	showVersion := flags.Bool("version", false, "버전 출력")
-	flags.Usage = func() {
-		fmt.Fprintln(stderr, "사용법: ppwk [--version]")
-		fmt.Fprintln(stderr)
-		flags.PrintDefaults()
+	err := root.Run(ctx, args)
+	if err == nil {
+		return cmd.ExitOK
 	}
+	fmt.Fprintln(stderr, err)
 
-	if err := flags.Parse(args); err != nil {
-		return err
+	var coder cli.ExitCoder
+	if errors.As(err, &coder) {
+		return coder.ExitCode()
 	}
-	if flags.NArg() != 0 {
-		return fmt.Errorf("알 수 없는 인자: %s", flags.Arg(0))
-	}
-	if *showVersion {
-		fmt.Fprintf(stdout, "ppwk %s\n", version)
-		return nil
-	}
-
-	flags.Usage()
-	return errors.New("명령을 지정해 주세요")
+	return cmd.ExitGeneral
 }

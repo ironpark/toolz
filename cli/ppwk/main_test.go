@@ -2,34 +2,49 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/ironpark/toolz/cli/ppwk/cmd"
 )
 
-func TestRunVersion(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+func TestRunVersionFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
 
-	if err := run([]string{"--version"}, &stdout, &stderr); err != nil {
-		t.Fatalf("run() error = %v", err)
+	if code := run(context.Background(), []string{"ppwk", "--version"}, &stdout, &stderr); code != cmd.ExitOK {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", code, cmd.ExitOK, stderr.String())
 	}
-	if got, want := stdout.String(), "ppwk dev\n"; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
+	if !strings.Contains(stdout.String(), "dev") {
+		t.Fatalf("stdout = %q, want the version", stdout.String())
 	}
 }
 
-func TestRunWithoutCommandShowsUsage(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+func TestRunWithoutCommandShowsHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
 
-	err := run(nil, &stdout, &stderr)
-	if err == nil {
-		t.Fatal("run() error = nil, want an error")
+	run(context.Background(), []string{"ppwk"}, &stdout, &stderr)
+
+	if !strings.Contains(stdout.String(), "USAGE") {
+		t.Fatalf("stdout = %q, want usage", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "사용법: ppwk") {
-		t.Fatalf("stderr = %q, want usage", stderr.String())
+}
+
+func TestUnknownFlagIsUsageError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	if code := run(context.Background(), []string{"ppwk", "--nope"}, &stdout, &stderr); code != cmd.ExitUsage {
+		t.Fatalf("exit code = %d, want %d", code, cmd.ExitUsage)
+	}
+}
+
+func TestUnarchiveIsRejected(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	if code := run(context.Background(), []string{"ppwk", "unarchive", "T001"}, &stdout, &stderr); code != cmd.ExitUsage {
+		t.Fatalf("exit code = %d, want %d", code, cmd.ExitUsage)
+	}
+	if !strings.Contains(stderr.String(), "v1") {
+		t.Fatalf("stderr = %q, want the v1 notice", stderr.String())
 	}
 }
