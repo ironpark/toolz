@@ -33,6 +33,15 @@ func (s *ExecRefStore) ConfigGetAll(key string) ([]string, error) {
 	return strings.Split(out, "\n"), nil
 }
 
+// ConfigBool 은 bool 설정을 읽는다. 없으면 false 다.
+//
+// 해석을 직접 하지 않고 --type=bool 에 맡긴다. "yes"/"on"/"1" 을 우리가 다시
+// 정의하면 git 과 미묘하게 다른 참·거짓이 하나 더 생긴다.
+func (s *ExecRefStore) ConfigBool(key string) (bool, error) {
+	out, err := s.configOutput("--type=bool", "--get", key)
+	return out == "true", err
+}
+
 // ConfigSet 은 값을 덮어쓴다.
 func (s *ExecRefStore) ConfigSet(key, value string) error {
 	_, err := s.configOutput(key, value)

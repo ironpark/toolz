@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
+	"text/tabwriter"
 
 	"github.com/ironpark/toolz/cli/ppwk/internal/board"
 	"github.com/ironpark/toolz/cli/ppwk/internal/session"
@@ -40,11 +42,13 @@ func (x *ctx) board() (*board.Board, error) {
 	if err != nil {
 		return nil, err
 	}
-	ident := session.Resolve(session.Options{
-		Flag:     x.cmd.String("agent"),
-		Worktree: abs,
+	return board.OpenFor(path, board.OpenOptions{
+		Session: session.Options{
+			Flag:     x.cmd.String("agent"),
+			Worktree: abs,
+		},
+		AllowSharedWorktree: x.cmd.Bool("allow-shared-worktree"),
 	})
-	return board.Open(path, ident)
 }
 
 // printf 는 --quiet 이면 아무것도 하지 않는다.
@@ -53,6 +57,18 @@ func (x *ctx) printf(format string, args ...any) {
 		return
 	}
 	fmt.Fprintf(x.stdout, format, args...)
+}
+
+// table 은 정렬된 행들을 낸다. --quiet 이면 아무것도 하지 않는다.
+func (x *ctx) table(rows [][]string) error {
+	if x.quiet {
+		return nil
+	}
+	w := tabwriter.NewWriter(x.stdout, 0, 0, 2, ' ', 0)
+	for _, row := range rows {
+		fmt.Fprintln(w, strings.Join(row, "\t"))
+	}
+	return w.Flush()
 }
 
 // emit 은 --json 응답을 낸다 (features §0.4).

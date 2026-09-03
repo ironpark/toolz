@@ -25,6 +25,11 @@ type Options struct {
 	Worktree string // 현재 worktree 경로
 	// GitConfig 는 ppwk.agent 값을 돌려준다. nil 이면 건너뛴다.
 	GitConfig func() string
+	// Detect 는 도구 감지를 수행한다. nil 이면 runby.Current 다.
+	//
+	// runby.Current 는 프로세스당 한 번만 감지하고 결과를 캐시한다. 그래서
+	// 환경변수를 바꿔 가며 감지를 검증하려면 이 자리가 필요하다 (T4.20~T4.24).
+	Detect func() runby.Result
 }
 
 // Resolve 는 §0.2 와 §0.2.1 의 결정 순서를 그대로 따른다.
@@ -32,7 +37,11 @@ type Options struct {
 //	agent:   --agent → PPWK_AGENT → 도구 감지 → git config ppwk.agent → <hostname>:<worktree>
 //	session: PPWK_SESSION → 도구 세션 ID → 생성한 nonce
 func Resolve(opts Options) Identity {
-	detected := runby.Current()
+	detect := opts.Detect
+	if detect == nil {
+		detect = runby.Current
+	}
+	detected := detect()
 	id := Identity{}
 
 	suffix := filepath.Base(opts.Worktree)
@@ -45,7 +54,7 @@ func Resolve(opts Options) Identity {
 	default:
 		if primary, ok := detected.Primary(); ok {
 			id.Agent = primary.Name.String() + ":" + suffix
-			id.AgentSource = "tool detection (" + detected.Chain() + ")"
+			id.AgentSource = toolAgentSource(primary.Name.String(), detected.Chain())
 			break
 		}
 		if opts.GitConfig != nil {
@@ -66,7 +75,7 @@ func Resolve(opts Options) Identity {
 		id.Session, id.SessionSource = os.Getenv("PPWK_SESSION"), "PPWK_SESSION"
 	default:
 		if session, ok := detected.SessionID(); ok {
-			id.Session, id.SessionSource = session.Value, "tool session ("+session.Agent.String()+")"
+			id.Session, id.SessionSource = session.Value, toolSessionSource(session.Agent.String())
 			break
 		}
 		// 감지되는 세션이 없어도 비워 두지 않는다. 세션 값은 commit content 에
@@ -76,6 +85,37 @@ func Resolve(opts Options) Identity {
 	}
 
 	return id
+}
+
+// 도구 감지가 성공했을 때, 그 근거가 된 환경 변수 이름을 provenance 로 쓴다.
+// doctor 가 "왜 이 신원인가" 를 설명할 때 감지 체인보다 이쪽이 구체적이다.
+var (
+	agentEnvKeys = map[string][]string{
+		"claude-code": {"CLAUDECODE"},
+		"codex":       {"CODEX_THREAD_ID", "CODEX_SESSION_ID", "CODEX_SANDBOX"},
+	}
+	sessionEnvKeys = map[string][]string{
+		"claude-code": {"CLAUDE_CODE_SESSION_ID"},
+		"codex":       {"CODEX_THREAD_ID", "CODEX_SESSION_ID"},
+	}
+)
+
+// envSource 는 설정된 첫 후보 환경 변수의 이름을 돌려준다. 없으면 fallback 이다.
+func envSource(keys []string, fallback string) string {
+	for _, key := range keys {
+		if os.Getenv(key) != "" {
+			return key
+		}
+	}
+	return fallback
+}
+
+func toolAgentSource(agent, chain string) string {
+	return envSource(agentEnvKeys[agent], "tool detection ("+chain+")")
+}
+
+func toolSessionSource(agent string) string {
+	return envSource(sessionEnvKeys[agent], "tool session ("+agent+")")
 }
 
 // Interactive 는 진행 표시와 색상을 켤지 판단한다 (§0.4).

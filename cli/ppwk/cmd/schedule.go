@@ -2,7 +2,8 @@ package cmd
 
 import (
 	"context"
-
+	"github.com/ironpark/toolz/cli/ppwk/internal/board"
+	"github.com/ironpark/toolz/cli/ppwk/internal/model"
 	"github.com/urfave/cli/v3"
 )
 
@@ -33,22 +34,50 @@ func reapCommand() *cli.Command {
 		Usage: "죽은 소유자의 이슈를 회수한다",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{Name: "dry-run", Usage: "회수 대상만 표시"},
+			&cli.BoolFlag{Name: "allow-shared-worktree", Usage: "worktree 배타 확보를 건너뜀"},
 		},
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("reap")
-		},
+		Action: action(runReap),
 	}
 }
 
 // agentsCommand — 잠금 파일을 읽어 에이전트 현황을 출력한다 (§4, D13).
 func agentsCommand() *cli.Command {
 	return &cli.Command{
-		Name:  "agents",
-		Usage: "에이전트 잠금 현황을 출력한다",
-		Action: func(_ context.Context, _ *cli.Command) error {
-			return notImplemented("agents")
-		},
+		Name:   "agents",
+		Usage:  "에이전트 잠금 현황을 출력한다",
+		Action: action(runAgents),
 	}
+}
+
+func runReap(x *ctx) error {
+	b, err := x.board()
+	if err != nil {
+		return err
+	}
+	issues, err := b.Reap(board.ReapOptions{DryRun: x.cmd.Bool("dry-run")})
+	if err != nil {
+		return err
+	}
+	return x.emitIssues(issues)
+}
+
+func runAgents(x *ctx) error {
+	b, err := x.board()
+	if err != nil {
+		return err
+	}
+	agents := b.Agents()
+	if x.json {
+		if agents == nil {
+			agents = []model.Lease{}
+		}
+		return x.emit(agents)
+	}
+	rows := make([][]string, 0, len(agents))
+	for _, a := range agents {
+		rows = append(rows, []string{a.Agent, a.Session, a.Worktree, a.LastActivity.String()})
+	}
+	return x.table(rows)
 }
 
 // internalCommand — 도구 훅 전용. --help 에 노출하지 않는다 (§4).

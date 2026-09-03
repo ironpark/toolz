@@ -99,6 +99,9 @@ var forceExtends = map[Action][]model.Status{
 // 모든 전이가 §4.1 의 CAS 루프를 탄다. 규칙 검사는 Apply 안에서 하므로,
 // 경쟁에 밀려 다시 읽은 상태에 대해서도 자동으로 다시 검사된다.
 func (b *Board) Transition(action Action, id string, opts TransitionOptions) (*Issue, error) {
+	if err := b.RegisterSession(); err != nil {
+		return nil, err
+	}
 	rule, ok := transitions[action]
 	if !ok {
 		return nil, fmt.Errorf("알 수 없는 전이: %s", action)
@@ -169,7 +172,7 @@ func (b *Board) applyTransition(action Action, rule transition, issue *model.Iss
 
 // checkOwnership 은 소유권 규칙을 적용한다.
 func (b *Board) checkOwnership(own ownership, issue *model.Issue, opts TransitionOptions, reject func(string) error) error {
-	mine := issue.Owner == "" || issue.Owner == b.identity.Agent
+	mine := issue.Owner == "" || (issue.Owner == b.identity.Agent && issue.Session == b.identity.Session)
 
 	switch own {
 	case ownTake:
