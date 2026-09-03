@@ -5,11 +5,11 @@ import (
 	"log"
 	"os"
 
-	"github.com/ironpark/toolz/cli/planr/cli"
+	"github.com/ironpark/toolz/cli/planr/cmd"
 )
 
 func main() {
-	if err := cli.Run(context.Background(), os.Args); err != nil {
+	if err := cmd.Run(context.Background(), os.Args); err != nil {
 		log.Fatal(err)
 	}
 }

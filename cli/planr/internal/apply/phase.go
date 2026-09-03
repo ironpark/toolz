@@ -13,6 +13,7 @@ import (
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
 	"github.com/ironpark/toolz/cli/planr/internal/plan"
 	"github.com/ironpark/toolz/cli/planr/internal/planlock"
+	"github.com/ironpark/toolz/cli/planr/internal/planstore"
 	"github.com/ironpark/toolz/cli/planr/internal/validation"
 	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
@@ -41,7 +42,7 @@ func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun bool, o
 	if err != nil {
 		return Operation{}, fmt.Errorf("parse %s/PLAN.md: %w", planDirectory, err)
 	}
-	if mdoc.FrontString(planFront, "plan_status") == "done" {
+	if mdoc.FrontString(planFront, "plan_status") == draft.StatusDone {
 		detail := fmt.Sprintf("plan %q is already done; new phases can only be applied to open plans", planDirectory)
 		return Operation{}, validation.NewFailure(validation.Record{Rule: "plan_done", Section: "frontmatter", Detail: detail}, detail)
 	}
@@ -71,7 +72,7 @@ func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun bool, o
 		return Operation{}, fmt.Errorf("update %s/PLAN.md: %w", planDirectory, err)
 	}
 	updatedPlanFront := mdoc.CopyFront(planFront)
-	updatedPlanFront["plan_status"] = "in-progress"
+	updatedPlanFront["plan_status"] = draft.StatusInProgress
 	delete(updatedPlanFront, "completed_at")
 	phasePath := filepath.Join(planRoot, plan.PhaseDocumentPath(phaseID, meta.Slug))
 	phaseContents, err := mdoc.Render(plan.PhaseFrontmatter(planDirectory, meta), plan.PhaseDocumentBody(settings.Language, d.Title, d.Planned, d.Completion))
@@ -94,11 +95,10 @@ func Phase(d PhaseDraft, settings config.Config, repoRoot string, dryRun bool, o
 	if err := vfs.MkdirAll(filepath.Join(planRoot, "phases"), 0755); err != nil {
 		return Operation{}, err
 	}
-	if err := mdoc.WriteAtomically(phasePath, phaseContents); err != nil {
-		return Operation{}, err
-	}
-	if err := mdoc.WriteAtomically(planPath, updatedPlanContents); err != nil {
-		_ = vfs.Remove(phasePath)
+	if err := planstore.Apply(
+		planstore.Create(phasePath, phaseContents),
+		planstore.Update(planPath, string(planRaw), updatedPlanContents),
+	); err != nil {
 		return Operation{}, err
 	}
 	fmt.Fprintf(output, "Added %s phase %02d: %s\n", planDirectory, phaseID, phasePath)

@@ -21,34 +21,6 @@ type Issue struct {
 	Message  string
 }
 
-// Reporter accumulates diagnostics and prints the human-readable report as
-// checks run. JSON callers get the collected records instead.
-type Reporter struct {
-	Issues  int
-	Records []Issue
-	JSON    bool
-}
-
-func (r *Reporter) Add(issue Issue) {
-	r.Records = append(r.Records, issue)
-	if r.JSON {
-		r.Issues++
-		return
-	}
-	if issue.Location == "" {
-		fmt.Printf("FAIL: %s\n", issue.Message)
-	} else {
-		fmt.Printf("FAIL %s: %s\n", issue.Location, issue.Message)
-	}
-	r.Issues++
-}
-
-func (r *Reporter) Printf(format string, values ...any) {
-	if !r.JSON {
-		fmt.Printf(format, values...)
-	}
-}
-
 type Phase struct {
 	plan.StoredPhase
 	path  string
@@ -201,10 +173,10 @@ func InspectPlan(planRoot, directory string) (Inspection, []Issue) {
 	if inspection.PlanReadable && inspection.PhaseDataOK {
 		inspection.ChecklistIssues = append(inspection.ChecklistIssues, compareChecklist(inspection)...)
 		planStatus := stringValue(inspection.Front["plan_status"])
-		expected := "done"
+		expected := draft.StatusDone
 		for _, phase := range inspection.Phases {
-			if phase.Status != "done" {
-				expected = "in-progress"
+			if phase.Status != draft.StatusDone {
+				expected = draft.StatusInProgress
 				break
 			}
 		}
@@ -223,7 +195,7 @@ func validatePlanFrontmatter(directory string, front map[string]any) []Issue {
 	issues := []Issue{}
 	location := directory + "/PLAN.md"
 	status := stringValue(front["plan_status"])
-	if status != "in-progress" && status != "done" {
+	if status != draft.StatusInProgress && status != draft.StatusDone {
 		issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("plan_status %q is invalid; expected in-progress or done", status)})
 	}
 	if value, found := front["depends_on"]; found {
@@ -265,7 +237,7 @@ func validatePlanFrontmatter(directory string, front map[string]any) []Issue {
 func validatePhase(directory string, phase Phase) []Issue {
 	location := directory + "/phases/" + filepath.Base(phase.path)
 	issues := []Issue{}
-	if !plan.StatusValues[phase.Status] {
+	if !draft.ValidStatus(phase.Status) {
 		issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("status %q is invalid", phase.Status)})
 	}
 	if err := plan.ValidateStatusChange(phase.front, phase.Status); err != nil {
@@ -369,7 +341,7 @@ func compareChecklist(inspection Inspection) []Issue {
 		if entry.title != phase.Title {
 			issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("checklist phase %02d title %q does not match phase file title %q", phase.ID, entry.title, phase.Title)})
 		}
-		expectedChecked := phase.Status == "done"
+		expectedChecked := phase.Status == draft.StatusDone
 		if entry.checked != expectedChecked {
 			issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("checklist phase %02d is %s but phase file status is %q", phase.ID, checklistState(entry.checked), phase.Status)})
 		}
@@ -391,7 +363,7 @@ func RepairChecklist(body string, phases []Phase) (string, error) {
 	sort.Slice(sortedPhases, func(i, j int) bool { return sortedPhases[i].ID < sortedPhases[j].ID })
 	entries := make([]string, 0, len(sortedPhases))
 	for _, phase := range sortedPhases {
-		entries = append(entries, plan.ChecklistEntry(phase.ID, phase.Title, phase.Slug, phase.Status == "done"))
+		entries = append(entries, plan.ChecklistEntry(phase.ID, phase.Title, phase.Slug, phase.Status == draft.StatusDone))
 	}
 	replacement := "\n"
 	if len(entries) > 0 {
@@ -418,7 +390,8 @@ func checklistState(checked bool) string {
 	return "unchecked"
 }
 
-func CheckPlanDependencies(reporter *Reporter, inspection Inspection, byName map[string]Inspection) {
+func CheckPlanDependencies(inspection Inspection, byName map[string]Inspection) []Issue {
+	issues := []Issue{}
 	location := inspection.Directory + "/PLAN.md"
 	if inspection.Front != nil {
 		if value, found := inspection.Front["depends_on"]; found {
@@ -430,11 +403,11 @@ func CheckPlanDependencies(reporter *Reporter, inspection Inspection, byName map
 					}
 					target, found := byName[dependency.Plan]
 					if !found {
-						reporter.Add(Issue{Location: location, Message: fmt.Sprintf("broken dependency %q: plan is not registered", raw)})
+						issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("broken dependency %q: plan is not registered", raw)})
 						continue
 					}
 					if dependency.Phase != nil && !hasPhase(target, *dependency.Phase) {
-						reporter.Add(Issue{Location: location, Message: fmt.Sprintf("broken dependency %q: phase %02d is not present in %s", raw, *dependency.Phase, target.Directory)})
+						issues = append(issues, Issue{Location: location, Message: fmt.Sprintf("broken dependency %q: phase %02d is not present in %s", raw, *dependency.Phase, target.Directory)})
 					}
 				}
 			}
@@ -442,7 +415,7 @@ func CheckPlanDependencies(reporter *Reporter, inspection Inspection, byName map
 	}
 
 	if !inspection.PhaseDataOK {
-		return
+		return issues
 	}
 	drafts := make([]draft.Phase, 0, len(inspection.Phases))
 	for _, phase := range inspection.Phases {
@@ -457,8 +430,9 @@ func CheckPlanDependencies(reporter *Reporter, inspection Inspection, byName map
 		drafts = append(drafts, draft.Phase{Title: phase.Title, Meta: meta})
 	}
 	if err := draft.ValidatePhaseDependencies(drafts); err != nil {
-		reporter.Add(Issue{Location: inspection.Directory, Message: "broken phase dependency graph: " + err.Error()})
+		issues = append(issues, Issue{Location: inspection.Directory, Message: "broken phase dependency graph: " + err.Error()})
 	}
+	return issues
 }
 
 func hasPhase(inspection Inspection, id int) bool {

@@ -46,8 +46,24 @@ func IsOS() bool {
 // ReadFile returns the contents of a file.
 func ReadFile(path string) ([]byte, error) { return current.ReadFile(path) }
 
-// ReadDir lists a directory, sorted by filename.
-func ReadDir(path string) ([]fs.FileInfo, error) { return current.ReadDir(path) }
+// ReadDir lists a directory, sorted by filename. On the machine's filesystem
+// it reads directory entries directly, which reports each name and its kind
+// without a stat per entry; afero's ReadDir stats every entry to build the
+// FileInfo none of planr's callers need.
+func ReadDir(path string) ([]fs.DirEntry, error) {
+	if IsOS() {
+		return os.ReadDir(path)
+	}
+	infos, err := current.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]fs.DirEntry, len(infos))
+	for index, info := range infos {
+		entries[index] = fs.FileInfoToDirEntry(info)
+	}
+	return entries, nil
+}
 
 // Stat reports the file information for a path.
 func Stat(path string) (fs.FileInfo, error) { return current.Stat(path) }

@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"github.com/ironpark/toolz/cli/planr/internal/apply"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
 )
 
@@ -32,10 +33,10 @@ func Value() Output {
 	return Output{
 		Name:                 "planr-plan-documents",
 		Version:              1,
-		RequiredPlanSections: append([]string{}, draft.RequiredSections...),
+		RequiredPlanSections: draft.RequiredSections(),
 		PlanFrontmatter:      []string{"plan_name", "description", "depends_on"},
-		PhaseStatuses:        []string{"planned", "conditional", "in-progress", "done"},
-		NewPhaseStatuses:     []string{"planned", "conditional"},
+		PhaseStatuses:        draft.Statuses(),
+		NewPhaseStatuses:     draft.NewPhaseStatuses(),
 		DependencyNotation:   "plan-name or plan-name#phase-number; phase drafts may use an existing phase number or slug",
 		PhaseBlock: PhaseBlock{
 			Heading:      "## PHASE — <title>",
@@ -51,7 +52,7 @@ func Value() Output {
 		},
 		PhaseDraftFrontmatter: []string{"planr_new: phase", "planr_plan", "phase_title", "slug", "perf_phase", "depends_on", "status", "entry_condition"},
 		EditFrontmatter:       []string{"planr_edit", "planr_target", "planr_base", "planr_section (section checkouts)", "planr_phase and planr_slug (phase checkouts)"},
-		ApplyKinds:            []string{"full plan draft", "phase draft", "planr_edit checkout"},
+		ApplyKinds:            []string{"full " + apply.KindPlan + " draft", apply.KindPhase + " draft", "planr_" + apply.KindEdit + " checkout"},
 		DerivedRegions:        []string{"PLAN.md phase checklist", "PLAN.md plan_status", "phase status transitions"},
 		// Both evaluated agents reached for schema first and never discovered
 		// that apply can report failures as data, so the contract advertises it.

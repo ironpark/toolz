@@ -4,32 +4,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	git "github.com/go-git/go-git/v5"
 	"github.com/ironpark/toolz/cli/planr/internal/draft"
-	"github.com/ironpark/toolz/cli/planr/internal/hooks"
 	"github.com/ironpark/toolz/cli/planr/internal/mdoc"
+	"github.com/ironpark/toolz/cli/planr/internal/planstore"
 	"github.com/ironpark/toolz/cli/planr/internal/vfs"
 )
-
-var StatusValues = map[string]bool{
-	"planned":     true,
-	"conditional": true,
-	"in-progress": true,
-	"done":        true,
-}
 
 // EnsureDependenciesMet refuses to advance a phase whose prerequisites are not
 // done. It covers both the phase's own depends_on and the plan-level
 // depends_on in PLAN.md, which is what `status` reports as `wait`. Resetting a
 // phase to planned or conditional moves backwards and is never blocked.
 func EnsureDependenciesMet(planDirectories []string, planRoot, planDirectory string, phaseID int, status string) error {
-	if status != "in-progress" && status != "done" {
+	if status != draft.StatusInProgress && status != draft.StatusDone {
 		return nil
 	}
 	phases, err := ReadPhases(planRoot)
@@ -61,7 +51,7 @@ func EnsureDependenciesMet(planDirectories []string, planRoot, planDirectory str
 			switch {
 			case !found:
 				unmet = append(unmet, fmt.Sprintf("phase %02d (not found)", *dependency.Phase))
-			case phase.Status != "done":
+			case phase.Status != draft.StatusDone:
 				unmet = append(unmet, fmt.Sprintf("phase %02d %q (%s)", phase.ID, phase.Title, phase.Status))
 			}
 			continue
@@ -118,7 +108,7 @@ func unmetDependency(planDirectories []string, dependency draft.Dependency) stri
 		if phase.ID != *dependency.Phase {
 			continue
 		}
-		if phase.Status != "done" {
+		if phase.Status != draft.StatusDone {
 			return fmt.Sprintf("%s (%s)", label, phase.Status)
 		}
 		return ""
@@ -143,175 +133,6 @@ func planLevelDependencies(planRoot string) ([]draft.Dependency, error) {
 	return dependencies, nil
 }
 
-func EnsureCleanSource(repoRoot string, planDirectories, ignore []string) error {
-	paths, err := UncommittedSourcePaths(repoRoot, planDirectories, ignore)
-	if err != nil {
-		return fmt.Errorf("cannot check uncommitted source changes: %w; use --force to bypass this check", err)
-	}
-	if len(paths) == 0 {
-		return nil
-	}
-	lines := make([]string, len(paths))
-	for index, path := range paths {
-		lines[index] = "  - " + path
-	}
-	return fmt.Errorf("cannot mark phase done while source changes are uncommitted:\n%s\ncommit the source changes first or use --force", strings.Join(lines, "\n"))
-}
-
-func UncommittedSourcePaths(repoRoot string, planDirectories, ignore []string) ([]string, error) {
-	repository, err := git.PlainOpenWithOptions(repoRoot, &git.PlainOpenOptions{EnableDotGitCommonDir: true})
-	if err != nil {
-		return nil, err
-	}
-	worktree, err := repository.Worktree()
-	if err != nil {
-		return nil, err
-	}
-	status, err := worktree.Status()
-	if err != nil {
-		return nil, err
-	}
-	paths := []string{}
-	ignorePatterns := compileIgnorePatterns(ignore)
-	for path, fileStatus := range status {
-		if fileStatus == nil || (fileStatus.Staging == git.Unmodified && fileStatus.Worktree == git.Unmodified) {
-			continue
-		}
-		if !isGeneratedPlanPath(repoRoot, planDirectories, path) && !isPlanDraftPath(repoRoot, path) && !matchesIgnorePatterns(path, ignorePatterns) {
-			paths = append(paths, path)
-		}
-	}
-	sort.Strings(paths)
-	return paths, nil
-}
-
-// isPlanDraftPath reports whether a dirty file is planr's own scratch output.
-// Drafts and checkouts survive their apply command, so without this they show
-// up as "uncommitted source changes" and force the author to commit planr's
-// own scratch output or reach for --force.
-func isPlanDraftPath(repoRoot, relativePath string) bool {
-	clean := filepath.ToSlash(filepath.Clean(relativePath))
-	if clean == ".planr" || strings.HasPrefix(clean, ".planr/") {
-		return true
-	}
-	if !strings.EqualFold(filepath.Ext(relativePath), ".md") {
-		return false
-	}
-	raw, err := vfs.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(relativePath)))
-	if err != nil {
-		return false
-	}
-	front, _, err := mdoc.Split(string(raw))
-	if err != nil {
-		return false
-	}
-	if name, ok := front["plan_name"].(string); ok && name != "" {
-		return true
-	}
-	if value, ok := front["planr_new"].(string); ok && value == "phase" {
-		return true
-	}
-	_, ok := front["planr_edit"]
-	return ok
-}
-
-// ignorePattern is one config ignore entry, with its glob form compiled once
-// so matching many paths does not recompile the same expression.
-type ignorePattern struct {
-	raw        string
-	expression *regexp.Regexp
-}
-
-func compileIgnorePatterns(patterns []string) []ignorePattern {
-	compiled := make([]ignorePattern, 0, len(patterns))
-	for _, pattern := range patterns {
-		pattern = filepath.ToSlash(strings.TrimSpace(pattern))
-		pattern = strings.TrimPrefix(pattern, "./")
-		if pattern == "" {
-			continue
-		}
-		compiled = append(compiled, ignorePattern{raw: pattern, expression: globPathExpression(pattern)})
-	}
-	return compiled
-}
-
-func (p ignorePattern) match(path string) bool {
-	if p.expression != nil && p.expression.MatchString(path) {
-		return true
-	}
-	return !strings.ContainsAny(p.raw, "*?") && (path == p.raw || strings.HasPrefix(path, strings.TrimSuffix(p.raw, "/")+"/"))
-}
-
-func IsIgnoredPath(relativePath string, patterns []string) bool {
-	return matchesIgnorePatterns(relativePath, compileIgnorePatterns(patterns))
-}
-
-func matchesIgnorePatterns(relativePath string, patterns []ignorePattern) bool {
-	path := filepath.ToSlash(filepath.Clean(relativePath))
-	for _, pattern := range patterns {
-		if pattern.match(path) {
-			return true
-		}
-	}
-	return false
-}
-
-func globPathExpression(pattern string) *regexp.Regexp {
-	pattern = filepath.ToSlash(pattern)
-	var expression strings.Builder
-	expression.WriteString("^")
-	for index := 0; index < len(pattern); index++ {
-		switch pattern[index] {
-		case '*':
-			if index+1 < len(pattern) && pattern[index+1] == '*' {
-				expression.WriteString(".*")
-				index++
-			} else {
-				expression.WriteString("[^/]*")
-			}
-		case '?':
-			expression.WriteString("[^/]")
-		default:
-			expression.WriteString(regexp.QuoteMeta(string(pattern[index])))
-		}
-	}
-	expression.WriteString("$")
-	compiled, err := regexp.Compile(expression.String())
-	if err != nil {
-		return nil
-	}
-	return compiled
-}
-
-func isGeneratedPlanPath(repoRoot string, planDirectories []string, relativePath string) bool {
-	absPath := filepath.Join(repoRoot, filepath.FromSlash(relativePath))
-	if filepath.Clean(absPath) == filepath.Join(repoRoot, ".planr.yaml") {
-		return true
-	}
-	for _, planDirectory := range planDirectories {
-		relative, err := filepath.Rel(planDirectory, absPath)
-		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator)) && !filepath.IsAbs(relative) {
-			return true
-		}
-	}
-	return false
-}
-
-func HookEvent(status string) string {
-	switch status {
-	case "planned":
-		return hooks.EventReset
-	case "conditional":
-		return hooks.EventConditional
-	case "in-progress":
-		return hooks.EventStart
-	case "done":
-		return hooks.EventDone
-	default:
-		return ""
-	}
-}
-
 func WillComplete(planRoot string, phaseID int) (bool, error) {
 	phases, err := ReadPhases(planRoot)
 	if err != nil {
@@ -326,7 +147,7 @@ func WillComplete(planRoot string, phaseID int) (bool, error) {
 			found = true
 			continue
 		}
-		if phase.Status != "done" {
+		if phase.Status != draft.StatusDone {
 			return false, nil
 		}
 	}
@@ -342,7 +163,7 @@ func AlreadyDone(planRoot string) (bool, error) {
 		return false, err
 	}
 	status := mdoc.FrontString(front, "plan_status")
-	return status == "done", nil
+	return status == draft.StatusDone, nil
 }
 
 // UpdatePhaseStatusLocked writes one phase's status and refreshes the derived
@@ -365,19 +186,28 @@ func UpdatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 		return false, fmt.Errorf("%s phase %02d: %w", planDirectory, phaseID, err)
 	}
 	phaseFront["status"] = status
+	completedAt := ""
 	// completed_at records when the phase reached done; reopening it clears the stamp.
-	if status == "done" {
-		phaseFront["completed_at"] = CompletionTimestamp()
+	if status == draft.StatusDone {
+		completedAt = CompletionTimestamp()
+		phaseFront["completed_at"] = completedAt
 	} else {
 		delete(phaseFront, "completed_at")
 	}
-	if err := mdoc.WriteFile(phasePath, phaseFront, phaseBody); err != nil {
+	phaseContents, err := mdoc.Render(phaseFront, phaseBody)
+	if err != nil {
 		return false, err
 	}
 
 	phases, err := ReadPhases(planRoot)
 	if err != nil {
 		return false, err
+	}
+	for index := range phases {
+		if phases[index].ID == phaseID {
+			phases[index].Status = status
+			break
+		}
 	}
 	planPath := filepath.Join(planRoot, "PLAN.md")
 	planRaw, err := vfs.ReadFile(planPath)
@@ -390,23 +220,30 @@ func UpdatePhaseStatusLocked(planRoot, planDirectory string, phaseID int, status
 	}
 	completed := len(phases) > 0
 	for _, phase := range phases {
-		if phase.Status != "done" {
+		if phase.Status != draft.StatusDone {
 			completed = false
 			break
 		}
 	}
 	if completed {
-		planFront["plan_status"] = "done"
-		planFront["completed_at"] = CompletionTimestamp()
+		planFront["plan_status"] = draft.StatusDone
+		planFront["completed_at"] = completedAt
 	} else {
-		planFront["plan_status"] = "in-progress"
+		planFront["plan_status"] = draft.StatusInProgress
 		delete(planFront, "completed_at")
 	}
-	planBody, err = UpdateChecklist(planBody, phaseID, status == "done")
+	planBody, err = UpdateChecklist(planBody, phaseID, status == draft.StatusDone)
 	if err != nil {
 		return false, fmt.Errorf("update PLAN.md phase checklist: %w", err)
 	}
-	if err := mdoc.WriteFile(planPath, planFront, planBody); err != nil {
+	planContents, err := mdoc.Render(planFront, planBody)
+	if err != nil {
+		return false, err
+	}
+	if err := planstore.Apply(
+		planstore.Update(phasePath, string(phaseRaw), phaseContents),
+		planstore.Update(planPath, string(planRaw), planContents),
+	); err != nil {
 		return false, err
 	}
 	return completed, nil
@@ -427,13 +264,13 @@ func UpdateChecklist(body string, phaseID int, done bool) (string, error) {
 }
 
 func ValidateStatusChange(front map[string]any, status string) error {
-	if status == "conditional" {
+	if status == draft.StatusConditional {
 		condition := mdoc.FrontString(front, "entry_condition")
 		if strings.TrimSpace(condition) == "" {
 			return fmt.Errorf("conditional status requires a non-empty entry_condition")
 		}
 	}
-	if status == "planned" && front["entry_condition"] != nil {
+	if status == draft.StatusPlanned && front["entry_condition"] != nil {
 		return fmt.Errorf("planned status requires entry_condition: null")
 	}
 	return nil

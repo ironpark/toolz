@@ -17,7 +17,37 @@ import (
 var topHeading = regexp.MustCompile(`(?m)^# (GOALS|SCOPE|CONTEXT|PHASES|VERIFICATION|ORDERING|NEXT)[ \t]*$`)
 var phaseHeading = regexp.MustCompile(`(?m)^## PHASE\s*(?:—|:|-)\s*(.+?)[ \t]*$`)
 var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
-var RequiredSections = []string{"GOALS", "SCOPE", "CONTEXT", "PHASES", "VERIFICATION", "ORDERING", "NEXT"}
+var requiredSections = []string{"GOALS", "SCOPE", "CONTEXT", "PHASES", "VERIFICATION", "ORDERING", "NEXT"}
+
+const (
+	StatusPlanned     = "planned"
+	StatusConditional = "conditional"
+	StatusInProgress  = "in-progress"
+	StatusDone        = "done"
+)
+
+var statuses = []string{StatusPlanned, StatusConditional, StatusInProgress, StatusDone}
+
+func RequiredSections() []string {
+	return append([]string{}, requiredSections...)
+}
+
+func Statuses() []string {
+	return append([]string{}, statuses...)
+}
+
+func NewPhaseStatuses() []string {
+	return []string{StatusPlanned, StatusConditional}
+}
+
+func ValidStatus(status string) bool {
+	for _, candidate := range statuses {
+		if status == candidate {
+			return true
+		}
+	}
+	return false
+}
 
 type Meta struct {
 	Phase     int    `yaml:"phase"`
@@ -127,7 +157,7 @@ func DescribeSectionMismatch(found []string) string {
 	}
 	required := map[string]bool{}
 	missing := []string{}
-	for _, name := range RequiredSections {
+	for _, name := range requiredSections {
 		required[name] = true
 		if counts[name] == 0 {
 			missing = append(missing, name)
@@ -156,7 +186,7 @@ func DescribeSectionMismatch(found []string) string {
 	if len(parts) == 0 {
 		// The names all line up, so the count can only be off by repetition that
 		// the checks above already tolerate; report the count plainly.
-		return fmt.Sprintf("document has %d top-level sections, want %d", len(found), len(RequiredSections))
+		return fmt.Sprintf("document has %d top-level sections, want %d", len(found), len(requiredSections))
 	}
 	return strings.Join(parts, "; ")
 }
@@ -183,7 +213,7 @@ func Parse(raw []byte, fallback string) (Draft, error) {
 		return Draft{}, validation.Wrap(err, "frontmatter", "frontmatter")
 	}
 	matches := topHeading.FindAllStringSubmatchIndex(body, -1)
-	if len(matches) != len(RequiredSections) {
+	if len(matches) != len(requiredSections) {
 		// The caller may be an agent that never reads the document, so name the
 		// sections that are actually missing or extra instead of only restating
 		// what a correct draft looks like.
@@ -196,7 +226,7 @@ func Parse(raw []byte, fallback string) (Draft, error) {
 			validation.Record{Rule: "sections", Section: "document", Detail: detail},
 			fmt.Sprintf("%s\nexpected sections: %s\nfound sections: %s",
 				detail,
-				strings.Join(RequiredSections, ", "),
+				strings.Join(requiredSections, ", "),
 				joinOrNone(found)),
 		)
 	}
@@ -206,9 +236,9 @@ func Parse(raw []byte, fallback string) (Draft, error) {
 	sections := map[string]string{}
 	for i, m := range matches {
 		name := body[m[2]:m[3]]
-		if name != RequiredSections[i] {
-			detail := fmt.Sprintf("section %d must be # %s", i+1, RequiredSections[i])
-			return Draft{}, validation.NewFailure(validation.Record{Rule: "section_order", Section: RequiredSections[i], Detail: detail}, detail)
+		if name != requiredSections[i] {
+			detail := fmt.Sprintf("section %d must be # %s", i+1, requiredSections[i])
+			return Draft{}, validation.NewFailure(validation.Record{Rule: "section_order", Section: requiredSections[i], Detail: detail}, detail)
 		}
 		end := len(body)
 		if i+1 < len(matches) {
@@ -398,13 +428,13 @@ func parsePhases(section string) ([]Phase, error) {
 			detail := fmt.Sprintf("phase %q has invalid number %d; phase numbers must be non-negative", title, meta.Phase)
 			return nil, phaseParseFailure(title, validation.IntPointer(meta.Phase), detail)
 		}
-		if !KebabPattern.MatchString(meta.Slug) || (meta.Status != "planned" && meta.Status != "conditional") {
+		if !KebabPattern.MatchString(meta.Slug) || (meta.Status != StatusPlanned && meta.Status != StatusConditional) {
 			return nil, phaseParseFailure(title, validation.IntPointer(meta.Phase), fmt.Sprintf("phase %q has invalid slug or status", title))
 		}
-		if meta.Status == "conditional" && (meta.EntryCondition == nil || strings.TrimSpace(*meta.EntryCondition) == "") {
+		if meta.Status == StatusConditional && (meta.EntryCondition == nil || strings.TrimSpace(*meta.EntryCondition) == "") {
 			return nil, phaseParseFailure(title, validation.IntPointer(meta.Phase), fmt.Sprintf("conditional phase %q requires entry_condition", title))
 		}
-		if meta.Status == "planned" && meta.EntryCondition != nil {
+		if meta.Status == StatusPlanned && meta.EntryCondition != nil {
 			return nil, phaseParseFailure(title, validation.IntPointer(meta.Phase), fmt.Sprintf("planned phase %q requires entry_condition: null", title))
 		}
 		rest := strings.TrimSpace(block[close+12:])

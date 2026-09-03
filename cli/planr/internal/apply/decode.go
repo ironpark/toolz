@@ -132,13 +132,13 @@ func parsePhaseDraft(raw []byte) (PhaseDraft, error) {
 	}
 	meta.Phase = -1
 	meta.Slug = slug
-	if meta.Status != "planned" && meta.Status != "conditional" {
+	if meta.Status != draft.StatusPlanned && meta.Status != draft.StatusConditional {
 		return PhaseDraft{}, phaseDraftValidationError("frontmatter", fmt.Sprintf("invalid new phase status %q; use planned or conditional", meta.Status))
 	}
-	if meta.Status == "conditional" && (meta.EntryCondition == nil || strings.TrimSpace(*meta.EntryCondition) == "") {
+	if meta.Status == draft.StatusConditional && (meta.EntryCondition == nil || strings.TrimSpace(*meta.EntryCondition) == "") {
 		return PhaseDraft{}, phaseDraftValidationError("frontmatter", "conditional phase requires entry_condition")
 	}
-	if meta.Status == "planned" && meta.EntryCondition != nil {
+	if meta.Status == draft.StatusPlanned && meta.EntryCondition != nil {
 		return PhaseDraft{}, phaseDraftValidationError("frontmatter", "planned phase cannot set entry_condition")
 	}
 	if mdoc.Title(body) != title {

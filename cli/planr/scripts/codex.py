@@ -114,10 +114,9 @@ RUN_LABEL = FIXTURE_LABELS[DEFAULT_FIXTURE]
 SUPPORTED_LANGUAGES = ("en", "ko")
 DEFAULT_LANGUAGE = "en"
 PLANR_CONFIG_FILE = ".planr.yaml"
-# .planr.yaml is read here without a YAML parser: the runners depend only on
-# the standard library so the plan scenario runs on a bare interpreter.  Only
-# planr's own top-level `language:` key is needed, and planr itself rejects a
-# malformed file long before the value would matter.
+# .planr.yaml is read here without a YAML parser: only planr's own top-level
+# `language:` key is needed, and planr itself rejects a malformed file long
+# before the value would matter.
 LANGUAGE_SETTING = re.compile(r"^language:\s*[\"']?([A-Za-z-]+)[\"']?\s*$", re.MULTILINE)
 
 
