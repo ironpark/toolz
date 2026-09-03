@@ -7,9 +7,9 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// Wails uses Go's `embed` package to embed the frontend files into the binary.
-// Any files in the frontend/dist folder will be embedded into the binary and
-// made available to the frontend.
+// Wails uses Go's `embed` package to embed every frontend build artifact into
+// the binary. The all: prefix is required because SvelteKit writes runtime
+// assets below frontend/dist/_app, which the default embed pattern excludes.
 // See https://pkg.go.dev/embed for more information.
 
 //go:embed all:frontend/dist
