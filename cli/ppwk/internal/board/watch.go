@@ -49,6 +49,20 @@ func (b *Board) Watch(ctx context.Context, opts WatchOptions, emit func(watch.Ev
 	}
 }
 
+// PollOnce 는 poller 를 한 주기 돌리고 이벤트를 돌려준다.
+//
+// Watch 를 쓸 수 없는 호출자를 위한 것이다 — 웹 서버는 자기 루프를 갖고
+// 있고, 감지 주기 사이에 다른 일을 한다. Poller 는 호출자가 들고 있어야
+// 한다. 매번 새로 만들면 기준선이 다시 잡혀 아무 변경도 보고되지 않는다.
+func (b *Board) PollOnce(poller *watch.Poller) ([]watch.Event, error) {
+	var events []watch.Event
+	err := b.pollOnce(poller, func(e watch.Event) error {
+		events = append(events, e)
+		return nil
+	})
+	return events, err
+}
+
 // pollOnce 는 한 주기를 돌고 이벤트를 살찌워 내보낸다.
 func (b *Board) pollOnce(poller *watch.Poller, emit func(watch.Event) error) error {
 	events, err := poller.Poll()

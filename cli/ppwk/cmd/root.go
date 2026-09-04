@@ -63,8 +63,9 @@ func New(v Version, stdout, stderr io.Writer) *cli.Command {
 			decideCommand(),
 			decisionsCommand(),
 
-			// 6. 변경 감지
+			// 6. 변경 감지와 브라우저
 			watchCommand(),
+			webCommand(),
 			hookCommand(),
 
 			// 7. 운영
