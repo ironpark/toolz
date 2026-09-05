@@ -5,7 +5,7 @@ CLI입니다. Claude Code, OpenCode, Codex 등의 하네스와 시작 모델, �
 MCP 서버, `AGENTS.md` 같은 에이전트 지침을 하나의 프리셋으로 관리합니다.
 
 > [!NOTE]
-> 현재는 Go 기반과 CLI 진입점만 준비된 초기 개발 단계입니다. 프리셋 형식과
+> 현재는 Go + [urfave/cli v3](https://github.com/urfave/cli) 기반 CLI 진입점만 준비된 초기 개발 단계입니다. 프리셋 형식과
 > 관리·실행 명령은 이후 구현할 예정입니다.
 
 ## 목표

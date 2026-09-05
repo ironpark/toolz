@@ -1,0 +1,14 @@
+# 빌드 산출물
+/bin/
+/dist/
+spona
+
+# 테스트/커버리지
+*.test
+*.out
+coverage.*
+
+# 로컬 환경
+.env
+.env.*
+.DS_Store
