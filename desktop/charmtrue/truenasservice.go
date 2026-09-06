@@ -149,6 +149,88 @@ type DatasetSnapshotMutation struct {
 	Recursive bool   `json:"recursive"`
 }
 
+// FilesystemACL is the UI-safe representation shared by NFSv4 and POSIX1e
+// filesystem ACLs. Basic and advanced permission/flag forms are kept separate
+// so loading and saving an ACL does not discard fields the editor did not alter.
+type FilesystemACL struct {
+	Path       string               `json:"path"`
+	User       string               `json:"user"`
+	Group      string               `json:"group"`
+	UID        int                  `json:"uid"`
+	GID        int                  `json:"gid"`
+	ACLType    string               `json:"aclType"`
+	Trivial    bool                 `json:"trivial"`
+	Entries    []FilesystemACLEntry `json:"entries"`
+	NFS41Flags map[string]bool      `json:"nfs41Flags"`
+}
+
+type FilesystemACLEntry struct {
+	Tag         string          `json:"tag"`
+	Type        string          `json:"type"`
+	ID          int             `json:"id"`
+	HasID       bool            `json:"hasId"`
+	Who         string          `json:"who"`
+	BasicPerms  string          `json:"basicPerms"`
+	Permissions map[string]bool `json:"permissions"`
+	BasicFlags  string          `json:"basicFlags"`
+	Flags       map[string]bool `json:"flags"`
+	Default     bool            `json:"default"`
+}
+
+type ACLTemplateInfo struct {
+	ID      int                  `json:"id"`
+	Name    string               `json:"name"`
+	Comment string               `json:"comment"`
+	Builtin bool                 `json:"builtin"`
+	ACLType string               `json:"aclType"`
+	Entries []FilesystemACLEntry `json:"entries"`
+}
+
+type FilesystemACLMutation struct {
+	Path                 string               `json:"path"`
+	ACLType              string               `json:"aclType"`
+	User                 string               `json:"user"`
+	Group                string               `json:"group"`
+	Entries              []FilesystemACLEntry `json:"entries"`
+	NFS41Flags           map[string]bool      `json:"nfs41Flags"`
+	StripACL             bool                 `json:"stripAcl"`
+	Recursive            bool                 `json:"recursive"`
+	Traverse             bool                 `json:"traverse"`
+	Canonicalize         bool                 `json:"canonicalize"`
+	ValidateEffectiveACL bool                 `json:"validateEffectiveAcl"`
+}
+
+type filesystemACLWire struct {
+	Path       string          `json:"path"`
+	User       *string         `json:"user"`
+	Group      *string         `json:"group"`
+	UID        *int            `json:"uid"`
+	GID        *int            `json:"gid"`
+	ACLType    string          `json:"acltype"`
+	Trivial    bool            `json:"trivial"`
+	ACL        []aclEntryWire  `json:"acl"`
+	NFS41Flags map[string]bool `json:"aclflags"`
+}
+
+type aclEntryWire struct {
+	Tag     string          `json:"tag"`
+	Type    string          `json:"type"`
+	ID      *int            `json:"id"`
+	Who     *string         `json:"who"`
+	Perms   json.RawMessage `json:"perms"`
+	Flags   json.RawMessage `json:"flags"`
+	Default bool            `json:"default"`
+}
+
+type aclTemplateWire struct {
+	ID      int            `json:"id"`
+	Name    string         `json:"name"`
+	Comment string         `json:"comment"`
+	Builtin bool           `json:"builtin"`
+	ACLType string         `json:"acltype"`
+	ACL     []aclEntryWire `json:"acl"`
+}
+
 type apiStorageDataset struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
@@ -1967,6 +2049,183 @@ func (s *TrueNASService) SetDatasetLocked(id, secret string, lock, recursive, fo
 	}
 	if err := client.WaitJob(ctx, jobID, nil); err != nil {
 		return fmt.Errorf("데이터셋 잠금 작업 실패: %w", err)
+	}
+	return nil
+}
+
+func aclEntryFromWire(entry aclEntryWire) FilesystemACLEntry {
+	result := FilesystemACLEntry{Tag: entry.Tag, Type: entry.Type, Default: entry.Default, Permissions: map[string]bool{}, Flags: map[string]bool{}}
+	if entry.ID != nil {
+		result.ID, result.HasID = *entry.ID, true
+	}
+	if entry.Who != nil {
+		result.Who = *entry.Who
+	}
+	var basic struct {
+		Basic string `json:"BASIC"`
+	}
+	if json.Unmarshal(entry.Perms, &basic) == nil && basic.Basic != "" {
+		result.BasicPerms = basic.Basic
+	} else {
+		_ = json.Unmarshal(entry.Perms, &result.Permissions)
+	}
+	basic.Basic = ""
+	if json.Unmarshal(entry.Flags, &basic) == nil && basic.Basic != "" {
+		result.BasicFlags = basic.Basic
+	} else {
+		_ = json.Unmarshal(entry.Flags, &result.Flags)
+	}
+	return result
+}
+
+func filesystemACLFromWire(raw filesystemACLWire) FilesystemACL {
+	result := FilesystemACL{Path: raw.Path, ACLType: raw.ACLType, Trivial: raw.Trivial, NFS41Flags: raw.NFS41Flags, UID: -1, GID: -1}
+	if raw.User != nil {
+		result.User = *raw.User
+	}
+	if raw.Group != nil {
+		result.Group = *raw.Group
+	}
+	if raw.UID != nil {
+		result.UID = *raw.UID
+	}
+	if raw.GID != nil {
+		result.GID = *raw.GID
+	}
+	for _, entry := range raw.ACL {
+		result.Entries = append(result.Entries, aclEntryFromWire(entry))
+	}
+	return result
+}
+
+// GetFilesystemACL returns the resolved ACL for a dataset mount path.
+func (s *TrueNASService) GetFilesystemACL(path string) (FilesystemACL, error) {
+	client, err := s.connectedClient()
+	if err != nil {
+		return FilesystemACL{}, err
+	}
+	path = strings.TrimSpace(path)
+	if path == "" || !strings.HasPrefix(path, "/mnt/") {
+		return FilesystemACL{}, errors.New("유효한 데이터셋 마운트 경로가 필요합니다")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
+	defer cancel()
+	var raw filesystemACLWire
+	if err := client.Call(ctx, "filesystem.getacl", []any{path, true, true}, &raw); err != nil {
+		return FilesystemACL{}, fmt.Errorf("파일시스템 ACL 조회 실패: %w", err)
+	}
+	return filesystemACLFromWire(raw), nil
+}
+
+func (s *TrueNASService) ACLTemplates(path string) ([]ACLTemplateInfo, error) {
+	client, err := s.connectedClient()
+	if err != nil {
+		return nil, err
+	}
+	path = strings.TrimSpace(path)
+	if path == "" || !strings.HasPrefix(path, "/mnt/") {
+		return nil, errors.New("유효한 데이터셋 마운트 경로가 필요합니다")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
+	defer cancel()
+	var raw []aclTemplateWire
+	args := map[string]any{"path": path, "query-filters": []any{}, "query-options": map[string]any{}, "format-options": map[string]any{"canonicalize": true, "ensure_builtins": true, "resolve_names": true}}
+	if err := client.Call(ctx, "filesystem.acltemplate.by_path", []any{args}, &raw); err != nil {
+		return nil, fmt.Errorf("ACL 템플릿 조회 실패: %w", err)
+	}
+	result := make([]ACLTemplateInfo, 0, len(raw))
+	for _, template := range raw {
+		item := ACLTemplateInfo{ID: template.ID, Name: template.Name, Comment: template.Comment, Builtin: template.Builtin, ACLType: template.ACLType}
+		for _, entry := range template.ACL {
+			item.Entries = append(item.Entries, aclEntryFromWire(entry))
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
+func aclEntryPayload(entry FilesystemACLEntry, aclType string) map[string]any {
+	payload := map[string]any{"tag": entry.Tag}
+	if aclType == "NFS4" {
+		payload["type"] = entry.Type
+	}
+	if (entry.Tag == "USER" || entry.Tag == "GROUP") && entry.HasID {
+		payload["id"] = entry.ID
+	} else {
+		payload["id"] = nil
+	}
+	if (entry.Tag == "USER" || entry.Tag == "GROUP") && entry.Who != "" {
+		payload["who"] = entry.Who
+	} else {
+		payload["who"] = nil
+	}
+	if entry.BasicPerms != "" {
+		payload["perms"] = map[string]any{"BASIC": entry.BasicPerms}
+	} else {
+		payload["perms"] = entry.Permissions
+	}
+	if aclType == "NFS4" {
+		if entry.BasicFlags != "" {
+			payload["flags"] = map[string]any{"BASIC": entry.BasicFlags}
+		} else {
+			payload["flags"] = entry.Flags
+		}
+	} else {
+		payload["default"] = entry.Default
+	}
+	return payload
+}
+
+func (s *TrueNASService) SaveFilesystemACL(input FilesystemACLMutation) error {
+	client, err := s.connectedClient()
+	if err != nil {
+		return err
+	}
+	input.Path, input.ACLType = strings.TrimSpace(input.Path), strings.ToUpper(strings.TrimSpace(input.ACLType))
+	if input.Path == "" || !strings.HasPrefix(input.Path, "/mnt/") {
+		return errors.New("유효한 데이터셋 마운트 경로가 필요합니다")
+	}
+	if input.ACLType != "NFS4" && input.ACLType != "POSIX1E" {
+		return errors.New("지원하지 않는 ACL 유형입니다")
+	}
+	if !input.StripACL && len(input.Entries) == 0 {
+		return errors.New("하나 이상의 ACL 항목이 필요합니다")
+	}
+	dacl := make([]any, 0, len(input.Entries))
+	for _, entry := range input.Entries {
+		entry.Tag = strings.TrimSpace(entry.Tag)
+		if entry.Tag == "" {
+			return errors.New("ACL 대상 유형이 비어 있습니다")
+		}
+		if (entry.Tag == "USER" || entry.Tag == "GROUP") && !entry.HasID && strings.TrimSpace(entry.Who) == "" {
+			return errors.New("사용자 또는 그룹 ACL 항목의 대상을 선택하세요")
+		}
+		if input.ACLType == "NFS4" && entry.Type != "ALLOW" && entry.Type != "DENY" {
+			return errors.New("NFSv4 ACL 동작은 ALLOW 또는 DENY여야 합니다")
+		}
+		dacl = append(dacl, aclEntryPayload(entry, input.ACLType))
+	}
+	data := map[string]any{
+		"path": input.Path, "dacl": dacl, "acltype": input.ACLType,
+		"options": map[string]any{"stripacl": input.StripACL, "recursive": input.Recursive, "traverse": input.Traverse, "canonicalize": input.Canonicalize, "validate_effective_acl": input.ValidateEffectiveACL},
+	}
+	if input.User != "" {
+		data["user"] = strings.TrimSpace(input.User)
+	}
+	if input.Group != "" {
+		data["group"] = strings.TrimSpace(input.Group)
+	}
+	if input.ACLType == "NFS4" {
+		data["nfs41_flags"] = input.NFS41Flags
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	var jobID int
+	if err := client.Call(ctx, "filesystem.setacl", []any{data}, &jobID); err != nil {
+		return fmt.Errorf("파일시스템 ACL 저장 실패: %w", err)
+	}
+	if err := client.WaitJob(ctx, jobID, nil); err != nil {
+		return fmt.Errorf("파일시스템 ACL 적용 작업 실패: %w", err)
 	}
 	return nil
 }

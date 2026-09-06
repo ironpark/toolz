@@ -1,5 +1,5 @@
 import { getContext, setContext } from 'svelte';
-import { TrueNASService, type APIKeyMutation, type APIKeyMutationResult, type ConnectionInfo, type DatasetDeleteOptions, type DatasetMutation, type DatasetSnapshotMutation, type GroupMutation, type IdentityOverview, type NetworkConfigurationMutation, type NetworkInterfaceMutation, type NetworkOverview, type RsyncTaskMutation, type SavedServer, type ShareMutation, type SharingOverview, type SMBShareACL, type StaticRouteMutation, type StorageOverview, type SystemManagementOverview, type UserMutation, type UserMutationResult } from '../../../bindings/github.com/ironpark/toolz/desktop/charmtrue';
+import { TrueNASService, type ACLTemplateInfo, type APIKeyMutation, type APIKeyMutationResult, type CertificateInstall, type CertificateOverview, type ConnectionInfo, type GeneratedCertificate, type SelfSignedCertificateRequest, type DatasetDeleteOptions, type DatasetMutation, type DatasetSnapshotMutation, type FilesystemACL, type FilesystemACLMutation, type GroupMutation, type IdentityOverview, type NetworkConfigurationMutation, type NetworkInterfaceMutation, type NetworkOverview, type RsyncTaskMutation, type SavedServer, type ShareMutation, type SharingOverview, type SMBShareACL, type StaticRouteMutation, type StorageOverview, type SystemManagementOverview, type UserMutation, type UserMutationResult } from '../../../bindings/github.com/ironpark/toolz/desktop/charmtrue';
 import type { View } from './types';
 
 const APP_CONTEXT = Symbol('charmtrue-app');
@@ -24,6 +24,9 @@ export class AppContext {
     identityLoading = $state(false);
     identityError = $state('');
     network = $state<NetworkOverview | null>(null);
+    certificates = $state<CertificateOverview | null>(null);
+    certificatesLoading = $state(false);
+    certificatesError = $state('');
     networkLoading = $state(false);
     networkError = $state('');
 
@@ -56,7 +59,7 @@ export class AppContext {
         if (view === 'services') return this.sharingLoading;
         if (view === 'network') return this.networkLoading;
         if (view === 'identity') return this.identityLoading;
-        return this.systemLoading;
+        return this.systemLoading || this.certificatesLoading;
     }
 
     async refreshView(view: View): Promise<void> {
@@ -66,7 +69,7 @@ export class AppContext {
         else if (view === 'services') await this.refreshSharing();
         else if (view === 'network') await this.refreshNetwork();
         else if (view === 'identity') await this.refreshIdentity();
-        else await this.refreshSystem();
+        else await Promise.all([this.refreshSystem(), this.refreshCertificates()]);
     }
 
     async connectSavedServer(id: string): Promise<void> {
@@ -142,6 +145,20 @@ export class AppContext {
     async setDatasetLocked(id: string, secret: string, lock: boolean, recursive: boolean, force: boolean): Promise<void> {
         this.storageError = '';
         try { await TrueNASService.SetDatasetLocked(id, secret, lock, recursive, force); await this.refreshStorage(); }
+        catch (error) { this.storageError = error instanceof Error ? error.message : String(error); throw error; }
+    }
+
+    async getFilesystemACL(path: string): Promise<FilesystemACL> {
+        return TrueNASService.GetFilesystemACL(path);
+    }
+
+    async getACLTemplates(path: string): Promise<ACLTemplateInfo[]> {
+        return (await TrueNASService.ACLTemplates(path)) ?? [];
+    }
+
+    async saveFilesystemACL(input: FilesystemACLMutation): Promise<void> {
+        this.storageError = '';
+        try { await TrueNASService.SaveFilesystemACL(input); await this.refreshStorage(); }
         catch (error) { this.storageError = error instanceof Error ? error.message : String(error); throw error; }
     }
 
@@ -252,6 +269,46 @@ export class AppContext {
         this.networkError = '';
         try { await TrueNASService.DeleteStaticRoute(id); await this.refreshNetwork(); }
         catch (error) { this.networkError = error instanceof Error ? error.message : String(error); throw error; }
+    }
+
+    async refreshCertificates(): Promise<void> {
+        if (!this.connection?.connected || this.certificatesLoading) return;
+        this.certificatesLoading = true;
+        this.certificatesError = '';
+        try { this.certificates = await TrueNASService.CertificateOverview(); }
+        catch (error) { this.certificatesError = error instanceof Error ? error.message : String(error || '인증서 정보를 불러오지 못했습니다.'); }
+        finally { this.certificatesLoading = false; }
+    }
+
+    async selfSignedCertificateDefaults(): Promise<SelfSignedCertificateRequest> {
+        return TrueNASService.SelfSignedCertificateDefaults();
+    }
+
+    async generateSelfSignedCertificate(input: SelfSignedCertificateRequest): Promise<GeneratedCertificate> {
+        return TrueNASService.GenerateSelfSignedCertificate(input);
+    }
+
+    async saveCertificateFiles(cert: GeneratedCertificate): Promise<string> {
+        return TrueNASService.SaveCertificateFiles(cert);
+    }
+
+    async installCertificate(input: CertificateInstall): Promise<number> {
+        this.certificatesError = '';
+        const id = await TrueNASService.InstallCertificate(input);
+        await this.refreshCertificates();
+        return id;
+    }
+
+    async setUICertificate(id: number): Promise<void> {
+        this.certificatesError = '';
+        try { await TrueNASService.SetUICertificate(id); await this.refreshCertificates(); }
+        catch (error) { this.certificatesError = error instanceof Error ? error.message : String(error); throw error; }
+    }
+
+    async deleteCertificate(id: number): Promise<void> {
+        this.certificatesError = '';
+        try { await TrueNASService.DeleteCertificate(id); await this.refreshCertificates(); }
+        catch (error) { this.certificatesError = error instanceof Error ? error.message : String(error); throw error; }
     }
 
     async refreshSystem(): Promise<void> { if(!this.connection?.connected||this.systemLoading)return;this.systemLoading=true;this.systemError='';try{this.systemManagement=await TrueNASService.SystemManagementOverview()}catch(e){this.systemError=e instanceof Error?e.message:String(e)}finally{this.systemLoading=false} }

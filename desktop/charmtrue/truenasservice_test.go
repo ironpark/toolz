@@ -453,6 +453,27 @@ func TestSMBShareOptionsPurposeConstraints(t *testing.T) {
 	}
 }
 
+func TestFilesystemACLWireConversionAndPayload(t *testing.T) {
+	uid, who := 1001, "alice"
+	raw := filesystemACLWire{
+		Path: "/mnt/tank/data", ACLType: "NFS4", UID: &uid,
+		ACL: []aclEntryWire{{Tag: "USER", Type: "ALLOW", ID: &uid, Who: &who, Perms: json.RawMessage(`{"BASIC":"MODIFY"}`), Flags: json.RawMessage(`{"BASIC":"INHERIT"}`)}},
+	}
+	acl := filesystemACLFromWire(raw)
+	if acl.Path != raw.Path || acl.UID != uid || len(acl.Entries) != 1 || acl.Entries[0].BasicPerms != "MODIFY" || acl.Entries[0].BasicFlags != "INHERIT" || !acl.Entries[0].HasID {
+		t.Fatalf("filesystemACLFromWire() = %#v", acl)
+	}
+	payload := aclEntryPayload(acl.Entries[0], "NFS4")
+	if payload["tag"] != "USER" || payload["id"] != uid || payload["who"] != who || payload["perms"].(map[string]any)["BASIC"] != "MODIFY" {
+		t.Fatalf("aclEntryPayload() = %#v", payload)
+	}
+
+	posix := aclEntryFromWire(aclEntryWire{Tag: "USER_OBJ", Perms: json.RawMessage(`{"READ":true,"WRITE":false,"EXECUTE":true}`), Default: true})
+	if !posix.Permissions["READ"] || posix.Permissions["WRITE"] || !posix.Default {
+		t.Fatalf("POSIX aclEntryFromWire() = %#v", posix)
+	}
+}
+
 func TestNetworkManagement(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
