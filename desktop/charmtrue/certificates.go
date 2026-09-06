@@ -459,21 +459,22 @@ func (s *TrueNASService) InstallCertificate(input CertificateInstall) (int, erro
 	if err := client.Call(ctx, "certificate.create", []any{payload}, &jobID); err != nil {
 		return 0, fmt.Errorf("인증서 가져오기 실패: %w", err)
 	}
-	var created struct {
-		ID int `json:"id"`
-	}
+	// TrueNAS returns either the new certificate ID or the full certificate
+	// object depending on the version, so decode both shapes.
+	var created json.RawMessage
 	if err := client.WaitJob(ctx, jobID, &created); err != nil {
 		return 0, fmt.Errorf("인증서 가져오기 실패: %w", err)
 	}
-	if created.ID == 0 {
+	id := certificateReferenceID(created)
+	if id == 0 {
 		return 0, errors.New("TrueNAS가 생성된 인증서 ID를 반환하지 않았습니다")
 	}
 	if input.ApplyToUI {
-		if err := s.applyUICertificate(ctx, client, created.ID); err != nil {
-			return created.ID, err
+		if err := s.applyUICertificate(ctx, client, id); err != nil {
+			return id, err
 		}
 	}
-	return created.ID, nil
+	return id, nil
 }
 
 // SetUICertificate binds an existing certificate to the web GUI.

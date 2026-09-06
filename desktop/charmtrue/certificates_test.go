@@ -134,7 +134,7 @@ func TestCertificateManagement(t *testing.T) {
 				}
 				result = 42
 			case "core.job_wait":
-				result = map[string]any{"id": 8, "name": "openssl-local"}
+				result = 8
 			case "system.general.update":
 				if req.Params[0].(map[string]any)["ui_certificate"] != float64(8) && req.Params[0].(map[string]any)["ui_certificate"] != float64(1) {
 					t.Errorf("system.general.update params = %#v", req.Params)
