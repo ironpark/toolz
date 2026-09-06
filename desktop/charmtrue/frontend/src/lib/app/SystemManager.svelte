@@ -9,6 +9,7 @@
     import { Input } from '$lib/components/ui/input';
     import { Spinner } from '$lib/components/ui/spinner';
     import * as Table from '$lib/components/ui/table';
+    import CertificateManager from './CertificateManager.svelte';
     import ConfirmActionDialog from './ConfirmActionDialog.svelte';
     import { getAppContext } from './context.svelte';
 
@@ -51,6 +52,7 @@
             {/if}
         </Card.Content>
     </Card.Root>
+    <CertificateManager />
     <Card.Root class="border-destructive/30"><Card.Header><Card.Title>전원 관리</Card.Title><Card.Description>실행 중인 작업과 연결을 확인한 후 진행하세요.</Card.Description></Card.Header><Card.Footer class="gap-2"><Button variant="outline" disabled={busy === 'reboot'} onclick={() => askPower('reboot')}><RotateCw />재부팅</Button><Button variant="destructive" disabled={busy === 'shutdown'} onclick={() => askPower('shutdown')}><Power />시스템 종료</Button></Card.Footer></Card.Root>
 </section>
 

@@ -14,8 +14,19 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function ACLTemplates(path: string): $CancellablePromise<$models.ACLTemplateInfo[] | null> {
+    return $Call.ByID(242639040, path);
+}
+
 export function AppInfo(): $CancellablePromise<$models.AppInfo> {
     return $Call.ByID(2980107274);
+}
+
+/**
+ * CertificateOverview returns every certificate and which one the UI uses.
+ */
+export function CertificateOverview(): $CancellablePromise<$models.CertificateOverview> {
+    return $Call.ByID(1220255893);
 }
 
 export function CheckinNetworkChanges(): $CancellablePromise<void> {
@@ -58,6 +69,13 @@ export function CurrentConnection(): $CancellablePromise<$models.ConnectionInfo>
     return $Call.ByID(2902204992);
 }
 
+/**
+ * DeleteCertificate removes a certificate that is not bound to the UI.
+ */
+export function DeleteCertificate(id: number): $CancellablePromise<void> {
+    return $Call.ByID(3608995003, id);
+}
+
 export function DeleteDataset(input: $models.DatasetDeleteOptions): $CancellablePromise<void> {
     return $Call.ByID(1321560836, input);
 }
@@ -97,12 +115,36 @@ export function Disconnect(): $CancellablePromise<void> {
     return $Call.ByID(2224169341);
 }
 
+/**
+ * GenerateSelfSignedCertificate produces a SAN certificate and key without
+ * requiring OpenSSL on the workstation. It does not need a TrueNAS connection.
+ */
+export function GenerateSelfSignedCertificate(input: $models.SelfSignedCertificateRequest): $CancellablePromise<$models.GeneratedCertificate> {
+    return $Call.ByID(571164929, input);
+}
+
+/**
+ * GetFilesystemACL returns the resolved ACL for a dataset mount path.
+ */
+export function GetFilesystemACL(path: string): $CancellablePromise<$models.FilesystemACL> {
+    return $Call.ByID(589481466, path);
+}
+
 export function GetSMBShareACL(shareName: string): $CancellablePromise<$models.SMBShareACL> {
     return $Call.ByID(1776517376, shareName);
 }
 
 export function IdentityOverview(): $CancellablePromise<$models.IdentityOverview> {
     return $Call.ByID(2813792206);
+}
+
+/**
+ * InstallCertificate imports a PEM certificate and private key into TrueNAS
+ * (Credentials > Certificates > Import) and, when requested, selects it as the
+ * GUI SSL certificate and restarts the web service.
+ */
+export function InstallCertificate(input: $models.CertificateInstall): $CancellablePromise<number> {
+    return $Call.ByID(4228500809, input);
 }
 
 /**
@@ -130,11 +172,24 @@ export function SaveAPIKey(input: $models.APIKeyMutation): $CancellablePromise<$
 }
 
 /**
+ * SaveCertificateFiles asks for a destination via the native save dialog and
+ * writes <name>.crt, <name>.key and san.cnf side by side. It returns the
+ * directory that received the files, or "" when the user cancelled.
+ */
+export function SaveCertificateFiles(cert: $models.GeneratedCertificate): $CancellablePromise<string> {
+    return $Call.ByID(816863368, cert);
+}
+
+/**
  * SaveDataset creates or updates a dataset. A changed ID is renamed only when
  * ForceRename is explicitly set because TrueNAS does not perform usage checks.
  */
 export function SaveDataset(input: $models.DatasetMutation): $CancellablePromise<void> {
     return $Call.ByID(610650050, input);
+}
+
+export function SaveFilesystemACL(input: $models.FilesystemACLMutation): $CancellablePromise<void> {
+    return $Call.ByID(1266504411, input);
 }
 
 export function SaveGroup(input: $models.GroupMutation): $CancellablePromise<void> {
@@ -176,12 +231,27 @@ export function SavedServers(): $CancellablePromise<$models.SavedServer[] | null
     return $Call.ByID(1621806626);
 }
 
+/**
+ * SelfSignedCertificateDefaults pre-fills the request from the current
+ * connection so the user only has to confirm the hosts they reach TrueNAS by.
+ */
+export function SelfSignedCertificateDefaults(): $CancellablePromise<$models.SelfSignedCertificateRequest> {
+    return $Call.ByID(16926974);
+}
+
 export function SetDatasetLocked(id: string, secret: string, lock: boolean, recursive: boolean, force: boolean): $CancellablePromise<void> {
     return $Call.ByID(1344414149, id, secret, lock, recursive, force);
 }
 
 export function SetShareEnabled(protocol: string, id: number, enabled: boolean): $CancellablePromise<void> {
     return $Call.ByID(3485979745, protocol, id, enabled);
+}
+
+/**
+ * SetUICertificate binds an existing certificate to the web GUI.
+ */
+export function SetUICertificate(id: number): $CancellablePromise<void> {
+    return $Call.ByID(1147119378, id);
 }
 
 /**
