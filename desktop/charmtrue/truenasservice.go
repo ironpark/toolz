@@ -20,6 +20,7 @@ const connectionTimeout = 15 * time.Second
 type TrueNASService struct {
 	mu           sync.RWMutex
 	profilesMu   sync.Mutex
+	setupMu      sync.Mutex
 	client       *truenas.Client
 	endpoint     string
 	system       SystemInfo

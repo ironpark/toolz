@@ -103,6 +103,17 @@ func (c *Client) Notifications() <-chan Notification { return c.events }
 // Done closes only when Close permanently shuts down the client.
 func (c *Client) Done() <-chan struct{} { return c.done }
 
+// DialAs opens an independent password session using this connection's endpoint
+// and TLS policy. It does not replace or persist the current credentials.
+func (c *Client) DialAs(ctx context.Context, username, password string) (*Client, error) {
+	config := c.config
+	config.Username, config.Password, config.APIKey, config.OTP = username, password, "", ""
+	// validate already materialized the chosen TLS policy into HTTPClient.
+	config.InsecureSkipVerify = false
+	config.DisableReconnect = true
+	return Dial(ctx, config)
+}
+
 // Call invokes one JSON-RPC method. Only the retryable -32000 overload response
 // is replayed; transport and method errors are returned without replaying calls.
 func (c *Client) Call(ctx context.Context, method string, params []any, result any) error {

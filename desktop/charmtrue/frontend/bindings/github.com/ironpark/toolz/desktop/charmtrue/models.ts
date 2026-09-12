@@ -196,6 +196,13 @@ export interface IdentityOverview {
     "shellChoices": { [_ in string]?: string } | null;
 }
 
+export interface InterfaceTraffic {
+    "name": string;
+    "receivedKbps": number | null;
+    "sentKbps": number | null;
+    "sampledAt": number;
+}
+
 export interface NetworkAliasInfo {
     "type": string;
     "address": string;
@@ -294,6 +301,16 @@ export interface NetworkSummary {
 export interface NetworkSummaryIPInfo {
     "ipv4": string[] | null;
     "ipv6": string[] | null;
+}
+
+export interface OverviewLiveStats {
+    "uptimeSeconds": number | null;
+    "uptimeSampledAt": number;
+    "uptimeError": string;
+    "traffic": InterfaceTraffic[] | null;
+    "trafficError": string;
+    "network": NetworkSummary;
+    "networkError": string;
 }
 
 export interface RsyncTaskInfo {
@@ -407,6 +424,42 @@ export interface SelfSignedCertificateRequest {
     "dnsNames": string[] | null;
     "days": number;
     "keyBits": number;
+}
+
+export interface SetupPreset {
+    "id": string;
+    "name": string;
+    "groups": string[] | null;
+    "users": SetupPresetUser[] | null;
+    "enableSSH": boolean;
+    "adminUser": string;
+    "replaceAdminUser": string;
+}
+
+export interface SetupPresetApply {
+    "preset": SetupPreset;
+    "expectedEndpoint": string;
+    "passwords": { [_ in string]?: string } | null;
+    "adminPassword": string;
+    "replacementPassword": string;
+}
+
+export interface SetupPresetResult {
+    "steps": SetupPresetStep[] | null;
+    "complete": boolean;
+}
+
+export interface SetupPresetStep {
+    "name": string;
+    "status": string;
+    "message": string;
+}
+
+export interface SetupPresetUser {
+    "name": string;
+    "fullName": string;
+    "group": string;
+    "smb": boolean;
 }
 
 export interface ShareInfo {

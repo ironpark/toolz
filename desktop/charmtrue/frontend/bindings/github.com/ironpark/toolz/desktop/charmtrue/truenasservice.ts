@@ -23,6 +23,24 @@ export function AppInfo(): $CancellablePromise<$models.AppInfo> {
 }
 
 /**
+ * ApplyDiagnosticTuning changes only the selected property after a fresh read.
+ */
+export function ApplyDiagnosticTuning(dataset: string, action: string, expectedEndpoint: string): $CancellablePromise<void> {
+    return $Call.ByID(251581271, dataset, action, expectedEndpoint);
+}
+
+/**
+ * ApplySetupPreset captures one connection; it never switches servers mid-run.
+ */
+export function ApplySetupPreset(input: $models.SetupPresetApply): $CancellablePromise<$models.SetupPresetResult> {
+    return $Call.ByID(3646876721, input);
+}
+
+export function CertificateKeychainSupported(): $CancellablePromise<boolean> {
+    return $Call.ByID(1231662164);
+}
+
+/**
  * CertificateOverview returns every certificate and which one the UI uses.
  */
 export function CertificateOverview(): $CancellablePromise<$models.CertificateOverview> {
@@ -134,8 +152,23 @@ export function GetSMBShareACL(shareName: string): $CancellablePromise<$models.S
     return $Call.ByID(1776517376, shareName);
 }
 
+/**
+ * HTTPSRedirect returns the current web UI redirect setting.
+ */
+export function HTTPSRedirect(): $CancellablePromise<boolean> {
+    return $Call.ByID(3313474612);
+}
+
 export function IdentityOverview(): $CancellablePromise<$models.IdentityOverview> {
     return $Call.ByID(2813792206);
+}
+
+/**
+ * ImportCertificateToKeychain imports the public certificate, without its key
+ * or an automatic trust override, into the current user's default keychain.
+ */
+export function ImportCertificateToKeychain(id: number): $CancellablePromise<string> {
+    return $Call.ByID(779478836, id);
 }
 
 /**
@@ -153,6 +186,14 @@ export function InstallCertificate(input: $models.CertificateInstall): $Cancella
  */
 export function NetworkOverview(): $CancellablePromise<$models.NetworkOverview> {
     return $Call.ByID(3743006440);
+}
+
+/**
+ * OverviewStats keeps failures independent so a missing reporting permission
+ * does not hide uptime or the addresses reported by the server.
+ */
+export function OverviewStats(): $CancellablePromise<$models.OverviewLiveStats> {
+    return $Call.ByID(1066499619);
 }
 
 export function PowerAction(action: string): $CancellablePromise<void> {
@@ -241,6 +282,20 @@ export function SelfSignedCertificateDefaults(): $CancellablePromise<$models.Sel
 
 export function SetDatasetLocked(id: string, secret: string, lock: boolean, recursive: boolean, force: boolean): $CancellablePromise<void> {
     return $Call.ByID(1344414149, id, secret, lock, recursive, force);
+}
+
+/**
+ * SetHTTPSRedirect saves the setting and schedules the web UI restart.
+ */
+export function SetHTTPSRedirect(enabled: boolean): $CancellablePromise<void> {
+    return $Call.ByID(214993950, enabled);
+}
+
+/**
+ * SetServiceStartup changes only the boot policy, never the running state.
+ */
+export function SetServiceStartup(name: string, automatic: boolean): $CancellablePromise<void> {
+    return $Call.ByID(4268072909, name, automatic);
 }
 
 export function SetShareEnabled(protocol: string, id: number, enabled: boolean): $CancellablePromise<void> {

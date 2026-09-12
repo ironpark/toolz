@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { Check, Ellipsis, Pencil, Plus, Route, Trash2, Undo2 } from '@lucide/svelte';
+    import { Check, Ellipsis, Network, Pencil, Plus, Route, Trash2, Undo2 } from '@lucide/svelte';
     import * as Alert from '$lib/components/ui/alert';
     import { Badge } from '$lib/components/ui/badge';
     import { Button } from '$lib/components/ui/button';
@@ -13,6 +13,9 @@
     import * as Table from '$lib/components/ui/table';
     import type { NetworkInterfaceInfo, StaticRouteInfo } from '../../../bindings/github.com/ironpark/toolz/desktop/charmtrue';
     import ConfirmActionDialog from './ConfirmActionDialog.svelte';
+    import NetworkTraffic from './NetworkTraffic.svelte';
+    import { formatTraffic } from './format';
+    import type { TrafficHistory } from './network-traffic';
     import { getAppContext } from './context.svelte';
 
     type Editor = 'configuration' | 'interface' | 'route' | null;
@@ -32,6 +35,7 @@
     const textareaClass = 'min-h-24 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30';
     let editor = $state<Editor>(null);
     let busy = $state('');
+    let trafficHistory = $state<TrafficHistory>({}), trafficSelected = $state(''), trafficNow = $state(Date.now() / 1000);
     let editorError = $state('');
     let configurationForm = $state<ConfigurationForm>(emptyConfiguration());
     let interfaceForm = $state<InterfaceForm>(emptyInterface());
@@ -41,7 +45,7 @@
     const interfaces = $derived(app.network?.interfaces ?? []);
     const staticRoutes = $derived(app.network?.staticRoutes ?? []);
 
-    onMount(() => { if (!app.network) void app.refreshNetwork(); });
+    onMount(() => { if (!app.network) void app.refreshNetwork(); const timer = setInterval(() => trafficNow = Date.now() / 1000, 1000); return () => clearInterval(timer); });
 
     function lines(value: string): string[] {
         return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
@@ -171,7 +175,7 @@
     }
 </script>
 
-<section class="space-y-6">
+<section class="space-y-5">
     {#if app.networkError}<Alert.Root variant="destructive"><Alert.Title>네트워크 작업 실패</Alert.Title><Alert.Description>{app.networkError}</Alert.Description></Alert.Root>{/if}
     {#if app.network?.checkinRemaining}
         <Alert.Root><Alert.Title>네트워크 연결 확인 필요</Alert.Title><Alert.Description><div class="flex flex-wrap items-center justify-between gap-3"><span>{app.network.checkinRemaining}초 안에 현재 연결을 확정하지 않으면 자동으로 롤백됩니다.</span><div class="flex gap-2"><Button size="sm" onclick={checkin} disabled={busy !== ''}>{#if busy === 'checkin'}<Spinner />{:else}<Check />{/if}연결 확정</Button><Button size="sm" variant="outline" onclick={() => ask('rollback')} disabled={busy !== ''}><Undo2 />즉시 롤백</Button></div></div></Alert.Description></Alert.Root>
@@ -179,28 +183,55 @@
         <Alert.Root><Alert.Title>적용 대기 중인 변경</Alert.Title><Alert.Description><div class="flex flex-wrap items-center justify-between gap-3"><span>인터페이스 변경을 검토한 후 안전 적용하세요.</span><div class="flex gap-2"><Button size="sm" onclick={() => ask('commit')} disabled={busy !== ''}>60초 안전 적용</Button><Button size="sm" variant="outline" onclick={() => ask('rollback')} disabled={busy !== ''}><Undo2 />변경 취소</Button></div></div></Alert.Description></Alert.Root>
     {/if}
 
-    <div class="grid gap-4 md:grid-cols-3">
-        <Card.Root><Card.Header><Card.Description>활성 인터페이스</Card.Description><Card.Title class="text-2xl">{interfaces.filter((item) => item.linkState.toUpperCase().includes('UP')).length} / {interfaces.length}</Card.Title></Card.Header></Card.Root>
-        <Card.Root><Card.Header><Card.Description>기본 경로</Card.Description><Card.Title class="truncate text-lg">{app.network?.summary.defaultRoutes?.[0] || '없음'}</Card.Title></Card.Header></Card.Root>
-        <Card.Root><Card.Header><Card.Description>DNS 서버</Card.Description><Card.Title class="truncate text-lg">{app.network?.summary.nameServers?.join(', ') || '없음'}</Card.Title></Card.Header></Card.Root>
+    <div class="flex flex-wrap items-center justify-between gap-3 px-1">
+        <div class="flex min-w-0 items-center gap-3"><div class="rounded-xl bg-primary/10 p-2.5 text-primary"><Network class="size-5" /></div><div><h2 class="break-all text-lg font-semibold">{app.network?.configuration.hostname || '네트워크'}{app.network?.configuration.domain ? `.${app.network.configuration.domain}` : ''}</h2><p class="mt-0.5 text-xs text-muted-foreground">실시간 흐름과 연결 상태를 확인하고 네트워크를 관리합니다.</p></div></div>
+        <Badge variant="outline">{interfaces.filter(item => item.linkState.toUpperCase() === 'UP' || item.linkState.toUpperCase() === 'LINK_STATE_UP').length} / {interfaces.length} 인터페이스 활성</Badge>
     </div>
 
-    <Card.Root>
-        <Card.Header class="flex flex-row items-start justify-between gap-4"><div><Card.Title>전역 네트워크 설정</Card.Title><Card.Description>{app.network?.configuration.hostname || '—'}{app.network?.configuration.domain ? `.${app.network.configuration.domain}` : ''}</Card.Description></div><Button size="sm" variant="outline" onclick={editConfiguration}><Pencil />수정</Button></Card.Header>
-        <Card.Content class="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4"><div><p class="text-muted-foreground">IPv4 게이트웨이</p><p class="mt-1 font-medium">{app.network?.configuration.ipv4Gateway || '자동'}</p></div><div><p class="text-muted-foreground">IPv6 게이트웨이</p><p class="mt-1 font-medium">{app.network?.configuration.ipv6Gateway || '자동'}</p></div><div><p class="text-muted-foreground">검색 도메인</p><p class="mt-1 font-medium">{app.network?.configuration.searchDomains?.join(', ') || '없음'}</p></div><div><p class="text-muted-foreground">서비스 검색</p><p class="mt-1 font-medium">{[app.network?.configuration.announceMdns && 'mDNS', app.network?.configuration.announceWsd && 'WSD', app.network?.configuration.announceNetbios && 'NetBIOS'].filter(Boolean).join(', ') || '꺼짐'}</p></div></Card.Content>
-    </Card.Root>
+    <NetworkTraffic bind:history={trafficHistory} bind:selected={trafficSelected} />
 
-    <Card.Root>
-        <Card.Header class="flex flex-row items-start justify-between gap-4"><div><Card.Title>네트워크 인터페이스</Card.Title><Card.Description>물리 및 가상 인터페이스 {interfaces.length}개</Card.Description></div><Button size="sm" onclick={() => editInterface()}><Plus />가상 인터페이스</Button></Card.Header>
-        <Card.Content><Table.Root><Table.Header><Table.Row><Table.Head>인터페이스</Table.Head><Table.Head>주소</Table.Head><Table.Head>링크</Table.Head><Table.Head>MTU</Table.Head><Table.Head class="text-right">작업</Table.Head></Table.Row></Table.Header><Table.Body>
-            {#each interfaces as item (item.id)}<Table.Row><Table.Cell><div class="flex items-center gap-2"><span class={`size-2 rounded-full ${item.linkState.toUpperCase().includes('UP') ? 'bg-emerald-500' : 'bg-muted-foreground'}`}></span><div><p class="font-medium">{item.name}</p><p class="text-xs text-muted-foreground">{item.description || item.type} · {item.macAddress || 'MAC 없음'}</p></div></div></Table.Cell><Table.Cell><div class="space-y-1">{#each item.aliases ?? [] as alias}<p class="font-mono text-xs">{alias.address}/{alias.netmask}</p>{/each}{#if item.ipv4Dhcp}<Badge variant="outline">DHCP</Badge>{/if}</div></Table.Cell><Table.Cell><p>{item.mediaSubtype || item.linkState || '—'}</p><p class="text-xs text-muted-foreground">{item.mediaType}</p></Table.Cell><Table.Cell>{item.mtu || '—'}</Table.Cell><Table.Cell><div class="flex justify-end"><DropdownMenu.Root><DropdownMenu.Trigger>{#snippet child({ props })}<Button {...props} size="icon-sm" variant="ghost" aria-label={`${item.name} 작업 메뉴`}><Ellipsis /></Button>{/snippet}</DropdownMenu.Trigger><DropdownMenu.Content align="end"><DropdownMenu.Item onclick={() => editInterface(item)}><Pencil />수정</DropdownMenu.Item>{#if item.type !== 'PHYSICAL'}<DropdownMenu.Separator /><DropdownMenu.Item variant="destructive" disabled={busy === `interface-${item.id}`} onclick={() => ask('interface', item)}><Trash2 />삭제</DropdownMenu.Item>{/if}</DropdownMenu.Content></DropdownMenu.Root></div></Table.Cell></Table.Row>{/each}
-        </Table.Body></Table.Root></Card.Content>
-    </Card.Root>
+    <section class="min-w-0 space-y-4">
+        <header class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-base font-semibold tracking-tight">인터페이스</h2><p class="mt-1 text-sm text-muted-foreground">주소·링크·속도를 한곳에서 확인 · 이름을 누르면 위 그래프가 전환됩니다.</p></div><Button size="sm" variant="outline" onclick={() => editInterface()}><Plus />가상 인터페이스</Button></header>
+        <div class="min-w-0">
+            {#if interfaces.length}
+                <Table.Root><Table.Header><Table.Row><Table.Head>인터페이스 / 상태</Table.Head><Table.Head>IP 주소</Table.Head><Table.Head>링크</Table.Head><Table.Head class="text-right">수신 / 송신</Table.Head><Table.Head class="w-12 text-right"><span class="sr-only">작업</span></Table.Head></Table.Row></Table.Header><Table.Body>
+                    {#each interfaces as item (item.id)}
+                        {@const name = item.name || item.id}
+                        {@const sample = trafficHistory[name]?.at(-1)}
+                        {@const fresh = sample && trafficNow - sample.time <= 30}
+                        {@const up = item.linkState.toUpperCase() === 'UP' || item.linkState.toUpperCase() === 'LINK_STATE_UP'}
+                        {@const liveIPs = app.network?.summary.ips?.[name]}
+                        {@const ips = [...new Set([...(liveIPs?.ipv4 ?? []), ...(liveIPs?.ipv6 ?? [])])]}
+                        <Table.Row class={trafficSelected === name ? 'bg-muted/40' : ''}>
+                            <Table.Cell><div class="flex items-center gap-2"><span class={`size-2 shrink-0 rounded-full ${up ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`}></span><Button variant="link" size="sm" class="h-auto p-0 font-semibold" onclick={() => trafficSelected = name}>{name}</Button><span class="text-xs text-muted-foreground">{up ? '연결됨' : item.linkState || '알 수 없음'}</span></div><p class="mt-1 max-w-64 whitespace-normal text-xs text-muted-foreground">{item.description || item.type}</p><details class="mt-1 text-xs text-muted-foreground"><summary class="cursor-pointer">장치 정보</summary><p class="mt-1 font-mono">MAC {item.macAddress || '—'}</p><p>MTU {item.mtu || '—'}</p></details></Table.Cell>
+                            <Table.Cell><div class="space-y-1">{#if ips.length}{#each ips as address}<p class="break-all whitespace-normal font-mono text-xs">{address}</p>{/each}{:else}{#each item.aliases ?? [] as alias}<p class="break-all whitespace-normal font-mono text-xs">{alias.address}/{alias.netmask}</p>{:else}<span class="text-xs text-muted-foreground">주소 없음</span>{/each}{/if}<div class="flex gap-1">{#if item.ipv4Dhcp}<Badge variant="outline">DHCP</Badge>{/if}{#if item.ipv6Auto}<Badge variant="outline">IPv6 자동</Badge>{/if}</div></div></Table.Cell>
+                            <Table.Cell><p class="text-sm">{item.mediaSubtype || '—'}</p><p class="text-xs text-muted-foreground">{item.mediaType}</p></Table.Cell>
+                            <Table.Cell class="text-right tabular-nums"><p class="text-sm text-sky-600 dark:text-sky-400"><span class="sr-only">수신 </span>↓ {formatTraffic(fresh ? sample?.rx : null)}</p><p class="mt-1 text-sm text-orange-600 dark:text-orange-400"><span class="sr-only">송신 </span>↑ {formatTraffic(fresh ? sample?.tx : null)}</p></Table.Cell>
+                            <Table.Cell><div class="flex justify-end"><DropdownMenu.Root><DropdownMenu.Trigger>{#snippet child({ props })}<Button {...props} size="icon-sm" variant="ghost" aria-label={`${item.name} 작업 메뉴`}><Ellipsis /></Button>{/snippet}</DropdownMenu.Trigger><DropdownMenu.Content align="end"><DropdownMenu.Item onclick={() => editInterface(item)}><Pencil />수정</DropdownMenu.Item>{#if item.type !== 'PHYSICAL'}<DropdownMenu.Separator /><DropdownMenu.Item variant="destructive" disabled={busy === `interface-${item.id}`} onclick={() => ask('interface', item)}><Trash2 />삭제</DropdownMenu.Item>{/if}</DropdownMenu.Content></DropdownMenu.Root></div></Table.Cell>
+                        </Table.Row>
+                    {/each}
+                </Table.Body></Table.Root>
+            {:else}<p class="py-8 text-center text-sm text-muted-foreground">{app.networkLoading ? '인터페이스를 불러오는 중…' : '표시할 인터페이스가 없습니다.'}</p>{/if}
+        </div>
+    </section>
 
-    <Card.Root>
-        <Card.Header class="flex flex-row items-start justify-between gap-4"><div><Card.Title>정적 라우트</Card.Title><Card.Description>특정 네트워크로 향하는 고정 경로</Card.Description></div><Button size="sm" variant="outline" onclick={() => editRoute()}><Plus />라우트 추가</Button></Card.Header>
-        <Card.Content>{#if staticRoutes.length}<Table.Root><Table.Header><Table.Row><Table.Head>목적지</Table.Head><Table.Head>게이트웨이</Table.Head><Table.Head>설명</Table.Head><Table.Head class="w-14 text-right"><span class="sr-only">작업</span></Table.Head></Table.Row></Table.Header><Table.Body>{#each staticRoutes as item (item.id)}<Table.Row><Table.Cell class="font-mono text-xs">{item.destination}</Table.Cell><Table.Cell class="font-mono text-xs">{item.gateway}</Table.Cell><Table.Cell>{item.description || '—'}</Table.Cell><Table.Cell><div class="flex justify-end"><DropdownMenu.Root><DropdownMenu.Trigger>{#snippet child({ props })}<Button {...props} size="icon-sm" variant="ghost" aria-label={`${item.destination} 작업 메뉴`}><Ellipsis /></Button>{/snippet}</DropdownMenu.Trigger><DropdownMenu.Content align="end"><DropdownMenu.Item onclick={() => editRoute(item)}><Pencil />수정</DropdownMenu.Item><DropdownMenu.Separator /><DropdownMenu.Item variant="destructive" disabled={busy === `route-${item.id}`} onclick={() => ask('route', item)}><Trash2 />삭제</DropdownMenu.Item></DropdownMenu.Content></DropdownMenu.Root></div></Table.Cell></Table.Row>{/each}</Table.Body></Table.Root>{:else}<Empty.Root class="min-h-36 border-0 p-6"><Empty.Media variant="icon"><Route /></Empty.Media><Empty.Header><Empty.Title>정적 라우트가 없습니다</Empty.Title><Empty.Description>특정 네트워크에 고정 경로가 필요할 때 추가하세요.</Empty.Description></Empty.Header><Empty.Content><Button size="sm" variant="outline" onclick={() => editRoute()}><Plus />라우트 추가</Button></Empty.Content></Empty.Root>{/if}</Card.Content>
-    </Card.Root>
+    <div class="grid items-start gap-5 xl:grid-cols-2">
+        <Card.Root>
+            <Card.Header class="flex flex-wrap items-start justify-between gap-3"><div><Card.Title>연결 설정</Card.Title><Card.Description class="mt-2">기본 경로와 이름 확인 서비스</Card.Description></div><Button size="sm" variant="outline" onclick={editConfiguration}><Pencil />설정 수정</Button></Card.Header>
+            <Card.Content>
+                <dl class="divide-y text-sm">
+                    <div class="grid gap-2 py-3 first:pt-0 sm:grid-cols-[100px_1fr]"><dt class="text-muted-foreground">현재 기본 경로</dt><dd class="space-y-1 break-all font-mono text-xs">{#each app.network?.summary.defaultRoutes ?? [] as route}<p>{route}</p>{:else}<span>없음</span>{/each}</dd></div>
+                    <div class="grid gap-2 py-3 sm:grid-cols-[100px_1fr]"><dt class="text-muted-foreground">DNS 서버</dt><dd class="space-y-1 break-all font-mono text-xs">{#each app.network?.summary.nameServers ?? app.network?.configuration.nameServers ?? [] as server}<p>{server}</p>{:else}<span>없음</span>{/each}</dd></div>
+                    <div class="grid gap-2 py-3 sm:grid-cols-[100px_1fr]"><dt class="text-muted-foreground">검색 도메인</dt><dd class="break-all text-xs">{app.network?.configuration.searchDomains?.join(', ') || '없음'}</dd></div>
+                    <div class="grid gap-2 py-3 sm:grid-cols-[100px_1fr]"><dt class="text-muted-foreground">서비스 검색</dt><dd class="flex flex-wrap gap-1">{#each [app.network?.configuration.announceMdns && 'mDNS', app.network?.configuration.announceWsd && 'WSD', app.network?.configuration.announceNetbios && 'NetBIOS'].filter(Boolean) as discovery}<Badge variant="outline">{discovery}</Badge>{:else}<span class="text-xs">꺼짐</span>{/each}</dd></div>
+                </dl>
+            </Card.Content>
+        </Card.Root>
+    <section class="min-w-0 space-y-4">
+        <header class="flex flex-wrap items-start justify-between gap-4"><div><h2 class="text-base font-semibold tracking-tight">정적 라우트</h2><p class="mt-1 text-sm text-muted-foreground">특정 네트워크로 향하는 고정 경로</p></div><Button size="sm" variant="outline" onclick={() => editRoute()}><Plus />라우트 추가</Button></header>
+        <div class="min-w-0">{#if staticRoutes.length}<Table.Root><Table.Header><Table.Row><Table.Head>목적지</Table.Head><Table.Head>게이트웨이</Table.Head><Table.Head>설명</Table.Head><Table.Head class="w-14 text-right"><span class="sr-only">작업</span></Table.Head></Table.Row></Table.Header><Table.Body>{#each staticRoutes as item (item.id)}<Table.Row><Table.Cell class="font-mono text-xs">{item.destination}</Table.Cell><Table.Cell class="font-mono text-xs">{item.gateway}</Table.Cell><Table.Cell>{item.description || '—'}</Table.Cell><Table.Cell><div class="flex justify-end"><DropdownMenu.Root><DropdownMenu.Trigger>{#snippet child({ props })}<Button {...props} size="icon-sm" variant="ghost" aria-label={`${item.destination} 작업 메뉴`}><Ellipsis /></Button>{/snippet}</DropdownMenu.Trigger><DropdownMenu.Content align="end"><DropdownMenu.Item onclick={() => editRoute(item)}><Pencil />수정</DropdownMenu.Item><DropdownMenu.Separator /><DropdownMenu.Item variant="destructive" disabled={busy === `route-${item.id}`} onclick={() => ask('route', item)}><Trash2 />삭제</DropdownMenu.Item></DropdownMenu.Content></DropdownMenu.Root></div></Table.Cell></Table.Row>{/each}</Table.Body></Table.Root>{:else}<Empty.Root class="min-h-36 border-0 p-4"><Empty.Media variant="icon"><Route /></Empty.Media><Empty.Header><Empty.Title>정적 라우트가 없습니다</Empty.Title><Empty.Description>특정 네트워크에 고정 경로가 필요할 때 추가하세요.</Empty.Description></Empty.Header></Empty.Root>{/if}</div>
+    </section>
+    </div>
 </section>
 
 <Dialog.Root open={editor !== null} onOpenChange={(open) => { if (!open) editor = null; }}>

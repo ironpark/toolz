@@ -11,7 +11,7 @@
     import { Spinner } from '$lib/components/ui/spinner';
     import * as Table from '$lib/components/ui/table';
     import { Textarea } from '$lib/components/ui/textarea';
-    import type { CertificateInfo, GeneratedCertificate, SelfSignedCertificateRequest } from '../../../bindings/github.com/ironpark/toolz/desktop/charmtrue';
+    import { TrueNASService, type CertificateInfo, type GeneratedCertificate, type SelfSignedCertificateRequest } from '../../../bindings/github.com/ironpark/toolz/desktop/charmtrue';
     import ConfirmActionDialog from './ConfirmActionDialog.svelte';
     import { getAppContext } from './context.svelte';
 
@@ -33,10 +33,12 @@
     let result = $state<GeneratedCertificate | null>(null);
     let resultSummary = $state<string[]>([]);
     let confirmOpen = $state(false);
-    let confirmation = $state<{ kind: 'apply' | 'delete'; target: CertificateInfo | null }>({ kind: 'apply', target: null });
+    let confirmation = $state<{ kind: 'apply' | 'delete' | 'keychain'; target: CertificateInfo | null }>({ kind: 'apply', target: null });
     const certificates = $derived(app.certificates?.certificates ?? []);
 
-    onMount(() => { if (!app.certificates) void app.refreshCertificates(); });
+    onMount(() => {
+        if (!app.certificates) void app.refreshCertificates();
+    });
 
     function emptyGenerateForm(): GenerateForm {
         return { name: 'charmtrue-local', commonName: 'truenas.local', country: 'KR', state: 'Seoul', locality: 'Seoul', organization: 'MyHomeNAS', organizationalUnit: 'IT', ipAddresses: '', dnsNames: 'truenas.local\n*.truenas.local', days: 825, keyBits: 2048, saveFiles: true, install: true, applyToUi: true };
@@ -121,7 +123,7 @@
         }
     }
 
-    function ask(kind: 'apply' | 'delete', target: CertificateInfo): void {
+    function ask(kind: 'apply' | 'delete' | 'keychain', target: CertificateInfo): void {
         confirmation = { kind, target };
         confirmOpen = true;
     }
@@ -131,15 +133,19 @@
         if (!target) return;
         busy = `${confirmation.kind}-${target.id}`;
         notice = '';
+        app.certificatesError = '';
         try {
-            if (confirmation.kind === 'apply') {
+            if (confirmation.kind === 'keychain') {
+                const fingerprint = await TrueNASService.ImportCertificateToKeychain(target.id);
+                notice = `"${target.name}" 공개 인증서를 macOS 기본 키체인에 등록했습니다. SHA-256: ${fingerprint}. 신뢰가 필요한 사설 인증서는 ‘키체인 접근’ 앱에서 인증서를 확인한 뒤 신뢰 설정을 변경하세요.`;
+            } else if (confirmation.kind === 'apply') {
                 await app.setUICertificate(target.id);
                 notice = `"${target.name}" 인증서를 웹 GUI에 적용했습니다. 웹 서비스가 재시작됩니다.`;
             } else {
                 await app.deleteCertificate(target.id);
             }
-        } catch {
-            // The context surfaces the error through certificatesError.
+        } catch (error) {
+            app.certificatesError = error instanceof Error ? error.message : String(error);
         } finally {
             busy = '';
         }
@@ -168,7 +174,7 @@
             <div class="grid min-h-32 place-items-center"><Spinner class="size-6" aria-label="인증서 불러오는 중" /></div>
         {:else if certificates.length}
             <Table.Root>
-                <Table.Header><Table.Row><Table.Head>이름</Table.Head><Table.Head>CN / SAN</Table.Head><Table.Head>만료</Table.Head><Table.Head>상태</Table.Head><Table.Head class="text-right">작업</Table.Head></Table.Row></Table.Header>
+                <Table.Header><Table.Row><Table.Head>이름</Table.Head><Table.Head>CN / SAN</Table.Head><Table.Head>만료</Table.Head><Table.Head>상태</Table.Head><Table.Head>키체인</Table.Head><Table.Head class="text-right">작업</Table.Head></Table.Row></Table.Header>
                 <Table.Body>
                     {#each certificates as cert (cert.id)}
                         <Table.Row>
@@ -176,6 +182,7 @@
                             <Table.Cell><div class="font-mono text-xs">{cert.commonName || '—'}</div>{#if cert.subjectAltNames?.length}<div class="text-xs text-muted-foreground">{cert.subjectAltNames.join(', ')}</div>{/if}</Table.Cell>
                             <Table.Cell class="text-xs">{formatDate(cert.until)}</Table.Cell>
                             <Table.Cell class="space-x-1">{#if cert.uiActive}<Badge variant="secondary"><ShieldCheck />GUI 사용 중</Badge>{/if}{#if cert.expired}<Badge variant="destructive">만료됨</Badge>{/if}{#if !cert.hasPrivateKey}<Badge variant="outline">개인키 없음</Badge>{/if}</Table.Cell>
+                            <Table.Cell><Button size="sm" variant="outline" disabled={busy !== ''} title="이 Mac의 키체인에 공개 인증서 등록" onclick={() => ask('keychain', cert)}>{#if busy === `keychain-${cert.id}`}<Spinner />{/if}키체인에 등록</Button></Table.Cell>
                             <Table.Cell class="space-x-2 text-right">
                                 {#if !cert.uiActive}<Button size="sm" variant="outline" disabled={!cert.hasPrivateKey || busy === `apply-${cert.id}`} onclick={() => ask('apply', cert)}>{#if busy === `apply-${cert.id}`}<Spinner />{/if}GUI에 적용</Button><Button size="sm" variant="ghost" disabled={busy === `delete-${cert.id}`} onclick={() => ask('delete', cert)}><Trash2 />삭제</Button>{/if}
                             </Table.Cell>
@@ -252,9 +259,10 @@
 
 <ConfirmActionDialog
     bind:open={confirmOpen}
-    title={confirmation.kind === 'apply' ? `"${confirmation.target?.name}"을(를) 웹 GUI에 적용할까요?` : `"${confirmation.target?.name}" 인증서를 삭제할까요?`}
-    description={confirmation.kind === 'apply' ? '웹 서비스가 재시작되며 브라우저와 이 앱의 연결이 잠시 끊길 수 있습니다.' : '삭제한 인증서는 복구할 수 없습니다.'}
-    confirmLabel={confirmation.kind === 'apply' ? 'GUI에 적용' : '삭제'}
+    title={confirmation.kind === 'keychain' ? `"${confirmation.target?.name}" 인증서를 키체인에 등록할까요?` : confirmation.kind === 'apply' ? `"${confirmation.target?.name}"을(를) 웹 GUI에 적용할까요?` : `"${confirmation.target?.name}" 인증서를 삭제할까요?`}
+    description={confirmation.kind === 'keychain' ? '선택한 공개 인증서를 이 Mac의 사용자 기본 키체인에 추가합니다. 개인키는 가져오지 않으며, 인증서 신뢰 설정은 키체인 접근 앱에서 직접 변경할 수 있습니다.' : confirmation.kind === 'apply' ? '웹 서비스가 재시작되며 브라우저와 이 앱의 연결이 잠시 끊길 수 있습니다.' : '삭제한 인증서는 복구할 수 없습니다.'}
+    confirmLabel={confirmation.kind === 'keychain' ? '키체인에 등록' : confirmation.kind === 'apply' ? 'GUI에 적용' : '삭제'}
+    destructive={confirmation.kind !== 'keychain'}
     busy={busy === `${confirmation.kind}-${confirmation.target?.id}`}
     onconfirm={confirmAction}
 />

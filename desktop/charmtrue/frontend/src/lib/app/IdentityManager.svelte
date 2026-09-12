@@ -18,7 +18,7 @@
     import * as Alert from '$lib/components/ui/alert';
     import { Badge } from '$lib/components/ui/badge';
     import { Button } from '$lib/components/ui/button';
-    import * as Card from '$lib/components/ui/card';
+
     import * as Dialog from '$lib/components/ui/dialog';
     import { Input } from '$lib/components/ui/input';
     import { Skeleton } from '$lib/components/ui/skeleton';
@@ -226,12 +226,12 @@
         </Alert.Root>
     {/if}
 
-    <Card.Root>
-        <Card.Header class="gap-4 border-b">
+    <section class="min-w-0 space-y-4">
+        <header class="space-y-4">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                <Card.Title>접근 주체</Card.Title>
-                <Card.Description>시스템 계정은 기본적으로 숨겨지며 일반 계정만 편집할 수 있습니다.</Card.Description>
+                <h2 class="text-base font-semibold tracking-tight">접근 주체</h2>
+                <p class="mt-1 text-sm text-muted-foreground">시스템 계정은 기본적으로 숨겨지며 일반 계정만 편집할 수 있습니다.</p>
                 </div>
                 <div class="flex gap-2">
                     <Button size="sm" onclick={openCreate}><Plus />{tab === 'users' ? '사용자 추가' : tab === 'groups' ? '그룹 추가' : 'API 키 추가'}</Button>
@@ -290,9 +290,9 @@
                     {currentTotal}개 항목
                 {/if}
             </p>
-        </Card.Header>
+        </header>
 
-        <Card.Content class="p-0">
+        <div class="min-w-0">
             {#if app.identityLoading && !app.identity}
                 <div class="space-y-3 p-6" aria-label="계정 정보 불러오는 중">
                     {#each Array(5) as _}
@@ -470,8 +470,8 @@
                     </Table.Body>
                 </Table.Root>
             {/if}
-        </Card.Content>
-    </Card.Root>
+        </div>
+    </section>
 </section>
 
 <Dialog.Root bind:open={editorOpen}>
